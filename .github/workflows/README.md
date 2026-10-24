@@ -123,6 +123,35 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 
 ---
 
+### Hub apps on macOS and Windows (`hub-apps-os.yml`)
+
+**Purpose**: Runs the hub-app tests, the hub's app supervisor tests and the hub path tests on macOS and
+Windows. The supervisor talks to apps over Unix sockets on macOS and named pipes on Windows; Check covers
+Linux only.
+
+**Triggers**:
+
+- Pull requests to `main` and pushes to `main` that touch `packages/hub-app/**`,
+  `packages/hub-app-fixture/**`, `packages/browser-pairing/**`, `packages/herdr-hub/src/apps/**`, `packages/herdr-hub/src/socket.ts`,
+  the hub's supervisor, apps and fixture tests and its `vitest.config.ts`, `packages/herdr-fleet/src/paths.ts`, `sqlite*` or `test/paths.test.ts`, rly's `vite*.config.ts` and `scripts/build-assets.ts` (rly is in the fixture's build chain),
+  `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `vitest.workspace-sources.ts`, `.github/actions/setup/**`
+  or the workflow itself
+- Manual workflow dispatch
+
+**Jobs**:
+
+#### Hub apps
+
+- **Matrix**: `macos-latest`, `windows-latest`, `fail-fast: false`
+- Builds `@knpkv/hub-app-fixture` and its workspace dependencies (the supervisor spawns the fixture's
+  `dist`), then runs `@knpkv/hub-app`'s tests, `herdr-fleet`'s `test/paths.test.ts` and `herdr-hub`'s
+  `test/supervisor.test.ts` and `test/apps.test.ts`
+- **Timeout**: 30 minutes per leg
+- **Node Version**: 26.7.0
+- **Advisory**: not a required check. A paths-filtered workflow does not report on pull requests it skips.
+
+---
+
 ### Snapshot (`snapshot.yml`)
 
 **Purpose**: Creates snapshot releases for testing unreleased changes.
@@ -320,6 +349,9 @@ provider payloads.
 ## Dependency Install Protection
 
 Dependency installs run through Socket Firewall in `.github/actions/setup`.
+The setup action downloads one Socket Firewall binary per runner OS and
+architecture (Linux x64/arm64, macOS x64/arm64, Windows x64), each pinned to the
+release's sha256. A runner with no pinned binary fails the step.
 The Socket action is pinned to an immutable commit SHA and kept current by
 Dependabot. The setup action intentionally does not restore a pnpm dependency
 cache, because Socket Firewall can only block package artifacts that are fetched

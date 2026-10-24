@@ -17,19 +17,36 @@ inputs:
 runs:
   using: composite
   steps:
+    # One sha-pinned Socket Firewall binary per runner OS and architecture. A runner with no pinned
+    # binary fails here: there is no unfirewalled or unpinned install path.
     - name: Install Socket Firewall
       shell: bash
       env:
-        SOCKET_FIREWALL_SHA256: c80371910a808ea5c68916c48e5451716a91ca411cf5e422fdbd8119729b742c
-        SOCKET_FIREWALL_URL: https://github.com/SocketDev/sfw-free/releases/download/v1.15.0/sfw-free-linux-x86_64
+        SOCKET_FIREWALL_RELEASE: https://github.com/SocketDev/sfw-free/releases/download/v1.15.0
+        RUNNER_PLATFORM: ${{ runner.os }}-${{ runner.arch }}
       run: |
+        case "${RUNNER_PLATFORM}" in
+          Linux-X64) asset=sfw-free-linux-x86_64 sha256=c80371910a808ea5c68916c48e5451716a91ca411cf5e422fdbd8119729b742c binary=sfw ;;
+          Linux-ARM64) asset=sfw-free-linux-arm64 sha256=55671fa409ef3d40fcee66acbba4d7acfff8a5332d349ad47cca809ebf473cd0 binary=sfw ;;
+          macOS-ARM64) asset=sfw-free-macos-arm64 sha256=fa473291b8b76220f4b636cf655e8a4dc03332145bdea3acfd9bc96887b2da20 binary=sfw ;;
+          macOS-X64) asset=sfw-free-macos-x86_64 sha256=07cfcc9805812130ebca07f73c51c2cd9c0181b394f25be4c969c0d31c9dc26f binary=sfw ;;
+          Windows-X64) asset=sfw-free-windows-x86_64.exe sha256=029882f10e1020c96353b184ec0dba7da853e0f6d35131ca930515a7e61e89e6 binary=sfw.exe ;;
+          *)
+            echo "::error title=No pinned Socket Firewall::No sha-pinned Socket Firewall binary for ${RUNNER_PLATFORM}."
+            exit 1
+            ;;
+        esac
         install_directory="${RUNNER_TEMP}/socket-firewall"
-        binary_path="${install_directory}/sfw"
+        binary_path="${install_directory}/${binary}"
         mkdir -p "${install_directory}"
         curl --fail --location --retry 4 --retry-all-errors \
-          --output "${binary_path}" "${SOCKET_FIREWALL_URL}"
-        printf '%s  %s\n' "${SOCKET_FIREWALL_SHA256}" "${binary_path}" \
-          | sha256sum --check --strict
+          --output "${binary_path}" "${SOCKET_FIREWALL_RELEASE}/${asset}"
+        # macOS ships a BSD sha256sum without --strict; its Perl shasum has it.
+        case "${RUNNER_PLATFORM}" in
+          macOS-*) verify=(shasum -a 256 --check --strict) ;;
+          *) verify=(sha256sum --check --strict) ;;
+        esac
+        printf '%s  %s\n' "${sha256}" "${binary_path}" | "${verify[@]}"
         chmod +x "${binary_path}"
         echo "${install_directory}" >> "${GITHUB_PATH}"
     - name: Install pnpm

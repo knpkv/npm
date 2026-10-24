@@ -1,4 +1,5 @@
 import react from "@vitejs/plugin-react"
+import { fileURLToPath } from "node:url"
 import { defineConfig } from "vite"
 import { BROWSER_TARGET } from "../../browser-target.ts"
 
@@ -16,7 +17,7 @@ export default defineConfig({
     emptyOutDir: false,
     lib: {
       entry: {
-        "diff/bounded/index": new URL("./src/diff/bounded/index.ts", import.meta.url).pathname
+        "diff/bounded/index": fileURLToPath(new URL("./src/diff/bounded/index.ts", import.meta.url))
       },
       formats: ["es"]
     },

@@ -350,6 +350,7 @@ describe("hub apps", () => {
                 }
               })
             })
+            created.once("error", (error) => resume(Effect.die(error)))
             created.listen(0, "127.0.0.1", () => resume(Effect.succeed(created)))
           }),
           (created) =>
@@ -478,7 +479,7 @@ describe("hub apps", () => {
     it.effect("passes only allowed response headers, keeping redirects inside the app", () =>
       Effect.gen(function*() {
         const directory = yield* tempDirectory
-        const socket = `${directory}/raw.sock`
+        const socket = endpointIn(directory, "raw")
         // An app answering with headers it may not set on the hub's origin.
         yield* Effect.acquireRelease(
           Effect.callback<Server>((resume) => {
@@ -497,6 +498,8 @@ describe("hub apps", () => {
               })
               response.end("ok")
             })
+            // A bind failure fails the test now instead of leaving it to time out.
+            raw.once("error", (error) => resume(Effect.die(error)))
             raw.listen(socket, () => resume(Effect.succeed(raw)))
           }),
           (raw) =>
