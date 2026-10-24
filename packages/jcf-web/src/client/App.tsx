@@ -418,7 +418,8 @@ export const App = () => {
                 aria-disabled={unavailable ? "true" : undefined}
                 aria-describedby={unavailable ? "jcf-log-time-reason" : undefined}
                 onClick={() => {
-                  if (!unavailable && plan !== null) setOpen({ kind: "manual", day: plan.monday, clock: "09:00" })
+                  if (!unavailable && plan !== null)
+                    setOpen({ kind: "manual", day: plan.day ?? plan.monday, clock: "09:00" })
                 }}
                 size="compact"
                 variant="primary"

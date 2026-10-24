@@ -570,7 +570,9 @@ export const layer = Layer.effect(
             Stream.splitLines,
             Stream.map(claudeSessionLine),
             Stream.filter(Option.isSome),
-            Stream.map((decoded) => decoded.value),
+            // Out-of-window lines still advance turn state, but their text is never used; dropping it
+            // here keeps memory proportional to the window rather than to the whole transcript.
+            Stream.map(({ value: line }) => line.atMs >= fromMs && line.atMs < toMs ? line : { ...line, text: "" }),
             Stream.runCollect,
             Effect.mapError(
               (error) =>

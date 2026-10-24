@@ -208,6 +208,7 @@ const AgentReport = Schema.Struct({
   mode: Schema.optional(Schema.String),
   sides: Schema.Struct({ clockify: Schema.Boolean, jira: Schema.Boolean }),
   proposals: Schema.Array(ReportProposal),
+  jiraUnseen: Schema.Array(Schema.Struct({ ticketKey: Schema.String, day: Schema.String, seconds: Schema.Finite })),
   ignored: Schema.Array(Schema.Struct({ ticketKey: Schema.String, day: Schema.String, seconds: Schema.Finite })),
   ignoredTickets: Schema.Array(Schema.String),
   ownershipWithheld: Schema.Array(
@@ -2078,8 +2079,10 @@ describe("jcf sync reconcile --agent --json", () => {
       expect(exit._tag).toBe("Success")
       expect(output(world.stderr)).not.toContain("Jira worklog fetch failed")
       // Reported, never offered: Jira would refuse a worklog on a ticket it cannot see.
-      expect(world.stdout).toHaveLength(1)
-      expect(jsonProposals(world.stdout).map((proposal) => proposal.ticketKey)).not.toContain("PROJ-5663")
+      const report = Option.getOrThrow(decodeAgentReport(world.stdout.join("\n")))
+      expect(report.proposals.map((proposal) => proposal.ticketKey)).not.toContain("PROJ-5663")
+      expect(report.jiraUnseen).toEqual([{ ticketKey: "PROJ-5663", day: "2026-07-01", seconds: expect.any(Number) }])
+      expect(report.jiraUnseen[0]!.seconds).toBeGreaterThan(0)
     }))
 
   // A key the worklog search itself returned cannot then be missing; that contradiction still fails,
