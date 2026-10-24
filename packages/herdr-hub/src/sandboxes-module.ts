@@ -34,6 +34,7 @@ import {
   moduleUnavailableCopy,
   moduleWriteRoute
 } from "./module-server.js"
+import type { SandboxPoolMode } from "./sandbox-config.js"
 import { openSandboxDatabase } from "./sandbox-store.js"
 import type { SandboxRequest } from "./sandboxes-contract.js"
 import {
@@ -170,28 +171,35 @@ const unavailableCopy = (reason: SandboxesUnavailable["reason"], host: string | 
   moduleUnavailableCopy("sandboxes", "RELAY_SANDBOXES_HOST", reason, host)
 
 /**
+ * The pool this host serves, and the mode it runs it in. A pool always names its mode, so nothing reads a
+ * missing mode as live: only live submits jobs, observe refuses them as `observe_mode` and off as `unavailable`.
+ */
+export type SandboxPoolServed =
+  | { readonly pool: null; readonly poolMode?: undefined }
+  | { readonly pool: PoolContract; readonly poolMode: SandboxPoolMode }
+
+/**
  * Only the configured pool host's own hub opens the database. `reads` replaces that reader in tests.
  * A reader that can't start is unavailable on every route, never a startup failure. Needs-you stays
  * empty when this host does not own the pool. A reader that fails to start reports one failed
  * `unavailable` issue, so Today does not call that an empty list. A later store or pending-lift
  * failure rejects so the collector keeps the hole.
  */
-export const makeSandboxesModule = (configuration: {
-  readonly host: string
-  readonly isHub: boolean
-  readonly sandboxesHost: FleetHostName | null
-  readonly stateDirectory: string
-  readonly pool: PoolContract | null
-  /** Fleet records awaiting approval. Read per request; a failure is unavailable, never an empty list. */
-  readonly pendingApprovals: Effect.Effect<ReadonlyArray<PendingSandboxApproval>, unknown>
-  readonly reads?: Effect.Effect<SandboxHostReads, SandboxReaderStartError, Scope.Scope>
-  /** Fleet submission for the jobs route. Only reached for the hub's own node while the pool is served. */
-  readonly submit: SandboxJobSubmit
-  /** The hub's own AWS sign-in, when this host runs the pool; null when it doesn't. */
-  readonly awsSignIn?: AwsSignIn | null
-  /** The mode this host runs the pool in; observe refuses every job as `observe_mode`. Null when not known. */
-  readonly poolMode?: "observe" | "live" | null
-}) => ({
+export const makeSandboxesModule = (
+  configuration: SandboxPoolServed & {
+    readonly host: string
+    readonly isHub: boolean
+    readonly sandboxesHost: FleetHostName | null
+    readonly stateDirectory: string
+    /** Fleet records awaiting approval. Read per request; a failure is unavailable, never an empty list. */
+    readonly pendingApprovals: Effect.Effect<ReadonlyArray<PendingSandboxApproval>, unknown>
+    readonly reads?: Effect.Effect<SandboxHostReads, SandboxReaderStartError, Scope.Scope>
+    /** Fleet submission for the jobs route. Only reached for the hub's own node while the pool is served. */
+    readonly submit: SandboxJobSubmit
+    /** The hub's own AWS sign-in, when this host runs the pool; null when it doesn't. */
+    readonly awsSignIn?: AwsSignIn | null
+  }
+) => ({
   descriptor: sandboxesModule,
   handlers: Layer.effect(
     ModuleHandlers,
@@ -350,6 +358,8 @@ export const makeSandboxesModule = (configuration: {
           ? refuse(403, "owner_only")
           : configuration.poolMode === "observe"
           ? refuse(409, "observe_mode")
+          : configuration.poolMode !== "live"
+          ? refuse(503, "unavailable")
           : (order._tag === "Retry" || order._tag === "BudgetLift"
             ? checkRequest(mounted.reads, order)
             : Effect.void).pipe(

@@ -219,6 +219,7 @@ import { relayIconSvg } from "./relay-icon.js"
 import { hubCapabilities, HubReadFailed, type HubRelayReads, type PendingJob } from "./relay/capabilities.js"
 import { cliBackends, makeRelayHubMount, type RelayHubBackends, type RelayHubMount } from "./relay/mount.js"
 import { handleRelayRoute } from "./relay/routes.js"
+import type { SandboxPoolMode } from "./sandbox-config.js"
 import { makeSandboxesModule, sandboxesListedOn, sandboxesModuleUrl, servesSandboxes } from "./sandboxes-module.js"
 import { makeStacksModule } from "./stacks-module.js"
 import { ApprovalAppStore } from "./store.js"
@@ -388,19 +389,23 @@ export type HubRelayOptions = {
   readonly backends?: RelayHubBackends
 }
 
-export type HttpServerOptions = {
+/**
+ * This host's sandbox pool, as the Sandboxes module serves it. `sandboxPool` is the pool contract; missing while
+ * `sandboxesHost` names this hub is a pool mismatch. A pool always comes with `sandboxPoolMode`, so a missing mode
+ * never reads as live: only live submits jobs. `awsSignIn` is the hub's own AWS sign-in for that pool, served to
+ * the owner; absent when off.
+ */
+export type HttpSandboxPoolOptions =
+  | { readonly sandboxPool?: null; readonly sandboxPoolMode?: undefined; readonly awsSignIn?: undefined }
+  | { readonly sandboxPool: PoolContract; readonly sandboxPoolMode: SandboxPoolMode; readonly awsSignIn?: AwsSignIn }
+
+export type HttpServerOptions = HttpSandboxPoolOptions & {
   /** Explicit server-private credential host. Missing means Code is unavailable, never discovered. */
   readonly codeHost?: FleetHostName
   /** Explicit server-private Stacks host (`RELAY_STACKS_HOST`). Missing means Stacks is unavailable. */
   readonly stacksHost?: FleetHostName
   /** Explicit server-private Sandboxes host (`RELAY_SANDBOXES_HOST`). Missing means Sandboxes is unavailable. */
   readonly sandboxesHost?: FleetHostName
-  /** Pool contract for this host. Missing while `sandboxesHost` names this hub is a pool mismatch. */
-  readonly sandboxPool?: PoolContract | null
-  /** The hub's own AWS sign-in for that pool, served to the owner by the Sandboxes module; absent when off. */
-  readonly awsSignIn?: AwsSignIn
-  /** The mode this host runs that pool in; in observe the Sandboxes module refuses every job. Absent when off. */
-  readonly sandboxPoolMode?: "observe" | "live"
   /**
    * Installed apps, which the hub runs as child processes. `configPath` is `apps.json` (default
    * `~/.config/herdr/apps.json`); `node` is the Node that runs the hub, and its apps (without it no app starts);
@@ -1908,9 +1913,10 @@ export const startHttpServer = async (
         isHub,
         sandboxesHost: options.sandboxesHost ?? null,
         stateDirectory: config.stateDirectory,
-        pool: options.sandboxPool ?? null,
         awsSignIn: options.awsSignIn ?? null,
-        poolMode: options.sandboxPoolMode ?? null,
+        ...(options.sandboxPool == null
+          ? { pool: null }
+          : { pool: options.sandboxPool, poolMode: options.sandboxPoolMode }),
         // Build the effect on read. Calling pendingApprovals here would list the store at startup.
         pendingApprovals: Effect.suspend(() => service.pendingApprovals()),
         // The module has checked same origin, the served pool and the hub's own node, and passes the

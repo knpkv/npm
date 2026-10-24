@@ -18,7 +18,7 @@ import { Config, Console, Effect, Layer, Option, Path, Redacted, Schema, Scope }
 import { FetchHttpClient } from "effect/http"
 import { readCodeHost } from "./code-module.js"
 import type { HostdOperationsCompositionError } from "./errors.js"
-import { startHttpServer } from "./http.js"
+import { type HttpServerOptions, startHttpServer } from "./http.js"
 import { copyTaskWorkRegistration } from "./internal/agent-task-work-source.js"
 import { fleetConfigSource } from "./internal/config-path.js"
 import { hasOutstandingWorkJob, noJobStore } from "./internal/outstanding-work-job.js"
@@ -201,10 +201,12 @@ const hostdProgram = Effect.fn("Hostd.program")(function*(options: HostdProgramO
   const withCode = codeHost === null ? relayOptions : { ...relayOptions, codeHost }
   const withStacks = stacksHost === null ? withCode : { ...withCode, stacksHost }
   const withSandboxesHost = sandboxesHost === null ? withStacks : { ...withStacks, sandboxesHost }
-  const withPool = sandboxPool === null ? withSandboxesHost : { ...withSandboxesHost, sandboxPool }
-  const serverOptions = sandboxes === null
-    ? withPool
-    : { ...withPool, awsSignIn: sandboxes.signIn, sandboxPoolMode: sandboxes.mode }
+  // A served pool always names its mode: off when the pool isn't built, which takes no jobs.
+  const serverOptions: HttpServerOptions = sandboxPool === null
+    ? withSandboxesHost
+    : sandboxes === null
+    ? { ...withSandboxesHost, sandboxPool, sandboxPoolMode: "off" }
+    : { ...withSandboxesHost, sandboxPool, sandboxPoolMode: sandboxes.mode, awsSignIn: sandboxes.signIn }
   const server = yield* Effect.acquireRelease(
     Effect.tryPromise({
       try: () => startHttpServer(config, service, assets, serverOptions),
