@@ -28,5 +28,15 @@
   "files": [
     "dist",
     "client"
-  ]
+  ],
+  "hubApp": {
+    "bin": "dist/bin.js",
+    "contract": 1,
+    "services": [
+      "jobs.submit",
+      "relay.post",
+      "host",
+      "needs-you"
+    ]
+  }
 }

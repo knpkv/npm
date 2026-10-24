@@ -9,15 +9,17 @@
  *   post) refuses a grant minted for a GET or HEAD: reads skip the same-origin check, so a cross-site link
  *   could otherwise act for the user. A job also spends the grant (single use); a `read` of the caller
  *   accepts any live grant of its app.
- * - A **token** names the app itself for app-level services (`host`, `fleet.read`). The hub writes one per
- *   app to `<directory>/<id>.token` (0600) and rotates it on every hub start.
+ * - A **token** names the app itself for app-level services (`host`, `fleet.read`). The hub mints one per spawn,
+ *   hands it to the child in its stdin handshake and keeps it only in memory; it dies with that spawn, so a
+ *   restarted app never reuses its predecessor's token. Nothing about an app's identity is on disk, which is why
+ *   file modes (ignored on Windows) carry no security here.
  *
  * Same-uid processes are trusted: these are correctness contracts, not a defence against a hostile app.
  *
  * @module
  */
-import { type AppId, Grant, GrantInvalid, type ModuleCaller } from "@knpkv/hub-app"
-import { Clock, Crypto, Effect, FileSystem, Option, Path, Schema, SynchronizedRef } from "effect"
+import { type AppId, Grant, GrantInvalid, type ModuleCaller, sameSecret } from "@knpkv/hub-app"
+import { Clock, Crypto, Effect, Redacted, Schema, SynchronizedRef } from "effect"
 import { Base64Url } from "effect/encoding"
 
 export const grantLifetimeMillis = 60_000
@@ -104,53 +106,38 @@ export type Grants = Effect.Success<typeof makeGrants>
 /** An app-service request carried no token, or one that isn't this app's. */
 export class AppTokenRejected extends Schema.TaggedError<AppTokenRejected>()("AppTokenRejected", {}) {}
 
-/** Compares every character whatever the first mismatch, so timing doesn't reveal a token's prefix. */
-const sameToken = (presented: string, expected: string): boolean => {
-  if (presented.length !== expected.length) return false
-  let difference = 0
-  for (let index = 0; index < expected.length; index++) {
-    difference |= presented.charCodeAt(index) ^ expected.charCodeAt(index)
-  }
-  return difference === 0
-}
-
 /**
- * Per-app tokens, written owner-only under `directory`. `issue` replaces the app's token and file;
- * `verify` checks a bearer token against the app it claims to be.
+ * Per-spawn app tokens, held in memory. `issue` mints the token for one spawn of `app` and replaces any earlier
+ * spawn's; `revoke` drops it only while that spawn is still the current one, so a late exit can't revoke its
+ * successor; `verify` checks a bearer token against the app it claims to be.
  */
-export const makeAppTokens = Effect.fn("AppTokens.make")(function*(directory: string) {
+export const makeAppTokens = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
-  const fileSystem = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  const tokens = yield* SynchronizedRef.make(new Map<AppId, string>())
+  const tokens = yield* SynchronizedRef.make(new Map<AppId, { readonly spawn: string; readonly token: string }>())
 
-  const issue = Effect.fn("AppTokens.issue")(function*(app: AppId) {
+  const issue = Effect.fn("AppTokens.issue")(function*(app: AppId, spawn: string) {
     const token = yield* randomToken(cryptoService)
-    yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 })
-    const file = path.join(directory, `${app}.token`)
-    const temporary = `${file}.${(yield* randomToken(cryptoService)).slice(0, 8)}.tmp`
-    yield* fileSystem.writeFileString(temporary, `${token}\n`, { mode: 0o600 })
-    yield* fileSystem.rename(temporary, file)
-    yield* SynchronizedRef.update(tokens, (table) => new Map(table).set(app, token))
+    yield* SynchronizedRef.update(tokens, (table) => new Map(table).set(app, { spawn, token }))
+    return Redacted.make(token)
   })
 
-  const revoke = Effect.fn("AppTokens.revoke")(function*(app: AppId) {
+  const revoke = Effect.fn("AppTokens.revoke")(function*(app: AppId, spawn: string) {
     yield* SynchronizedRef.update(tokens, (table) => {
+      if (table.get(app)?.spawn !== spawn) return table
       const next = new Map(table)
       next.delete(app)
       return next
     })
-    yield* fileSystem.remove(path.join(directory, `${app}.token`), { force: true })
   })
 
   const verify = Effect.fn("AppTokens.verify")(function*(app: AppId, authorization: string | undefined) {
     const presented = authorization?.startsWith("Bearer ") === true ? authorization.slice(7) : undefined
-    const expected = Option.fromUndefinedOr((yield* SynchronizedRef.get(tokens)).get(app))
-    if (presented === undefined || Option.isNone(expected) || !sameToken(presented, expected.value)) {
+    const expected = (yield* SynchronizedRef.get(tokens)).get(app)
+    if (presented === undefined || expected === undefined || !sameSecret(presented, expected.token)) {
       return yield* new AppTokenRejected({})
     }
   })
 
   return { issue, revoke, verify }
 })
-export type AppTokens = Effect.Success<ReturnType<typeof makeAppTokens>>
+export type AppTokens = Effect.Success<typeof makeAppTokens>

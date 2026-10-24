@@ -1,5 +1,5 @@
 /**
- * The process boundary of every app: `runApp(app, platform)` reads argv, environment and the terminal,
+ * The process boundary of every app: `runApp(app, platform)` reads argv, stdin and the terminal,
  * then serves until SIGINT or SIGTERM. `platform` supplies whatever the app's handlers need beyond
  * `ShellServices`. Call it from the app's `bin` entry.
  *
@@ -14,10 +14,10 @@ import { type AppServer, readRunMode, serveApp } from "./node.js"
 
 export const runApp = <E, R>(app: AppServer<E, R>, platform: Layer.Layer<R>): void => {
   const program = Effect.gen(function*() {
-    const mode = readRunMode(app.manifest, process.argv.slice(2), process.env)
+    const mode = readRunMode(app.manifest, process.argv.slice(2))
     if (Result.isFailure(mode)) return yield* mode.failure
     const launch = browserLaunch({
-      noOpen: mode.success._tag === "Attached" || !mode.success.open,
+      noOpen: mode.success._tag !== "Standalone" || !mode.success.open,
       browser: process.env.BROWSER,
       ci: process.env.CI,
       interactive: process.stdout.isTTY === true

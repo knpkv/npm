@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * `herdr-usage [serve] [--port n] [--no-open]` runs the Usage app on its own; `herdr-usage --socket <path>` attaches
- * it to the hub. `HERDR_USAGE_LIMITS_COMMAND` overrides the agent-usage command a standalone run reads with
+ * `herdr-usage [serve] [--port n] [--no-open]` runs the Usage app on its own; the hub runs `herdr-usage --attach`
+ * itself. `HERDR_USAGE_LIMITS_COMMAND` overrides the agent-usage command a standalone run reads with
  * (see `./options.ts`).
  */
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
