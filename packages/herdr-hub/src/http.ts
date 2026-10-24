@@ -4252,7 +4252,9 @@ export const startHttpServer = async (
           ) {
             let proofSession: ApprovalProofSession | undefined
             const effect = Effect.gen(function*() {
-              const who = yield* authorized
+              // A decision needs an approval node on the hub's listener too: fleet hosts run agents under the
+              // same login, and a script can read the proof and set any Origin, so the login alone is no person.
+              const who = yield* tailnetActor(request, config, config.approvalNodes)
               yield* sameOrigin(request, expectedOrigin())
               const jobId = yield* decodeJobPathSegment(approvalJobId)
               const submittedApproval = yield* readApproval(request)
