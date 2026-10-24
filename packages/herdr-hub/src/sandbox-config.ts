@@ -311,3 +311,14 @@ export const formatResetInspection = (inspection: ResetInspection): string =>
     ),
     ...listed("incomplete discovery", inspection.dryRun.discoveryFailures)
   ].join("\n")
+
+/**
+ * What hostd logs when it runs a pool its hub won't serve: the Sandboxes module serves only when
+ * RELAY_SANDBOXES_HOST names this host. Null when it does.
+ */
+export const sandboxesHostWarning = (host: string, sandboxesHost: string | null): string | null =>
+  sandboxesHost !== null && sandboxesHost.toLowerCase() === host.toLowerCase()
+    ? null
+    : `hostd: this host runs the sandbox pool, but RELAY_SANDBOXES_HOST ${
+      sandboxesHost === null ? "is unset" : `names ${sandboxesHost}`
+    }, so the hub serves no Sandboxes pages`

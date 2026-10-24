@@ -34,24 +34,27 @@ export const crossPackageReferences = (file, config) => {
     .map(({ path }) => ({ file, reference: path }))
 }
 
-/** Checks every `packages/<name>/tsconfig*.json` under `repositoryRoot`; returns the failures and the file count. */
+/**
+ * Checks every package tsconfig (`tsconfig*.json` at any depth under `packages/`) under `repositoryRoot`, never one under
+ * `node_modules`; returns the failures and the file count.
+ */
 export const checkTsconfigReferences = Effect.fn("TsconfigReferences.check")(function* (repositoryRoot) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const failures = []
   let files = 0
   const packages = path.join(repositoryRoot, "packages")
-  for (const name of (yield* fs.readDirectory(packages)).toSorted()) {
-    const directory = path.join(packages, name)
-    if ((yield* fs.stat(directory)).type !== "Directory") continue
-    for (const entry of (yield* fs.readDirectory(directory)).toSorted()) {
-      if (!/^tsconfig.*\.json$/u.test(entry)) continue
-      const file = `packages/${name}/${entry}`
-      const parsed = TypeScript.parseConfigFileTextToJson(file, yield* fs.readFileString(path.join(directory, entry)))
-      if (parsed.error !== undefined) return yield* fail(`${file} is not valid JSON with comments`)
-      files += 1
-      failures.push(...crossPackageReferences(file, parsed.config))
-    }
+  const entries = (yield* fs.readDirectory(packages, { recursive: true }))
+    .map((entry) => entry.split(path.sep).join("/"))
+    .filter((entry) => !entry.split("/").includes("node_modules") && /(^|\/)tsconfig[^/]*\.json$/u.test(entry))
+    .toSorted()
+  for (const entry of entries) {
+    if (entry.split("/").length < 2) continue
+    const file = `packages/${entry}`
+    const parsed = TypeScript.parseConfigFileTextToJson(file, yield* fs.readFileString(path.join(packages, entry)))
+    if (parsed.error !== undefined) return yield* fail(`${file} is not valid JSON with comments`)
+    files += 1
+    for (const failure of crossPackageReferences(file, parsed.config)) failures.push(failure)
   }
   return { failures, files }
 })
