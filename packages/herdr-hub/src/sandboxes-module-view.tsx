@@ -433,7 +433,8 @@ const useAwsSession = (read: SandboxesModuleReads["awsSession"], enabled: boolea
       const at = yield* Clock.currentTimeMillis
       const value = Exit.isSuccess(exit) ? exit.value : null
       if (value !== null) yield* Effect.sync(() => setSession(value))
-      const since = value?._tag === "SignInPending" ? (pendingSince ?? at) : null
+      // A failed read changes nothing known, so the 10 minutes keep counting from the first pending read.
+      const since = value === null ? pendingSince : value._tag === "SignInPending" ? (pendingSince ?? at) : null
       yield* Effect.sleep(since !== null && at - since < pendingPollFor ? pendingPollEvery : pollEvery)
       return yield* step(since)
     })

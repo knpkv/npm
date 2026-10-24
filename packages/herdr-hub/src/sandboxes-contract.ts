@@ -71,12 +71,21 @@ export type SandboxRequests = typeof SandboxRequests.Type
  * `SignInPending` with what to approve (its URL and code let whoever holds them finish the sign-in), or
  * `SignInRequired`: `never` signed in, or the sign-in it held `ended`. Or why the pool is not served here.
  */
+/** The page a waiting sign-in is approved on. Only an https URL decodes, so the link can never run script. */
+const VerificationUri = Schema.String.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter(
+    (value) => URL.canParse(value) && new URL(value).protocol === "https:" && new URL(value).hostname.length > 0,
+    { expected: "an https URL" }
+  )
+)
+
 export const SandboxAwsSession = Schema.Union([
   SandboxesUnavailable,
   Schema.TaggedStruct("NotConfigured", {}),
   Schema.TaggedStruct("SignedIn", { expiresAt: Instant }),
   Schema.TaggedStruct("SignInPending", {
-    verificationUri: Schema.String,
+    verificationUri: VerificationUri,
     userCode: Schema.String,
     expiresAt: Instant
   }),

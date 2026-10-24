@@ -111,8 +111,9 @@ export const startSandboxAwsSignIn = Effect.gen(function*() {
   ).pipe(Effect.mapError(() => new SandboxesWriteFailed({ reason: "network" })))
   if (response.status === 403) return yield* new SandboxesWriteFailed({ reason: "unauthorized" })
   if (response.status < 200 || response.status >= 300) return yield* new SandboxesWriteFailed({ reason: "rejected" })
+  // An answer that doesn't decode, such as a sign-in page that isn't https, is refused, never shown.
   return yield* decodeBoundedResponseJson(response, SandboxAwsSession, 4_096).pipe(
-    Effect.mapError(() => new SandboxesWriteFailed({ reason: "network" }))
+    Effect.mapError(() => new SandboxesWriteFailed({ reason: "rejected" }))
   )
 }).pipe(Effect.withSpan("SandboxesClient.startAwsSignIn"))
 

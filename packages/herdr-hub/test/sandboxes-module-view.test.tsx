@@ -1934,6 +1934,24 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       expect(reads.mock.calls.length).toBe(after)
     })
 
+    it("keeps counting the 10 minutes through a failed read", async () => {
+      let calls = 0
+      const reads = vi.fn(() => {
+        calls += 1
+        return calls === 20
+          ? Effect.fail(new SandboxesClientError({ detail: "network" }))
+          : Effect.succeed(pendingSession)
+      })
+      await render(pool([own]), {
+        awsSession: Effect.suspend(reads),
+        writes: allWrites(Effect.succeed(pendingSession))
+      })
+      await act(async () => await vi.advanceTimersByTimeAsync(600_000))
+      const after = reads.mock.calls.length
+      await act(async () => await vi.advanceTimersByTimeAsync(25_000))
+      expect(reads.mock.calls.length).toBe(after)
+    })
+
     it("says an ended sign-in ended, and marks the spend it read last as last known", async () => {
       await render(pool([{ ...available("ephemeral-02", "999999999991", null), spend: spent(7.4) }]), {
         awsSession: Effect.succeed({ _tag: "SignInRequired", reason: "ended" }),

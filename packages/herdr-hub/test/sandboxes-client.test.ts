@@ -112,6 +112,36 @@ it.effect("reads the hub's AWS sign-in, including why one is required", () =>
     expect(refused.detail).toBe("status")
   }))
 
+it.effect("refuses a sign-in page that isn't https, so it can never become a script link", () =>
+  Effect.gen(function*() {
+    for (const verificationUri of ["javascript:alert(1)", "http://portal.example.test/device", "not a url"]) {
+      const pending = {
+        _tag: "SignInPending",
+        verificationUri,
+        userCode: "ABCD-EFGH",
+        expiresAt: "2026-10-23T13:15:00.000Z"
+      }
+      const read = yield* loadSandboxAwsSession.pipe(
+        Effect.provideService(HttpClient.HttpClient, answering(200, pending)),
+        Effect.flip
+      )
+      expect([verificationUri, read._tag, read.detail]).toEqual([
+        verificationUri,
+        "SandboxesClientError",
+        "invalid_response"
+      ])
+      const started = yield* startSandboxAwsSignIn.pipe(
+        Effect.provideService(HttpClient.HttpClient, answering(200, pending)),
+        Effect.flip
+      )
+      expect([verificationUri, started._tag, started.reason]).toEqual([
+        verificationUri,
+        "SandboxesWriteFailed",
+        "rejected"
+      ])
+    }
+  }))
+
 it.effect("starts an AWS sign-in with an empty body and returns what to approve; another node is refused", () =>
   Effect.gen(function*() {
     const seen: Array<Seen> = []
