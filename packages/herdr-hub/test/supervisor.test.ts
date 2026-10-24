@@ -394,8 +394,9 @@ describe("supervisor", () => {
     )
 
     // The owner of `base`'s parent can rename `base` away whatever the mode bits, so the parent must be ours or
-    // root's. Tests can't chown, so the hub runs as a uid that owns neither the temp root nor anything in it.
-    it.effect.skipIf(windows)(
+    // root's. Tests can't chown, so the hub runs as a uid that owns neither the temp root nor anything in it. As
+    // root the temp directory is owned by 0, which the rule accepts, so the case can't be built there.
+    it.effect.skipIf(windows || userInfo().uid === 0)(
       "keeps apps down, creating nothing, when another user owns the runtime directory's parent",
       () =>
         Effect.gen(function*() {
