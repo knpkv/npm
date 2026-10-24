@@ -21,10 +21,10 @@ The persisted payload is the decoded job payload; the hash is computed over that
 
 `can(config, principal, permission)` says what a hub caller may do. The permissions are one closed list: `view`, `jobs.submit`, `approve`, `sandboxes.owner`, `push`, `connect.terminal` and `apps.restart`. A `Principal` is who the listener decided the request is:
 
-- **`Person`**: a login signed in in a browser. It holds what `users[login]` grants. While `users` is absent, every login in `allowedUsers` holds every permission, as before permissions existed.
+- **`Person`**: a login signed in in a browser, on a tailnet node. It holds what `users[login]` grants. While `users` is absent, every login in `allowedUsers` holds every permission, as before permissions existed. A `users` entry for a login outside `allowedUsers` grants nothing. `approve` also needs the person to be on a node in `approvalNodes`, or to have proved presence with a passkey (`presence: "passkey"`).
 - **`Host`**: a fleet host. Agents run there under the owner's login, so a host is never a person. It holds `hosts`, which defaults to `view` and `jobs.submit`, and never `approve` or `sandboxes.owner`, whatever `hosts` says.
-- **`Local`**: the user on the hub's own computer. With the local sign-in (`session: true`) it holds `local`, which defaults to every permission. Plain loopback without it only views.
-- **`Service`** (another hub node) and **`Anonymous`** hold nothing.
+- **`Local`**: the user on the hub's own computer. With the local sign-in (`session: true`) it holds `local`, which defaults to every permission but `approve` and `sandboxes.owner`. It never holds those two, since the hub's own agents run under the same user account. Plain loopback without the sign-in only views.
+- **`Service`** (another hub node) and **`Anonymous`** hold nothing. A service call is admitted by its node id where it arrives, outside `can`.
 
 `users`, `hosts` and `local` are optional configuration keys. A permission name this package does not know still decodes (a plain dotted lower-case word, up to 64 characters). It grants nothing, and `unknownPermissions(config)` lists it for the startup log, so one configuration can reach a hub that is older than the configuration. A hub older than these keys refuses a configuration that has them (excess keys fail the decode), so write them only once every host understands them.
 

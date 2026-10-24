@@ -9,9 +9,16 @@
  *   which one a request is belongs to the listener; this module only answers what each may do.
  * - **Grants come from the fleet configuration.** `users` maps a login to its permissions, `hosts` is what
  *   any fleet host may do, `local` what a signed-in local user may do. While `users` is absent, every login
- *   in `allowedUsers` holds every permission, as before permissions existed.
- * - **Some permissions are never a host's.** `approve` and `sandboxes.owner` act for the owner, so a host
- *   never holds them, whatever `hosts` says. Plain loopback without the local sign-in only views.
+ *   in `allowedUsers` holds every permission, as before permissions existed. A `users` entry for a login
+ *   outside `allowedUsers` grants nothing: Tailscale never admits that login.
+ * - **Owner permissions need a person.** `approve` and `sandboxes.owner` act for the owner. Agents run on
+ *   fleet hosts under the owner's login and on the hub's own computer under its user account, so neither a
+ *   host nor the local user ever holds them, whatever `hosts` or `local` says. Plain loopback without the
+ *   local sign-in only views.
+ * - **Approving needs the approval node or a passkey.** A person approves from a node in `approvalNodes`,
+ *   as before identities existed, or from any node once a passkey proved them present for that decision.
+ * - **A service is checked by its node, not here.** Hub-to-peer calls are admitted by the hub's node id
+ *   where they arrive; `can` grants a `Service` nothing.
  * - **Unknown names are ignored, not refused.** One configuration reaches hosts that may run an older hub,
  *   so a permission this hub does not know decodes, grants nothing, and is listed by
  *   {@link unknownPermissions} for the startup log. Every known grant still holds.
@@ -50,31 +57,45 @@ export const defaultHostPermissions: ReadonlyArray<Permission> = ["view", "jobs.
 /** Permissions that act for the owner; a host never holds them. */
 const ownerOnly: ReadonlySet<Permission> = new Set<Permission>(["approve", "sandboxes.owner"])
 
+/** How a person proved they are present: not at all yet, or a passkey for this decision. */
+export type Presence = "none" | "passkey"
+
 export type Principal =
-  | { readonly _tag: "Person"; readonly login: string }
+  | { readonly _tag: "Person"; readonly login: string; readonly nodeId: string; readonly presence: Presence }
   | { readonly _tag: "Host"; readonly nodeId: string }
   | { readonly _tag: "Local"; readonly session: boolean }
   | { readonly _tag: "Service"; readonly nodeId: string }
   | { readonly _tag: "Anonymous" }
 
-type Grants = Pick<HostConfiguration, "allowedUsers" | "users" | "hosts" | "local">
+type Grants = Pick<HostConfiguration, "allowedUsers" | "approvalNodes" | "users" | "hosts" | "local">
 
 const isPermission = Schema.is(Permission)
 
 /** The known permissions among `names`, in their order; unknown names are dropped. */
 export const grantsOf = (names: ReadonlyArray<string>): ReadonlyArray<Permission> => names.filter(isPermission)
 
+const withoutOwnerOnly = (granted: ReadonlyArray<Permission>): ReadonlyArray<Permission> =>
+  granted.filter((permission) => !ownerOnly.has(permission))
+
+const personGrants = (config: Grants, login: string): ReadonlyArray<Permission> =>
+  !config.allowedUsers.includes(login)
+    ? []
+    : config.users === undefined
+    ? permissions
+    : grantsOf(config.users[login] ?? [])
+
 const grantedTo = (config: Grants, principal: Principal): ReadonlyArray<Permission> => {
   switch (principal._tag) {
-    case "Person":
-      return config.users === undefined
-        ? (config.allowedUsers.includes(principal.login) ? permissions : [])
-        : grantsOf(config.users[principal.login] ?? [])
+    case "Person": {
+      const present = principal.presence === "passkey" || config.approvalNodes.includes(principal.nodeId)
+      return personGrants(config, principal.login).filter((permission) => permission !== "approve" || present)
+    }
     case "Host":
-      return (config.hosts === undefined ? defaultHostPermissions : grantsOf(config.hosts))
-        .filter((permission) => !ownerOnly.has(permission))
+      return withoutOwnerOnly(config.hosts === undefined ? defaultHostPermissions : grantsOf(config.hosts))
     case "Local":
-      return principal.session ? (config.local === undefined ? permissions : grantsOf(config.local)) : ["view"]
+      return principal.session
+        ? withoutOwnerOnly(config.local === undefined ? permissions : grantsOf(config.local))
+        : ["view"]
     case "Service":
     case "Anonymous":
       return []

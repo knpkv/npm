@@ -5,13 +5,17 @@ import { can, grantsOf, type Permission, permissions, type Principal, unknownPer
 
 const identity = Schema.Struct({
   allowedUsers: HostConfiguration.fields.allowedUsers,
+  approvalNodes: HostConfiguration.fields.approvalNodes,
   users: HostConfiguration.fields.users,
   hosts: HostConfiguration.fields.hosts,
   local: HostConfiguration.fields.local
 })
-const configOf = (input: typeof identity.Encoded) => Schema.decodeSync(identity)(input)
+const configOf = (input: Omit<typeof identity.Encoded, "approvalNodes">) =>
+  Schema.decodeSync(identity)({ approvalNodes: ["node-phone"], ...input })
 
-const person = (login: string): Principal => ({ _tag: "Person", login })
+/** A person on the approval node, no passkey: every grant counts, approve included. */
+const person = (login: string): Principal => ({ _tag: "Person", login, nodeId: "node-phone", presence: "none" })
+const ownerSide: ReadonlyArray<Permission> = ["view", "jobs.submit", "push", "connect.terminal", "apps.restart"]
 const all = (principal: Principal, config: ReturnType<typeof configOf>) =>
   permissions.filter((permission) => can(config, principal, permission))
 
@@ -32,6 +36,27 @@ describe("permissions", () => {
     expect(all(person("teammate@example.test"), config)).toEqual([])
   })
 
+  // WhoIs admits only allowedUsers, so a users entry for any other login grants nothing.
+  it("ignores a users entry for a login that is not in allowedUsers", () => {
+    const config = configOf({ allowedUsers: ["owner@example.test"], users: { "other@example.test": ["view"] } })
+    expect(all(person("other@example.test"), config)).toEqual([])
+  })
+
+  // Until a passkey proves the person is present, approving stays tied to the approval nodes, as today.
+  it("lets a person approve only from an approval node, or with a passkey from any node", () => {
+    const config = configOf({ allowedUsers: ["owner@example.test"] })
+    const on = (nodeId: string, presence: "none" | "passkey"): Principal => ({
+      _tag: "Person",
+      login: "owner@example.test",
+      nodeId,
+      presence
+    })
+    expect(can(config, on("node-phone", "none"), "approve")).toBe(true)
+    expect(can(config, on("node-laptop", "none"), "approve")).toBe(false)
+    expect(can(config, on("node-laptop", "passkey"), "approve")).toBe(true)
+    expect(can(config, on("node-laptop", "none"), "jobs.submit")).toBe(true)
+  })
+
   // Agents run on fleet hosts under the owner's login: a host is never a person and never approves or owns.
   it("lets a host view and submit jobs by default, and never approve or own, whatever hosts says", () => {
     const host: Principal = { _tag: "Host", nodeId: "node-build" }
@@ -41,12 +66,15 @@ describe("permissions", () => {
   })
 
   // Plain loopback is any process on the computer: it only views until the local login proves the user.
-  it("lets plain loopback only view, and a local session what local grants", () => {
+  // That login proves the same user account, which the hub's own agents share, so it never approves or owns.
+  it("lets plain loopback only view, and a local session what local grants, never approve or own", () => {
     const config = configOf({ allowedUsers: [] })
     expect(all({ _tag: "Local", session: false }, config)).toEqual(["view"])
-    expect(all({ _tag: "Local", session: true }, config)).toEqual(permissions)
+    expect(all({ _tag: "Local", session: true }, config)).toEqual(ownerSide)
     expect(all({ _tag: "Local", session: true }, configOf({ allowedUsers: [], local: ["view", "apps.restart"] })))
       .toEqual(["view", "apps.restart"])
+    expect(all({ _tag: "Local", session: true }, configOf({ allowedUsers: [], local: ["approve", "sandboxes.owner"] })))
+      .toEqual([])
   })
 
   it("gives a service and an anonymous caller nothing", () => {
@@ -59,7 +87,7 @@ describe("permissions", () => {
   // reported and ignored, never a decode failure, so the grants it knows still hold.
   it("decodes a permission it does not know, ignores it, and names it", () => {
     const config = configOf({
-      allowedUsers: [],
+      allowedUsers: ["owner@example.test"],
       users: { "owner@example.test": ["view", "future.thing"] },
       hosts: ["view", "host.future"],
       local: ["later"]
