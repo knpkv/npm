@@ -60,13 +60,15 @@ const registry = (versions: ReadonlyArray<NpmViewVersion>) =>
 const npmWith = (npmrc: string) =>
   Effect.gen(function*() {
     const fileSystem = yield* FileSystem.FileSystem
-    const cwd = yield* fileSystem.makeTempDirectoryScoped({ directory: tmpdir(), prefix: "apps-npm-" })
-    yield* fileSystem.writeFileString(`${cwd}/.npmrc`, npmrc)
+    const root = yield* fileSystem.makeTempDirectoryScoped({ directory: tmpdir(), prefix: "apps-npm-" })
+    // The user's config, outside npm's cwd: no project `.npmrc` is in play, as with the CLI.
+    yield* fileSystem.makeDirectory(`${root}/work`)
+    yield* fileSystem.writeFileString(`${root}/user.npmrc`, npmrc)
     return yield* makeNpm({
       node: process.execPath,
       npmCli: yield* Effect.promise(() => npmCli),
-      cwd,
-      env: { npm_config_userconfig: `${cwd}/.npmrc`, npm_config_cache: `${cwd}/cache` }
+      cwd: `${root}/work`,
+      env: { npm_config_userconfig: `${root}/user.npmrc`, npm_config_cache: `${root}/cache` }
     })
   })
 
@@ -203,13 +205,14 @@ describe("npm resolve", () => {
             })
         )
         const fileSystem = yield* FileSystem.FileSystem
-        const cwd = yield* fileSystem.makeTempDirectoryScoped({ directory: tmpdir(), prefix: "apps-npm-" })
-        yield* fileSystem.writeFileString(`${cwd}/.npmrc`, `registry=${stalled.url}\nfetch-retries=0\n`)
+        const root = yield* fileSystem.makeTempDirectoryScoped({ directory: tmpdir(), prefix: "apps-npm-" })
+        yield* fileSystem.makeDirectory(`${root}/work`)
+        yield* fileSystem.writeFileString(`${root}/user.npmrc`, `registry=${stalled.url}\nfetch-retries=0\n`)
         const npm = yield* makeNpm({
           node: process.execPath,
           npmCli: yield* Effect.promise(() => npmCli),
-          cwd,
-          env: { npm_config_userconfig: `${cwd}/.npmrc`, npm_config_cache: `${cwd}/cache` },
+          cwd: `${root}/work`,
+          env: { npm_config_userconfig: `${root}/user.npmrc`, npm_config_cache: `${root}/cache` },
           viewTimeout: Duration.seconds(2)
         })
         const error = yield* npm.resolve("@knpkv/hub-app-fixture", "latest").pipe(Effect.flip)

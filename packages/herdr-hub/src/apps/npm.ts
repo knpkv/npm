@@ -20,6 +20,7 @@ import { HubAppPackageField } from "@knpkv/hub-app"
 import { Array as Arr, Duration, Effect, FileSystem, Option, Order, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { posix, win32 } from "node:path"
+import type { SignatureCheck } from "./trust.js"
 
 /** No usable `npm-cli.js`: `looked` lists every place tried, in order. */
 export class NpmUnavailable extends Schema.TaggedError<NpmUnavailable>()("NpmUnavailable", {
@@ -212,12 +213,20 @@ export interface NpmOptions {
   readonly node: string
   /** `npm-cli.js`, from `findNpmCli`. */
   readonly npmCli: string
-  /** Where npm runs; its `.npmrc` (and the user's) apply. */
+  /**
+   * Where `npm view` runs. The CLI passes `<hubData>/hub-apps`, which holds no `.npmrc`: `npm install --prefix`
+   * reads project config from the prefix, not from here, so a project `.npmrc` here would make view and install ask
+   * different registries. With none, both read only the user's and the global config.
+   */
   readonly cwd: string
   /** Extra environment for npm (tests point `npm_config_userconfig` at a throwaway `.npmrc`). */
   readonly env?: Readonly<Record<string, string>>
   /** How long `npm view` may take before it is killed; 60 s by default. */
   readonly viewTimeout?: Duration.Duration
+  /** How long `npm install` may take before it is killed; 5 min by default. */
+  readonly installTimeout?: Duration.Duration
+  /** How long `npm audit signatures` may take before it is killed; 60 s by default. */
+  readonly auditTimeout?: Duration.Duration
 }
 
 export interface Npm {
@@ -226,9 +235,33 @@ export interface Npm {
     pkg: string,
     spec: string
   ) => Effect.Effect<ResolvedApp, NotAHubApp | AppInstallFailed>
+  /**
+   * Installs exactly `app` into `prefix` (one exact dependency, no dev dependencies, install scripts only with
+   * `allowScripts`), then requires the lockfile's integrity for it to be the one `npm view` reported: a registry that
+   * served another tarball meanwhile fails with `fetch`.
+   */
+  readonly install: (
+    prefix: string,
+    app: ResolvedApp,
+    allowScripts: boolean
+  ) => Effect.Effect<void, AppInstallFailed>
+  /**
+   * `npm audit signatures` in `prefix`. A registry without signing keys (mirrors, private registries) is reported, not
+   * failed; any other failure blocks the install.
+   */
+  readonly auditSignatures: (prefix: string, pkg: string) => Effect.Effect<SignatureCheck, AppInstallFailed>
 }
 
+const PackageLock = Schema.Struct({
+  packages: Schema.Record(Schema.String, Schema.Struct({ integrity: Schema.optional(Schema.String) }))
+})
+const decodeLock = Schema.decodeUnknownOption(Schema.fromJsonString(PackageLock))
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))
+/** What npm says when no installed package came from a registry that publishes signing keys. */
+const noSignaturesSummary = "found no dependencies to audit that were installed from a supported registry"
+
 export const makeNpm = Effect.fn("Npm.make")(function*(options: NpmOptions) {
+  const fileSystem = yield* FileSystem.FileSystem
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
   /** Runs npm to completion: stdout, stderr's last line (warnings and progress go there) and the exit code. */
@@ -285,5 +318,73 @@ export const makeNpm = Effect.fn("Npm.make")(function*(options: NpmOptions) {
       )
     )
 
-  return { resolve } satisfies Npm
+  const install = Effect.fn("Npm.install")(function*(prefix: string, app: ResolvedApp, allowScripts: boolean) {
+    const failed = (stage: "fetch" | "commit", detail: string) =>
+      new AppInstallFailed({ package: app.package, stage, detail })
+    yield* fileSystem.makeDirectory(prefix, { recursive: true }).pipe(
+      Effect.andThen(fileSystem.writeFileString(
+        `${prefix}/package.json`,
+        `${encodeJson({ name: "herdr-hub-app", private: true, dependencies: { [app.package]: app.version } })}\n`
+      )),
+      Effect.mapError((error) => failed("commit", error.message))
+    )
+    const result = yield* run([
+      "install",
+      "--prefix",
+      prefix,
+      "--omit=dev",
+      ...(allowScripts ? [] : ["--ignore-scripts"]),
+      "--no-fund",
+      "--no-audit"
+    ]).pipe(
+      Effect.mapError((error) => failed("fetch", error.message)),
+      Effect.timeoutOrElse({
+        duration: options.installTimeout ?? Duration.minutes(5),
+        orElse: () => Effect.fail(failed("fetch", "npm install timed out"))
+      })
+    )
+    if (result.exitCode !== ChildProcessSpawner.ExitCode(0)) {
+      return yield* failed("fetch", result.lastErrorLine ?? `npm install exited ${result.exitCode}`)
+    }
+    const lock = yield* fileSystem.readFileString(`${prefix}/package-lock.json`).pipe(
+      Effect.map(decodeLock),
+      Effect.mapError((error) => failed("fetch", error.message))
+    )
+    const installed = Option.flatMap(
+      lock,
+      ({ packages }) => Option.fromNullishOr(packages[`node_modules/${app.package}`]?.integrity)
+    )
+    if (Option.isNone(installed) || installed.value !== app.integrity) {
+      return yield* failed("fetch", "the registry served a different tarball than the one described")
+    }
+  })
+
+  const auditSignatures: Npm["auditSignatures"] = (prefix, pkg) =>
+    run(["audit", "signatures", "--prefix", prefix, "--json"]).pipe(
+      Effect.mapError((error) => new AppInstallFailed({ package: pkg, stage: "signatures", detail: error.message })),
+      // It fetches the registry's keys and every package's signatures; a stalled registry must not hold the lock.
+      Effect.timeoutOrElse({
+        duration: options.auditTimeout ?? Duration.seconds(60),
+        orElse: () =>
+          Effect.fail(
+            new AppInstallFailed({ package: pkg, stage: "signatures", detail: "npm audit signatures timed out" })
+          )
+      }),
+      Effect.flatMap(({ exitCode, lastErrorLine, stdout }): Effect.Effect<SignatureCheck, AppInstallFailed> => {
+        if (exitCode === ChildProcessSpawner.ExitCode(0)) return Effect.succeed("verified")
+        const summary = Option.flatMap(decodeNpmError(stdout), ({ error }) => Option.fromNullishOr(error.summary))
+        if (Option.isSome(summary) && summary.value === noSignaturesSummary) {
+          return Effect.succeed("registry_has_no_signatures")
+        }
+        return Effect.fail(
+          new AppInstallFailed({
+            package: pkg,
+            stage: "signatures",
+            detail: Option.getOrElse(summary, () => lastErrorLine ?? `npm audit signatures exited ${exitCode}`)
+          })
+        )
+      })
+    )
+
+  return { resolve, install, auditSignatures } satisfies Npm
 })
