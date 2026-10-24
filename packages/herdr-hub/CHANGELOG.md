@@ -2,6 +2,25 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.57.0
+
+### Minor Changes
+
+- [#1095](https://github.com/knpkv/npm/pull/1095) [`dae5d9d`](https://github.com/knpkv/npm/commit/dae5d9dc2cda82f5d54ba9ccb2d38d099b6ebfba) Thanks [@konopkov](https://github.com/konopkov)! - Hub apps run without nix. **Breaking change to the attached app contract** (even at 0.x): an attached app no longer takes `--socket <path>`, `HUB_URL` or `HUB_APP_TOKEN_FILE`. The hub starts each installed app itself as `<node> <prefix>/<bin> --attach` and writes one handshake line on its stdin (`HubHandshake`: the endpoint, a unix socket or a Windows named pipe; the hub's URL; a token and a secret, both fresh per start and never written to disk). The app reads it within 5 s (at most 4 KiB), listens on the endpoint, answers `403 not_hub` to any request without the spawn's `x-hub-app-secret` (compared in constant time, before any `x-hub-*` header is read), and stops when stdin ends. `serveAttached` reads the handshake from stdin; `readRunMode` takes argv only; `AttachedOptions.token` is a `Redacted` value. `apps.json` is v2 only (`AppsConfig`, `InstalledApp`): it names its one writer (`cli` or `nix`), trusted scopes, and per app the install prefix, the script (`hubApp.bin`, a path inside the package), whether it is enabled and its heap cap; v1 files are refused. An app's package.json declares `"hubApp": { "bin", "contract", "services" }` (`HubAppPackageField`). App states gain `starting`, `crashloop`, `disabled`, `install_missing` and `health`, and `AppStartError` gains `handshake`.
+
+  The hub supervises its apps: one child per entry, restarted with backoff (1 s up to 60 s) after an exit or three missed health probes, left off after 5 exits in 10 minutes until restarted, stopped by closing stdin (killed after 5 s). Output goes to a per-app log (5 MB, one previous file kept). Tokens are per spawn, held in memory and revoked when that spawn ends. Sockets live in an owner-only runtime directory the hub wipes at start and refuses when another user owns it or others can enter it. On Windows file modes do nothing: owner-only state comes from the user profile's ACL, an owner-only pipe DACL is not attempted, and the per-spawn secret is the check. `@knpkv/herdr-fleet`'s `HubPaths` gains `hubData`, `hubState` and `hubRuntime` (`null` on Windows). `herdr-usage` attaches the same way, and its package.json declares `hubApp` (`dist/bin.js`, contract 1, `fleet.read` and `host`).
+
+### Patch Changes
+
+- Updated dependencies [[`dae5d9d`](https://github.com/knpkv/npm/commit/dae5d9dc2cda82f5d54ba9ccb2d38d099b6ebfba), [`4914da5`](https://github.com/knpkv/npm/commit/4914da56c3e97101a3cbf9ad1cc649cfa5a526e6)]:
+  - @knpkv/hub-app@0.4.0
+  - @knpkv/herdr-fleet@0.20.0
+  - @knpkv/herdr-usage@0.1.1
+  - @knpkv/sandbox-pool@0.10.1
+  - @knpkv/herdr-connect@0.31.1
+  - @knpkv/herdr-coordinator@0.4.12
+  - @knpkv/herdr-work@0.12.13
+
 ## 0.56.0
 
 ### Minor Changes
