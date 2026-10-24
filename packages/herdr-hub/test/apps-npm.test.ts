@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Predicate } from "effect"
+import { Duration, Effect, FileSystem, Predicate } from "effect"
 import { createServer, type Server } from "node:http"
 import { tmpdir } from "node:os"
 import process from "node:process"
@@ -89,6 +89,26 @@ describe("npm resolve", () => {
       })
     }))
 
+  // npm view lists a range's matches in publish order, so a backport published after a newer release comes last.
+  it.effect("picks the highest version by semver, not the last one npm listed", () =>
+    Effect.gen(function*() {
+      const backport = yield* resolvedFrom("@knpkv/hub-app-fixture", [
+        fixtureVersion("1.0.0"),
+        fixtureVersion("1.4.0"),
+        fixtureVersion("1.2.1")
+      ])
+      const release = yield* resolvedFrom("@knpkv/hub-app-fixture", [
+        fixtureVersion("1.4.0"),
+        fixtureVersion("1.4.0-rc.1")
+      ])
+      const prerelease = yield* resolvedFrom("@knpkv/hub-app-fixture", [
+        fixtureVersion("2.0.0-rc.10"),
+        fixtureVersion("2.0.0-rc.9"),
+        fixtureVersion("2.0.0-rc.beta")
+      ])
+      expect([backport.version, release.version, prerelease.version]).toEqual(["1.4.0", "1.4.0", "2.0.0-rc.beta"])
+    }))
+
   // A typo (`left-pad` as an app) or a package with a malformed field is refused before any download.
   it.effect("refuses a package without a valid hubApp field", () =>
     Effect.gen(function*() {
@@ -150,6 +170,50 @@ describe("npm resolve", () => {
         expect(resolved.version).toBe("1.4.0")
         expect(resolved.integrity).toBe("sha512-1.4.0")
         expect(scoped.requests.length).toBeGreaterThan(0)
+      }).pipe(Effect.scoped), 30_000)
+
+    it.effect(
+      "resolves a range to its highest version when the registry lists a backport last",
+      () =>
+        Effect.gen(function*() {
+          const scoped = yield* registry([fixtureVersion("1.0.0"), fixtureVersion("1.4.0"), fixtureVersion("1.2.1")])
+          const npm = yield* npmWith(`registry=${scoped.url}\n`)
+          expect((yield* npm.resolve("@knpkv/hub-app-fixture", "^1.0.0")).version).toBe("1.4.0")
+        }).pipe(Effect.scoped),
+      30_000
+    )
+
+    // A registry that accepts and then never answers must not leave `apps add` hanging.
+    it.effect("gives up on npm view after its timeout and says so", () =>
+      Effect.gen(function*() {
+        const stalled = yield* Effect.acquireRelease(
+          Effect.callback<{ server: Server; url: string }>((resume) => {
+            const server = createServer(() => {})
+            server.once("error", (error) => resume(Effect.die(error)))
+            server.listen(0, "127.0.0.1", () => {
+              const address = server.address()
+              const port = address === null || Predicate.isString(address) ? 0 : address.port
+              resume(Effect.succeed({ server, url: `http://127.0.0.1:${port}/` }))
+            })
+          }),
+          ({ server }) =>
+            Effect.callback<void>((resume) => {
+              server.closeAllConnections()
+              server.close(() => resume(Effect.void))
+            })
+        )
+        const fileSystem = yield* FileSystem.FileSystem
+        const cwd = yield* fileSystem.makeTempDirectoryScoped({ directory: tmpdir(), prefix: "apps-npm-" })
+        yield* fileSystem.writeFileString(`${cwd}/.npmrc`, `registry=${stalled.url}\nfetch-retries=0\n`)
+        const npm = yield* makeNpm({
+          node: process.execPath,
+          npmCli: yield* Effect.promise(() => npmCli),
+          cwd,
+          env: { npm_config_userconfig: `${cwd}/.npmrc`, npm_config_cache: `${cwd}/cache` },
+          viewTimeout: Duration.seconds(2)
+        })
+        const error = yield* npm.resolve("@knpkv/hub-app-fixture", "latest").pipe(Effect.flip)
+        expect(error).toMatchObject({ _tag: "AppInstallFailed", stage: "resolve", detail: "npm view timed out" })
       }).pipe(Effect.scoped), 30_000)
 
     it.effect("fails resolve with npm's own reason when the package does not exist", () =>

@@ -17,7 +17,7 @@
  * @since 0.1.0
  */
 import { HubAppPackageField } from "@knpkv/hub-app"
-import { Effect, FileSystem, Option, Schema, Stream } from "effect"
+import { Array as Arr, Duration, Effect, FileSystem, Option, Order, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { posix, win32 } from "node:path"
 
@@ -112,7 +112,7 @@ export const NpmViewVersion = Schema.Struct({
 })
 export interface NpmViewVersion extends Schema.Schema.Type<typeof NpmViewVersion> {}
 
-/** A range matching several versions comes back as an array, oldest first. */
+/** A range matching several versions comes back as an array, in publish order (not semver order). */
 const NpmViewResult = Schema.Union([NpmViewVersion, Schema.Array(NpmViewVersion)])
 const decodeView = Schema.decodeUnknownOption(Schema.fromJsonString(NpmViewResult))
 const decodeHubApp = Schema.decodeUnknownOption(HubAppPackageField)
@@ -136,13 +136,56 @@ export interface ResolvedApp {
 
 const installHooks = ["preinstall", "install", "postinstall", "prepare"]
 
-/** Picks the newest version a view answered with and checks its `hubApp` field. */
+const versionParts = (version: string) => {
+  const [core = "", prerelease] = version.split("+", 1)[0]?.split(/-(.*)/su) ?? []
+  return {
+    core: core.split(".").map(Number),
+    prerelease: prerelease === undefined || prerelease === "" ? [] : prerelease.split(".")
+  }
+}
+
+const isNumeric = (identifier: string) => /^\d+$/u.test(identifier)
+
+/** One prerelease identifier against another: numeric ones by value and below alphanumeric ones, which compare as text. */
+const identifierOrder = (left: string, right: string): -1 | 0 | 1 =>
+  isNumeric(left) && isNumeric(right)
+    ? Order.Number(Number(left), Number(right))
+    : isNumeric(left)
+    ? -1
+    : isNumeric(right)
+    ? 1
+    : Order.String(left, right)
+
+/**
+ * Semver precedence for versions npm has already matched against a range: `major.minor.patch` numerically, then a
+ * release above any of its prereleases, then prerelease identifiers field by field (a shorter list first on a tie).
+ */
+export const versionOrder: Order.Order<string> = (left, right) => {
+  const a = versionParts(left)
+  const b = versionParts(right)
+  for (let index = 0; index < 3; index++) {
+    const by = Order.Number(a.core[index] ?? 0, b.core[index] ?? 0)
+    if (by !== 0) return by
+  }
+  if (a.prerelease.length === 0 && b.prerelease.length === 0) return 0
+  if (a.prerelease.length === 0) return 1
+  if (b.prerelease.length === 0) return -1
+  for (let index = 0; index < Math.min(a.prerelease.length, b.prerelease.length); index++) {
+    const by = identifierOrder(a.prerelease[index] ?? "", b.prerelease[index] ?? "")
+    if (by !== 0) return by
+  }
+  return Order.Number(a.prerelease.length, b.prerelease.length)
+}
+
+/** Picks the highest version a view answered with (by semver) and checks its `hubApp` field. */
 export const resolvedFrom = (
   pkg: string,
   view: NpmViewVersion | ReadonlyArray<NpmViewVersion>
 ): Effect.Effect<ResolvedApp, NotAHubApp | AppInstallFailed> => {
   const versions: ReadonlyArray<NpmViewVersion> = Array.isArray(view) ? view : [view]
-  const newest = versions.at(-1)
+  const newest = Arr.isReadonlyArrayNonEmpty(versions)
+    ? Arr.max(versions, Order.mapInput(versionOrder, (candidate: NpmViewVersion) => candidate.version))
+    : undefined
   if (newest === undefined) {
     return Effect.fail(new AppInstallFailed({ package: pkg, stage: "resolve", detail: "no version matched" }))
   }
@@ -173,6 +216,8 @@ export interface NpmOptions {
   readonly cwd: string
   /** Extra environment for npm (tests point `npm_config_userconfig` at a throwaway `.npmrc`). */
   readonly env?: Readonly<Record<string, string>>
+  /** How long `npm view` may take before it is killed; 60 s by default. */
+  readonly viewTimeout?: Duration.Duration
 }
 
 export interface Npm {
@@ -186,7 +231,7 @@ export interface Npm {
 export const makeNpm = Effect.fn("Npm.make")(function*(options: NpmOptions) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
-  /** Runs npm to completion; stdout and the exit code. */
+  /** Runs npm to completion: stdout, stderr's last line (warnings and progress go there) and the exit code. */
   const run = (args: ReadonlyArray<string>) =>
     Effect.scoped(
       Effect.gen(function*() {
@@ -196,33 +241,48 @@ export const makeNpm = Effect.fn("Npm.make")(function*(options: NpmOptions) {
           extendEnv: true,
           env: { ...options.env, npm_config_update_notifier: "false", npm_config_fund: "false" }
         }))
-        const [stdout, exitCode] = yield* Effect.all(
-          [Stream.mkString(Stream.decodeText(child.stdout)), child.exitCode],
+        // Both pipes are drained together: a full stderr pipe would block npm.
+        const [stdout, stderr, exitCode] = yield* Effect.all(
+          [
+            Stream.mkString(Stream.decodeText(child.stdout)),
+            Stream.mkString(Stream.decodeText(child.stderr)),
+            child.exitCode
+          ],
           { concurrency: "unbounded" }
         )
-        return { stdout, exitCode }
+        const lastErrorLine = stderr.split(/\r?\n/u).map((line) => line.trim()).filter((line) => line !== "").at(-1) ??
+          null
+        return { stdout, lastErrorLine, exitCode }
       })
     )
 
   const resolve: Npm["resolve"] = (pkg, spec) =>
     run(["view", `${pkg}@${spec}`, "--json"]).pipe(
       Effect.mapError((error) => new AppInstallFailed({ package: pkg, stage: "resolve", detail: error.message })),
-      Effect.flatMap(({ exitCode, stdout }): Effect.Effect<ResolvedApp, NotAHubApp | AppInstallFailed> => {
-        if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
-          const detail = Option.match(decodeNpmError(stdout), {
-            onNone: () => `npm view exited ${exitCode}`,
-            onSome: ({ error }) => [error.code, error.summary].filter((part) => part !== undefined).join(": ")
+      // The scope closing on timeout kills the child.
+      Effect.timeoutOrElse({
+        duration: options.viewTimeout ?? Duration.seconds(60),
+        orElse: () =>
+          Effect.fail(new AppInstallFailed({ package: pkg, stage: "resolve", detail: "npm view timed out" }))
+      }),
+      Effect.flatMap(
+        ({ exitCode, lastErrorLine, stdout }): Effect.Effect<ResolvedApp, NotAHubApp | AppInstallFailed> => {
+          if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
+            const detail = Option.match(decodeNpmError(stdout), {
+              onNone: () => lastErrorLine ?? `npm view exited ${exitCode}`,
+              onSome: ({ error }) => [error.code, error.summary].filter((part) => part !== undefined).join(": ")
+            })
+            return Effect.fail(new AppInstallFailed({ package: pkg, stage: "resolve", detail }))
+          }
+          return Option.match(decodeView(stdout), {
+            onNone: (): Effect.Effect<ResolvedApp, NotAHubApp | AppInstallFailed> =>
+              Effect.fail(
+                new AppInstallFailed({ package: pkg, stage: "resolve", detail: "npm view answered unreadably" })
+              ),
+            onSome: (view) => resolvedFrom(pkg, view)
           })
-          return Effect.fail(new AppInstallFailed({ package: pkg, stage: "resolve", detail }))
         }
-        return Option.match(decodeView(stdout), {
-          onNone: (): Effect.Effect<ResolvedApp, NotAHubApp | AppInstallFailed> =>
-            Effect.fail(
-              new AppInstallFailed({ package: pkg, stage: "resolve", detail: "npm view answered unreadably" })
-            ),
-          onSome: (view) => resolvedFrom(pkg, view)
-        })
-      })
+      )
     )
 
   return { resolve } satisfies Npm
