@@ -2,6 +2,12 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.60.2
+
+### Patch Changes
+
+- [#1118](https://github.com/knpkv/npm/pull/1118) [`d32289b`](https://github.com/knpkv/npm/commit/d32289b78e3eabd6c378fcbc202f9207c1d32d12) Thanks [@konopkov](https://github.com/konopkov)! - The hub takes a Relay tool-call decision only from an approval node, like a job's approve or reject. Before this, any allowed login on any tailnet node passed, including a script on a fleet host.
+
 ## 0.60.1
 
 ### Patch Changes
