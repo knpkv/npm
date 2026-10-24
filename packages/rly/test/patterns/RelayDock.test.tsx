@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+// happy-dom 21 no longer loads iframe pages by default; the iframe-portal tests need about:blank to mount.
+// @vitest-environment-options {"settings":{"enableIframePageLoading":true}}
 
 import { act, type ReactElement, type ReactNode, StrictMode, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
