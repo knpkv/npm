@@ -185,6 +185,16 @@ it.effect("signs the hub out of AWS with an empty body; another caller is refuse
       Effect.flip
     )
     expect(refused.reason).toBe("unauthorized")
+    const running = yield* signOutSandboxAws.pipe(
+      Effect.provideService(HttpClient.HttpClient, answering(409, { error: "reset_running" })),
+      Effect.flip
+    )
+    expect(running.reason).toBe("reset_running")
+    const other = yield* signOutSandboxAws.pipe(
+      Effect.provideService(HttpClient.HttpClient, answering(409, { error: "something new" })),
+      Effect.flip
+    )
+    expect(other.reason).toBe("rejected")
   }))
 
 const failedRun = {

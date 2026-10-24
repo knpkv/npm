@@ -11,7 +11,7 @@ import {
   SandboxRuns,
   type SandboxRunView
 } from "@knpkv/sandbox-pool/host"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import {
@@ -43,6 +43,17 @@ export class SandboxesWriteFailed extends Schema.TaggedError<SandboxesWriteFaile
     "observe_mode"
   ])
 }) {}
+
+/**
+ * The hub was not signed out. `reset_running`: a reset still runs on the sign-in; `unauthorized`: the owner
+ * rule; `network`: it may or may not have reached the hub; anything else is `rejected`.
+ */
+export class SandboxesSignOutFailed extends Schema.TaggedError<SandboxesSignOutFailed>()("SandboxesSignOutFailed", {
+  reason: Schema.Literals(["reset_running", "rejected", "network", "unauthorized"])
+}) {}
+
+/** The hub refused a sign-out because a reset still runs on the sign-in. */
+const ResetRunning = Schema.Struct({ error: Schema.Literal("reset_running") })
 
 const RefusedRequest = Schema.Struct({
   error: Schema.Literals(["already_requested", "not_quarantined", "not_budget_held", "observe_mode"])
@@ -124,11 +135,17 @@ export const signOutSandboxAws = Effect.gen(function*() {
     HttpClientRequest.post("/v1/modules/sandboxes/aws-sign-out").pipe(
       HttpClientRequest.bodyJsonUnsafe({})
     )
-  ).pipe(Effect.mapError(() => new SandboxesWriteFailed({ reason: "network" })))
-  if (response.status === 403) return yield* new SandboxesWriteFailed({ reason: "unauthorized" })
-  if (response.status < 200 || response.status >= 300) return yield* new SandboxesWriteFailed({ reason: "rejected" })
+  ).pipe(Effect.mapError(() => new SandboxesSignOutFailed({ reason: "network" })))
+  if (response.status === 403) return yield* new SandboxesSignOutFailed({ reason: "unauthorized" })
+  if (response.status === 409) {
+    const running = yield* decodeBoundedResponseJson(response, ResetRunning, 1_024).pipe(Effect.option)
+    return yield* new SandboxesSignOutFailed({ reason: Option.isSome(running) ? "reset_running" : "rejected" })
+  }
+  if (response.status < 200 || response.status >= 300) {
+    return yield* new SandboxesSignOutFailed({ reason: "rejected" })
+  }
   return yield* decodeBoundedResponseJson(response, SandboxAwsSession, 4_096).pipe(
-    Effect.mapError(() => new SandboxesWriteFailed({ reason: "rejected" }))
+    Effect.mapError(() => new SandboxesSignOutFailed({ reason: "rejected" }))
   )
 }).pipe(Effect.withSpan("SandboxesClient.signOutAws"))
 

@@ -33,10 +33,10 @@ import {
 import { ShellIcon } from "./internal/shell-icon.js"
 import { StateCard } from "./internal/state-card.js"
 import { fleetHubModule, moduleHref, type ModulePageMount, type ModuleViews, sandboxesModule } from "./modules.js"
-import { SandboxesClientError, SandboxesWriteFailed } from "./sandboxes-client.js"
+import { SandboxesClientError, SandboxesSignOutFailed, SandboxesWriteFailed } from "./sandboxes-client.js"
 import type { SandboxAwsSession, SandboxesCaller, SandboxRequest, SandboxRequests } from "./sandboxes-contract.js"
 
-export { SandboxesClientError, SandboxesWriteFailed }
+export { SandboxesClientError, SandboxesSignOutFailed, SandboxesWriteFailed }
 
 /** Owner writes. Each submits the existing Fleet job kind as the caller. */
 export interface SandboxesModuleWrites {
@@ -50,7 +50,7 @@ export interface SandboxesModuleWrites {
   /** Starts the hub's AWS sign-in, or joins the one waiting, and answers what to approve. */
   readonly startAwsSignIn: Effect.Effect<SandboxAwsSession, SandboxesWriteFailed>
   /** Signs the hub out of AWS, on AWS's side too, and answers the sign-in it now holds. */
-  readonly signOutAws: Effect.Effect<SandboxAwsSession, SandboxesWriteFailed>
+  readonly signOutAws: Effect.Effect<SandboxAwsSession, SandboxesSignOutFailed>
 }
 
 /** Page reads. Each must keep its identity across renders, or the page reads again on every render. */
@@ -464,7 +464,8 @@ const useAws = (reads: SandboxesModuleReads, active: boolean) => {
 
 /**
  * Sign out of AWS beside the signed-in line, after one confirm. A refusal keeps the sheet open and says the hub
- * didn't sign out; success closes it and hands the new sign-in state to `done`.
+ * didn't sign out, or that a reset is running and the hub signs out only after it; success closes it and hands
+ * the new sign-in state to `done`.
  */
 const SignOutAws = ({
   done,
@@ -474,17 +475,19 @@ const SignOutAws = ({
   readonly signOut: SandboxesModuleWrites["signOutAws"]
 }): ReactElement => {
   const [open, setOpen] = useState(false)
-  const [phase, setPhase] = useState<"Idle" | "Sending" | "Failed">("Idle")
+  const [phase, setPhase] = useState<"Idle" | "Sending" | "Failed" | "ResetRunning">("Idle")
   const opener = useRef<HTMLButtonElement | null>(null)
   const send = () => {
     setPhase("Sending")
-    void Effect.runPromiseExit(signOut).then((exit) => {
-      if (Exit.isSuccess(exit)) {
+    void Effect.runPromiseExit(Effect.result(signOut)).then((exit) => {
+      if (Exit.isSuccess(exit) && Result.isSuccess(exit.value)) {
         setPhase("Idle")
         setOpen(false)
-        done(exit.value)
+        done(exit.value.success)
       } else {
-        setPhase("Failed")
+        const resetRunning =
+          Exit.isSuccess(exit) && Result.isFailure(exit.value) && exit.value.failure.reason === "reset_running"
+        setPhase(resetRunning ? "ResetRunning" : "Failed")
       }
     })
   }
@@ -506,11 +509,13 @@ const SignOutAws = ({
           <Sheet.Body className="sandboxes-sheet-body">
             <p className="sandboxes-sheet-lead">
               Spend stops updating, and Release, Retry reset and Request to lift the stop wait until someone signs in
-              again. Any reset already running finishes first.
+              again.
             </p>
-            {phase === "Failed" ? (
+            {phase === "Failed" || phase === "ResetRunning" ? (
               <p className="sandboxes-refusal" role="alert">
-                The hub didn’t sign out. Try again.
+                {phase === "ResetRunning"
+                  ? "A reset is running. Sign out when it finishes."
+                  : "The hub didn’t sign out. Try again."}
               </p>
             ) : null}
           </Sheet.Body>

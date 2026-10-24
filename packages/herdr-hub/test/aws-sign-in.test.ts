@@ -550,6 +550,40 @@ it.layer(NodeServices.layer)("AWS sign-in", (it) => {
       expect(yield* down.signIn.state).toEqual({ _tag: "SignInRequired", reason: "ended" })
     }).pipe(Effect.scoped))
 
+  // A device code still waiting would sign the hub back in as whoever approves it: signing out cancels it.
+  it.effect("signing out cancels a sign-in waiting for its code: the file goes and nothing signs in later", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const calls: Array<Call> = []
+      const { pendingFile, signIn } = yield* signInWith(
+        identityCenter([refused("authorization_pending"), granted()], calls),
+        []
+      )
+      yield* signIn.begin
+      expect((yield* signIn.state)._tag).toBe("SignInPending")
+      expect(yield* signIn.signOut).toEqual({ endedOnAws: true })
+      expect(yield* fs.exists(pendingFile)).toBe(false)
+      const tokenCalls = calls.filter(({ path }) => path === "/token").length
+      yield* TestClock.adjust("1 minute")
+      expect(calls.filter(({ path }) => path === "/token").length).toBe(tokenCalls)
+      expect(yield* signIn.state).toEqual({ _tag: "SignInRequired", reason: "never" })
+    }).pipe(Effect.scoped))
+
+  // The tokens are credentials: once signed out they leave the database and its write-ahead log, not only the row.
+  it.effect("a signed-out token is gone from the database files", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const { directory, signIn } = yield* signedIn([])
+      yield* signIn.signOut
+      const files = (yield* fs.readDirectory(directory)).filter((name) => name.startsWith("aws-sign-in.sqlite"))
+      expect(files.length).toBeGreaterThan(0)
+      for (const name of files) {
+        const bytes = new TextDecoder("latin1").decode(yield* fs.readFile(path.join(directory, name)))
+        expect([name, bytes.includes("access-1"), bytes.includes("refresh-1")]).toEqual([name, false, false])
+      }
+    }).pipe(Effect.scoped))
+
   it.effect("signing out with nothing held calls nothing and changes nothing", () =>
     Effect.gen(function*() {
       const calls: Array<Call> = []

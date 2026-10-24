@@ -311,6 +311,13 @@ export const makeSandboxesModule = (
         )
       const refuse = (status: ModuleRouteFailure["status"], code: string) =>
         Effect.fail(new ModuleRouteFailure({ status, code }))
+      // A reset holds the sign-in until it ends: signing out mid-nuke would leave the account in Cleaning. So
+      // sign-out waits for every reset to end, and refuses when the pool can't be read to tell.
+      const noResetRunning = Effect.fn("SandboxesModule.noResetRunning")(function*(reads: SandboxHostReads) {
+        const pool = yield* reads.overview
+        if (pool._tag !== "Ready") return yield* refuse(503, "unavailable")
+        if (pool.sandboxes.some((card) => card.state._tag === "Cleaning")) return yield* refuse(409, "reset_running")
+      })
       // The AWS sign-in is the owner's: its pending URL and code finish a sign-in, so nothing is read, started or
       // ended for anyone else. Only the owner's press starts one or signs the hub out; no read ever does.
       const awsSignIn = configuration.awsSignIn ?? null
@@ -324,7 +331,7 @@ export const makeSandboxesModule = (
           ? refuse(403, "owner_only")
           : awsSignIn === null
           ? Effect.succeed({ _tag: "NotConfigured" })
-          : (action === "start"
+          : (action === "signOut" ? noResetRunning(mounted.reads) : Effect.void).pipe(Effect.andThen((action === "start"
             ? Effect.asVoid(awsSignIn.begin)
             : action === "signOut"
             ? awsSignIn.signOut.pipe(
@@ -339,7 +346,7 @@ export const makeSandboxesModule = (
               Effect.andThen(awsSignIn.state),
               Effect.map(sessionOf),
               Effect.mapError(() => new ModuleRouteFailure({ status: 503, code: "unavailable" }))
-            )
+            )))
       // Anyone but the owner learns only whether the hub is signed in; an unreadable state is not known.
       const awsSignedIn = (caller: ModuleCaller): Effect.Effect<boolean | null> =>
         caller.owner || mounted._tag === "Unavailable" || awsSignIn === null

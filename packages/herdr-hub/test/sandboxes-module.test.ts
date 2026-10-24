@@ -717,6 +717,39 @@ describe("host-local Sandboxes module", () => {
     )
   })
 
+  // A reset in progress needs the sign-in until it ends: signing out would cut it off mid-nuke and leave the
+  // account in Cleaning. So sign-out is refused while one runs, and when the pool can't be read to tell.
+  it.effect("refuses to sign out while a reset runs, and when the pool can't be read, keeping the token", () => {
+    const { calls, signIn } = fakeSignIn({ _tag: "SignedIn", expiresAt: Date.UTC(2026, 9, 23, 18, 5) })
+    const resetting: SandboxHostReads = {
+      ...fakeReads,
+      overview: Effect.succeed(
+        Schema.decodeUnknownSync(SandboxesOverview)({
+          ...overview,
+          sandboxes: [{ ...overview.sandboxes[0], state: { _tag: "Cleaning", runId: "run-c", step: "nuke" } }]
+        })
+      )
+    }
+    const unreadable: SandboxHostReads = {
+      ...fakeReads,
+      overview: Effect.succeed({ _tag: "Failed", reason: "unavailable" })
+    }
+    return Effect.gen(function*() {
+      const signOut = (reads: SandboxHostReads) =>
+        withModule(
+          host,
+          Effect.result(request("sandboxes/aws-sign-out", "serve", "POST", { owner: true, body: {} })),
+          { awsSignIn: signIn, reads: Effect.succeed(reads) }
+        )
+      const running = yield* signOut(resetting)
+      expect(Result.isFailure(running) && running.failure).toMatchObject({ status: 409, code: "reset_running" })
+      const blind = yield* signOut(unreadable)
+      expect(Result.isFailure(blind) && blind.failure).toMatchObject({ status: 503, code: "unavailable" })
+      expect(calls.filter((call) => call === "signOut")).toEqual([])
+      expect((yield* signIn.state)._tag).toBe("SignedIn")
+    })
+  })
+
   // The owner is an identity, not the hub's node: from a laptop on the tailnet they are still the owner.
   it.effect("lets the owner sign the hub in from another node, and refuses anyone who is not the owner", () => {
     const { calls, signIn } = fakeSignIn({ _tag: "SignInRequired", reason: "never" })

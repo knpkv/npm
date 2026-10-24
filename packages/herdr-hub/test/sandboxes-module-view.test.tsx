@@ -20,6 +20,7 @@ import {
   SandboxesClientError,
   type SandboxesModuleReads,
   type SandboxesModuleWrites,
+  SandboxesSignOutFailed,
   SandboxesWriteFailed
 } from "../src/sandboxes-module-view.js"
 
@@ -1881,8 +1882,8 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       expect(text("[data-aws-signed-in]")).toBe("Signed in to AWS until 18:05")
       const sheet = await openDialog(button("Sign out of AWS"))
       expect(sheet?.querySelector("h2")?.textContent).toBe("Sign the hub out of AWS?")
-      expect(sheet?.textContent).toContain(
-        "Spend stops updating, and Release, Retry reset and Request to lift the stop wait until someone signs in again. Any reset already running finishes first."
+      expect(sheet?.querySelector(".sandboxes-sheet-lead")?.textContent).toBe(
+        "Spend stops updating, and Release, Retry reset and Request to lift the stop wait until someone signs in again."
       )
       expect(signOut).not.toHaveBeenCalled()
       await act(async () => button("Sign out", '[role="dialog"]')?.click())
@@ -1896,7 +1897,7 @@ describe("Sandboxes overview", { concurrent: false }, () => {
     })
 
     it("keeps the sign-out sheet open and says so when the hub didn’t sign out; Cancel changes nothing", async () => {
-      const signOut = vi.fn(() => Effect.fail(new SandboxesWriteFailed({ reason: "network" })))
+      const signOut = vi.fn(() => Effect.fail(new SandboxesSignOutFailed({ reason: "network" })))
       await render(pool([own]), {
         awsSession: Effect.succeed(signedIn),
         writes: allWrites(Effect.succeed(pendingSession), Effect.suspend(signOut))
@@ -1911,6 +1912,23 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       await settle()
       expect(document.querySelector('[role="dialog"]')).toBeNull()
       expect(signOut).toHaveBeenCalledTimes(1)
+      expect(text("[data-aws-signed-in]")).toBe("Signed in to AWS until 18:05")
+    })
+
+    it("says a reset is running when the hub refuses to sign out during one", async () => {
+      await render(pool([own]), {
+        awsSession: Effect.succeed(signedIn),
+        writes: allWrites(
+          Effect.succeed(pendingSession),
+          Effect.fail(new SandboxesSignOutFailed({ reason: "reset_running" }))
+        )
+      })
+      await openDialog(button("Sign out of AWS"))
+      await act(async () => button("Sign out", '[role="dialog"]')?.click())
+      await settle()
+      expect(document.querySelector('[role="dialog"] [role="alert"]')?.textContent).toBe(
+        "A reset is running. Sign out when it finishes."
+      )
       expect(text("[data-aws-signed-in]")).toBe("Signed in to AWS until 18:05")
     })
 
