@@ -1,5 +1,6 @@
 import { DateTime, Option, Schema } from "effect"
 import { fleetJobRecordMaxBytes } from "./limits.js"
+import { PermissionName } from "./permissions.js"
 
 export const JobIdentifier = Schema.String.check(
   Schema.isNonEmpty(),
@@ -685,6 +686,12 @@ export const HostConfiguration = Schema.Struct({
   lanWork: Schema.optionalKey(LanWorkConfiguration),
   allowedUsers: Schema.Array(Schema.String),
   approvalNodes: Schema.Array(Schema.String),
+  /** Permissions per login; absent means every `allowedUsers` login holds every permission. */
+  users: Schema.optionalKey(Schema.Record(Schema.String, Schema.Array(PermissionName))),
+  /** What any fleet host may do; absent means view and submit jobs. Never approve or own. */
+  hosts: Schema.optionalKey(Schema.Array(PermissionName)),
+  /** What the signed-in local user may do; absent means everything but approve and own. Plain loopback only views. */
+  local: Schema.optionalKey(Schema.Array(PermissionName)),
   machines: FleetMachines,
   applyMachines: Schema.Array(FleetHostName),
   checkCommand: Command,
