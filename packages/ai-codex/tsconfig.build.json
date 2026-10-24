@@ -3,10 +3,5 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "tsBuildInfoFile": "node_modules/.cache/tsconfig.build.tsbuildinfo"
-  },
-  "references": [
-    {
-      "path": "../bounded-io/tsconfig.build.json"
-    }
-  ]
+  }
 }

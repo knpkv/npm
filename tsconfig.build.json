@@ -11,7 +11,6 @@
     { "path": "./packages/sandbox-pool/tsconfig.build.json" },
     { "path": "./packages/capability/tsconfig.build.json" },
     { "path": "./packages/rly/tsconfig.build.json" },
-    { "path": "./packages/control-center-sql/tsconfig.build.json" },
-    { "path": "./packages/control-center/tsconfig.build.json" }
+    { "path": "./packages/control-center-sql/tsconfig.build.json" }
   ]
 }
