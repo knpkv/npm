@@ -171,15 +171,19 @@ export interface SandboxPoolFromConfigOptions {
  */
 /**
  * The pool's `cleaning`: a move into Cleaning runs holding the sign-in (so sign-out can't slip between its check
- * and a reset's start) and only while the hub is signed in. Signed out, pending, or a sign-in that can't be read
- * fails as `ResetNeedsSignIn` and writes nothing.
+ * and a reset's start) and only with a usable access token. It asks for the token itself, refreshing it, because
+ * the stored state reads as signed in for an expired token until AWS refuses its refresh. No sign-in, a pending
+ * one, or one that can't be read or refreshed fails as `ResetNeedsSignIn` and writes nothing.
  */
 export const cleaningUnderSignIn =
   (signIn: AwsSignIn) => <A, E, R>(write: Effect.Effect<A, E, R>): Effect.Effect<A, E | ResetNeedsSignIn, R> =>
     signIn.hold(
-      signIn.state.pipe(
-        Effect.map((state) => state._tag === "SignedIn"),
-        Effect.catchTag("AwsSignInUnavailable", () => Effect.succeed(false)),
+      signIn.accessToken.pipe(
+        Effect.as(true),
+        Effect.catchTags({
+          AwsSignInRequired: () => Effect.succeed(false),
+          AwsSignInUnavailable: () => Effect.succeed(false)
+        }),
         Effect.flatMap((signedIn): Effect.Effect<A, E | ResetNeedsSignIn, R> =>
           signedIn ? write : Effect.fail(new ResetNeedsSignIn())
         )

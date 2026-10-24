@@ -6,8 +6,8 @@ import { Effect, Redacted, Schema } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import * as Path from "effect/Path"
-import type { AwsSignIn, AwsSignInState } from "../src/aws-sign-in.js"
-import { AwsSignInUnavailable } from "../src/aws-sign-in.js"
+import type { AwsSignIn } from "../src/aws-sign-in.js"
+import { AwsSignInRequired, AwsSignInUnavailable } from "../src/aws-sign-in.js"
 import {
   cleaningUnderSignIn,
   formatResetInspection,
@@ -212,10 +212,16 @@ it("prints a reset inspection as the plan, the dry run and the budget hold", () 
   )
 })
 
-/** A sign-in in `state`, recording when its hold is taken and released around what runs inside it. */
-const holdingSignIn = (state: Effect.Effect<AwsSignInState, AwsSignInUnavailable>, held: Array<string>): AwsSignIn => ({
-  state,
-  accessToken: Effect.die("no token expected"),
+/**
+ * A sign-in whose stored state reads as signed in, whose `accessToken` answers `token`, and which records when its
+ * hold is taken and released around what runs inside it.
+ */
+const holdingSignIn = (
+  token: Effect.Effect<Redacted.Redacted<string>, AwsSignInRequired | AwsSignInUnavailable>,
+  held: Array<string>
+): AwsSignIn => ({
+  state: Effect.succeed({ _tag: "SignedIn", expiresAt: 1 }),
+  accessToken: token,
   begin: Effect.die("no sign-in expected"),
   signOut: Effect.die("no sign-out expected"),
   hold: (effect) =>
@@ -227,27 +233,24 @@ const holdingSignIn = (state: Effect.Effect<AwsSignInState, AwsSignInUnavailable
   region: "eu-central-1"
 })
 
-// The pool's moves into Cleaning run through this: inside the sign-in's hold, and only while the hub is signed in.
-it.effect("a move into Cleaning runs inside the sign-in's hold, only while signed in; signed out or unreadable refuses", () =>
+// The pool's moves into Cleaning run through this: inside the sign-in's hold, and only with a usable access token.
+// The stored state isn't enough: it reads as signed in for an expired token whose refresh AWS then refuses.
+it.effect("a move into Cleaning runs inside the sign-in's hold only with a usable token; none, or an unreadable one, refuses", () =>
   Effect.gen(function*() {
     const held: Array<string> = []
-    const signedIn = cleaningUnderSignIn(holdingSignIn(Effect.succeed({ _tag: "SignedIn", expiresAt: 1 }), held))
+    const signedIn = cleaningUnderSignIn(holdingSignIn(Effect.succeed(Redacted.make("token")), held))
     expect(yield* signedIn(Effect.sync(() => held.push("write")).pipe(Effect.as("moved")))).toBe("moved")
     expect(held).toEqual(["take", "write", "release"])
-    const refusing: ReadonlyArray<Effect.Effect<AwsSignInState, AwsSignInUnavailable>> = [
-      Effect.succeed({ _tag: "SignInRequired", reason: "ended" }),
-      Effect.succeed({
-        _tag: "SignInPending",
-        verificationUri: "https://portal.example.test",
-        userCode: "A",
-        expiresAt: 1
-      }),
-      Effect.fail(new AwsSignInUnavailable({ operation: "read", detail: "unreadable" }))
-    ]
-    for (const state of refusing) {
+    const refusing: ReadonlyArray<Effect.Effect<Redacted.Redacted<string>, AwsSignInRequired | AwsSignInUnavailable>> =
+      [
+        Effect.fail(new AwsSignInRequired({ pending: false })),
+        Effect.fail(new AwsSignInRequired({ pending: true })),
+        Effect.fail(new AwsSignInUnavailable({ operation: "refresh", detail: "unreachable" }))
+      ]
+    for (const token of refusing) {
       const seen: Array<string> = []
       const failure = yield* Effect.flip(
-        cleaningUnderSignIn(holdingSignIn(state, seen))(Effect.sync(() => seen.push("write")))
+        cleaningUnderSignIn(holdingSignIn(token, seen))(Effect.sync(() => seen.push("write")))
       )
       expect([failure._tag, seen]).toEqual(["ResetNeedsSignIn", ["take", "release"]])
     }

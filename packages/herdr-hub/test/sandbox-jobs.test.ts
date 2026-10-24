@@ -24,6 +24,8 @@ import {
 } from "@knpkv/sandbox-pool"
 import { Cause, DateTime, Duration, Effect, Exit, Fiber, Latch, Logger, Redacted, Schema, Semaphore } from "effect"
 import { TestClock } from "effect/testing"
+import { type AwsSignIn, AwsSignInRequired } from "../src/aws-sign-in.js"
+import { cleaningUnderSignIn } from "../src/sandbox-config.js"
 import {
   BudgetControl,
   BudgetLiftFailed,
@@ -254,6 +256,29 @@ describe("sandbox jobs", () => {
       signedIn = true
       expect(yield* f.pool.sweepOnce).toMatchObject({ expired: 1 })
       expect((yield* f.store.get(accountB)).state._tag).toBe("Available")
+    }))
+
+  // The hub's stored sign-in reads as signed in for an expired token until a refresh is tried; AWS refusing that
+  // refresh means there is no sign-in. The move into Cleaning asks for the token itself, so it sees that.
+  it.effect("an expired token whose refresh is refused rejects a release with the account unchanged, not quarantined", () =>
+    Effect.gen(function*() {
+      const signIn: AwsSignIn = {
+        state: Effect.succeed({ _tag: "SignedIn", expiresAt: 0 }),
+        accessToken: Effect.fail(new AwsSignInRequired({ pending: false })),
+        begin: Effect.die("no sign-in expected"),
+        signOut: Effect.die("no sign-out expected"),
+        hold: (effect) => effect,
+        revoked: () => Effect.void,
+        region: "eu-central-1"
+      }
+      const f = yield* fixture({ cleaning: cleaningUnderSignIn(signIn) })
+      const leased = yield* f.job({ kind: "sandbox.lease" }, "agent-a", "job-1")
+      const refused = yield* Effect.flip(
+        f.job({ kind: "sandbox.release", accountId: leased.accountId }, "agent-a", "job-2")
+      )
+      expect([refused.disposition, refused.detail]).toEqual(["rejected", JSON.stringify({ _tag: "ResetNeedsSignIn" })])
+      expect(yield* f.store.get(leased.accountId)).toEqual(leased)
+      expect(f.calls).toEqual([])
     }))
 
   it.effect("signed out, a reset left in Cleaning waits for the sign-in instead of failing into quarantine", () =>
