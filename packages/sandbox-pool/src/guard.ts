@@ -72,40 +72,71 @@ const queueFull = "not all resources will be enqueued"
 const logFields = (line: string): string => line.replace(/\[[^\]]*\]/g, " ").replace(/"(?:[^"\\]|\\.)*"/g, "\"\"")
 
 /**
- * Resource types whose service has no endpoint in a region, by region: listing them there fails with no such host
- * or an unknown operation, and nothing can exist. The same type is still scanned, and its failures still count, in
- * every other region.
+ * A listing failure that is not a hole in the scan: `types` fail in `region` (every region when null) with an
+ * `error=` matching `cause`, and that failure means nothing of the type can exist there. Any other failure of the
+ * same type, or the same failure elsewhere, still counts.
  */
-const regionGaps = new Map<string, ReadonlySet<string>>([
-  [
-    "eu-central-1",
-    new Set([
-      "BedrockModelCustomizationJob",
+interface ExpectedFailure {
+  readonly region: string | null
+  readonly types: ReadonlySet<string>
+  readonly cause: RegExp
+}
+
+const expectedFailures: ReadonlyArray<ExpectedFailure> = [
+  // No Q Business endpoint in eu-central-1; us-east-1 has one and is still scanned.
+  {
+    region: "eu-central-1",
+    types: new Set([
       "QBusinessApplication",
       "QBusinessDataSource",
       "QBusinessIndex",
       "QBusinessPlugin",
       "QBusinessRetriever",
       "QBusinessWebExperience"
+    ]),
+    cause: /no such host/
+  },
+  // eu-central-1 has no Bedrock model customization API; us-east-1 does.
+  { region: "eu-central-1", types: new Set(["BedrockModelCustomizationJob"]), cause: /UnknownOperationException/ },
+  // Without a Shield Advanced subscription there are no protections. The organization does not deny subscribing,
+  // so the types stay in the scan and only this failure is expected.
+  {
+    region: null,
+    types: new Set(["ShieldProtection", "ShieldProtectionGroup"]),
+    cause: /ResourceNotFoundException: The subscription does not exist/
+  }
+]
+
+/** logfmt `key=value` pairs; a quoted value is consumed whole, so text inside it never reads as another key. */
+const logfmtPair = /(?:^|\s)(\w+)=("(?:[^"\\]|\\.)*"|\S*)/g
+
+/** The line's top-level logfmt fields, quoted values unquoted. Resource listings without these have none. */
+const logfmtFields = (line: string): ReadonlyMap<string, string> =>
+  new Map(
+    Array.from(line.matchAll(logfmtPair), ([, key, value]) => [
+      key ?? "",
+      value !== undefined && value.startsWith("\"") ? value.slice(1, -1) : value ?? ""
     ])
-  ]
-])
+  )
 
-const ownerField = /(?:^|\s)owner=(\S+)/
-const resourceTypeField = /(?:^|\s)resource_type=(\S+)/
-
-/** Whether a log line is a listing of a type in a region where its service does not exist. */
-const inRegionGap = (fields: string): boolean => {
-  const region = ownerField.exec(fields)?.[1]
-  const resourceType = resourceTypeField.exec(fields)?.[1]
-  return region !== undefined && resourceType !== undefined && (regionGaps.get(region)?.has(resourceType) ?? false)
+/** Whether a log line is one of `expectedFailures`, judged by its own owner=, resource_type= and error= fields. */
+const isExpectedFailure = (line: string): boolean => {
+  const fields = logfmtFields(line)
+  const region = fields.get("owner")
+  const resourceType = fields.get("resource_type")
+  const error = fields.get("error")
+  if (region === undefined || resourceType === undefined || error === undefined) return false
+  return expectedFailures.some((expected) =>
+    (expected.region === null || expected.region === region) && expected.types.has(resourceType) &&
+    expected.cause.test(error)
+  )
 }
 
-/** Every line of a run that reports failed discovery, colour codes removed. Region gaps are not failures. */
+/** Every line of a run that reports failed discovery, colour codes removed. Expected failures are not. */
 export const discoveryFailures = (output: string): ReadonlyArray<string> =>
   output.split("\n").map(plainLine).filter((line) => {
     const fields = line.startsWith("{") ? line : logFields(line)
-    if (!line.startsWith("{") && inRegionGap(fields)) return false
+    if (!line.startsWith("{") && isExpectedFailure(line)) return false
     return logLevel.test(fields) || (anyLevel.test(fields) && line.includes(queueFull))
   })
 

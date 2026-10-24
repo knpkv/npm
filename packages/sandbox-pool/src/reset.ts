@@ -95,7 +95,8 @@ export class Nuke extends Context.Service<
 /**
  * Types a pool account cannot hold in any region, so aws-nuke skips them: listing them only fails and would leave
  * every scan incomplete. Each group says why nothing can exist. Never add a type that is merely unreachable or
- * denied to the reset role; a type missing from only some regions belongs in `regionGaps` instead.
+ * denied to the reset role today; a type missing from only some regions, or absent only until someone subscribes,
+ * belongs in guard.ts's `expectedFailures` instead.
  */
 const unavailableResourceTypes = [
   // Timestream for LiveAnalytics takes no new customers.
@@ -134,14 +135,13 @@ const unavailableResourceTypes = [
   // Firewall Manager policies live only in the organization's Firewall Manager admin account, never a pool account.
   "FMSNotificationChannel",
   "FMSPolicy",
-  // The organization's service control policy denies Network Manager to every principal in a pool account.
+  // Network Manager's API lives in us-west-2, outside the region allow-list SCP's allowed regions, and networkmanager
+  // is not among that SCP's global actions, so every principal in a pool account is denied. Changing either list
+  // in infra removes this guarantee.
   "NetworkManagerConnectPeer",
   "NetworkManagerCoreNetwork",
   "NetworkManagerGlobalNetwork",
-  "NetworkManagerNetworkAttachment",
-  // Shield Advanced protections need a subscription a pool account does not have.
-  "ShieldProtection",
-  "ShieldProtectionGroup"
+  "NetworkManagerNetworkAttachment"
 ]
 
 export const renderNukeConfig = (contract: PoolContract, accountId: string): string =>

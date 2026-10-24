@@ -547,27 +547,55 @@ describe("aws-nuke scan coverage", () => {
     "OpsWorksCMServerState",
     "OpsWorksInstance",
     "OpsWorksLayer",
-    "OpsWorksUserProfile",
-    "ShieldProtection",
-    "ShieldProtectionGroup"
+    "OpsWorksUserProfile"
   ]
+  // eu-central-1 has no endpoint for these; us-east-1 lists them and can hold real resources.
+  const regionGapTypes = [
+    "BedrockModelCustomizationJob",
+    "QBusinessApplication",
+    "QBusinessDataSource",
+    "QBusinessIndex",
+    "QBusinessPlugin",
+    "QBusinessRetriever",
+    "QBusinessWebExperience"
+  ]
+  const noHost = "dial tcp: lookup qbusiness.eu-central-1.api.aws: no such host"
+  const noSubscription = "ResourceNotFoundException: The subscription does not exist."
 
   it("excludes every type no pool account can hold, and nothing a region-only gap could hide", () => {
     const excludes: ReadonlyArray<string> = JSON.parse(renderNukeConfig(contract, "111111111111"))["resource-types"]
       .excludes
     for (const type of unavailableEverywhere) expect(excludes).toContain(type)
-    // These exist in us-east-1; only eu-central-1 lacks them, so a global exclude would skip real resources.
-    for (const type of ["BedrockModelCustomizationJob", "QBusinessApplication", "QBusinessIndex"]) {
+    // A global exclude would skip real resources: in us-east-1 for the gaps, anywhere once Shield is subscribed.
+    for (const type of [...regionGapTypes, "ShieldProtection", "ShieldProtectionGroup"]) {
       expect(excludes).not.toContain(type)
     }
   })
 
   it("a type whose service has no endpoint in that region is not an incomplete scan there", () => {
-    const noHost = "dial tcp: lookup qbusiness.eu-central-1.api.aws: no such host"
-    expect(discoveryFailures(listingFailedIn("eu-central-1", "QBusinessApplication", noHost))).toEqual([])
-    expect(
-      discoveryFailures(listingFailedIn("eu-central-1", "BedrockModelCustomizationJob", "UnknownOperationException"))
-    ).toEqual([])
+    for (const type of regionGapTypes) {
+      const cause = type.startsWith("QBusiness") ? noHost : "UnknownOperationException: Unknown Operation"
+      expect(discoveryFailures(listingFailedIn("eu-central-1", type, cause))).toEqual([])
+    }
+  })
+
+  it("a gap type failing for any other reason in that region still stops the reset", () => {
+    const denied = listingFailedIn("eu-central-1", "QBusinessApplication", "AccessDeniedException")
+    expect(discoveryFailures(denied)).toEqual([denied])
+    const bedrockHost = listingFailedIn("eu-central-1", "BedrockModelCustomizationJob", noHost)
+    expect(discoveryFailures(bedrockHost)).toEqual([bedrockHost])
+    // The cause is read from error=, never from msg, which carries text the run does not control.
+    const spoofed =
+      `time="t" level=error msg="listing failed: no such host" error="AccessDeniedException" owner=eu-central-1 resource_type=QBusinessIndex`
+    expect(discoveryFailures(spoofed)).toEqual([spoofed])
+  })
+
+  it("Shield protections are scanned, and only a missing subscription is not an incomplete scan", () => {
+    for (const type of ["ShieldProtection", "ShieldProtectionGroup"]) {
+      expect(discoveryFailures(listingFailedIn("us-east-1", type, noSubscription))).toEqual([])
+      const denied = listingFailedIn("us-east-1", type, "AccessDeniedException")
+      expect(discoveryFailures(denied)).toEqual([denied])
+    }
   })
 
   it("the same type failing where its service exists still stops the reset", () => {
