@@ -37,8 +37,8 @@ import {
 } from "@knpkv/sandbox-pool/aws"
 import { Effect, Path, Schema } from "effect"
 import { HttpClient } from "effect/http"
-import { awsRoleCredentials, makeAwsSignIn } from "./aws-sign-in.js"
-import { makeSandboxPool, runSandboxSweep, withSandboxOperations } from "./sandbox-jobs.js"
+import { awsRoleCredentials, type AwsSignIn, makeAwsSignIn } from "./aws-sign-in.js"
+import { makeSandboxPool, ResetNeedsSignIn, runSandboxSweep, withSandboxOperations } from "./sandbox-jobs.js"
 import { openSandboxDatabase } from "./sandbox-store.js"
 
 export const SandboxPoolMode = Schema.Literals(["off", "observe", "live"])
@@ -169,6 +169,23 @@ export interface SandboxPoolFromConfigOptions {
  * opens the pool's store and the AWS sign-in under `stateDirectory`, in the caller's scope. The caller forks
  * `sweep` in its lifetime and serves `withOperations(base)`, which adds the job kinds in live mode only.
  */
+/**
+ * The pool's `cleaning`: a move into Cleaning runs holding the sign-in (so sign-out can't slip between its check
+ * and a reset's start) and only while the hub is signed in. Signed out, pending, or a sign-in that can't be read
+ * fails as `ResetNeedsSignIn` and writes nothing.
+ */
+export const cleaningUnderSignIn =
+  (signIn: AwsSignIn) => <A, E, R>(write: Effect.Effect<A, E, R>): Effect.Effect<A, E | ResetNeedsSignIn, R> =>
+    signIn.hold(
+      signIn.state.pipe(
+        Effect.map((state) => state._tag === "SignedIn"),
+        Effect.catchTag("AwsSignInUnavailable", () => Effect.succeed(false)),
+        Effect.flatMap((signedIn): Effect.Effect<A, E | ResetNeedsSignIn, R> =>
+          signedIn ? write : Effect.fail(new ResetNeedsSignIn())
+        )
+      )
+    )
+
 export const makeSandboxPoolFromConfig = Effect.fn("SandboxPool.fromConfig")(function*(
   options: SandboxPoolFromConfigOptions
 ) {
@@ -215,8 +232,8 @@ export const makeSandboxPoolFromConfig = Effect.fn("SandboxPool.fromConfig")(fun
     budget: adapters.budget,
     spend: adapters.spend,
     sweep: adapters.registersJobs ? "full" : "spend-only",
-    // Each move into Cleaning holds the sign-in, so sign-out can't slip between its check and a reset's start.
-    cleaning: signIn.hold
+    // Each move into Cleaning holds the sign-in and needs it signed in.
+    cleaning: cleaningUnderSignIn(signIn)
   })
   return {
     mode,

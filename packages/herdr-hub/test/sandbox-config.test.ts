@@ -6,7 +6,10 @@ import { Effect, Redacted, Schema } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import * as Path from "effect/Path"
+import type { AwsSignIn, AwsSignInState } from "../src/aws-sign-in.js"
+import { AwsSignInUnavailable } from "../src/aws-sign-in.js"
 import {
+  cleaningUnderSignIn,
   formatResetInspection,
   makeSandboxPoolFromConfig,
   sandboxPoolAdapters,
@@ -208,3 +211,44 @@ it("prints a reset inspection as the plan, the dry run and the budget hold", () 
     ].join("\n")
   )
 })
+
+/** A sign-in in `state`, recording when its hold is taken and released around what runs inside it. */
+const holdingSignIn = (state: Effect.Effect<AwsSignInState, AwsSignInUnavailable>, held: Array<string>): AwsSignIn => ({
+  state,
+  accessToken: Effect.die("no token expected"),
+  begin: Effect.die("no sign-in expected"),
+  signOut: Effect.die("no sign-out expected"),
+  hold: (effect) =>
+    Effect.sync(() => held.push("take")).pipe(
+      Effect.andThen(effect),
+      Effect.ensuring(Effect.sync(() => held.push("release")))
+    ),
+  revoked: () => Effect.void,
+  region: "eu-central-1"
+})
+
+// The pool's moves into Cleaning run through this: inside the sign-in's hold, and only while the hub is signed in.
+it.effect("a move into Cleaning runs inside the sign-in's hold, only while signed in; signed out or unreadable refuses", () =>
+  Effect.gen(function*() {
+    const held: Array<string> = []
+    const signedIn = cleaningUnderSignIn(holdingSignIn(Effect.succeed({ _tag: "SignedIn", expiresAt: 1 }), held))
+    expect(yield* signedIn(Effect.sync(() => held.push("write")).pipe(Effect.as("moved")))).toBe("moved")
+    expect(held).toEqual(["take", "write", "release"])
+    const refusing: ReadonlyArray<Effect.Effect<AwsSignInState, AwsSignInUnavailable>> = [
+      Effect.succeed({ _tag: "SignInRequired", reason: "ended" }),
+      Effect.succeed({
+        _tag: "SignInPending",
+        verificationUri: "https://portal.example.test",
+        userCode: "A",
+        expiresAt: 1
+      }),
+      Effect.fail(new AwsSignInUnavailable({ operation: "read", detail: "unreadable" }))
+    ]
+    for (const state of refusing) {
+      const seen: Array<string> = []
+      const failure = yield* Effect.flip(
+        cleaningUnderSignIn(holdingSignIn(state, seen))(Effect.sync(() => seen.push("write")))
+      )
+      expect([failure._tag, seen]).toEqual(["ResetNeedsSignIn", ["take", "release"]])
+    }
+  }))

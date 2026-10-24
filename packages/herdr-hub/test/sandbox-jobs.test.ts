@@ -28,6 +28,7 @@ import {
   BudgetControl,
   BudgetLiftFailed,
   makeSandboxPool,
+  ResetNeedsSignIn,
   runSandboxSweep,
   type SandboxPoolServices
 } from "../src/sandbox-jobs.js"
@@ -93,6 +94,13 @@ interface FakeOptions {
   /** The hub's sign-in hold, taken around every move into Cleaning. */
   readonly cleaning?: SandboxPoolServices["cleaning"]
 }
+
+/** A `cleaning` that runs the write only while `signedIn()` says so, as the hub's does. */
+const whileSignedIn =
+  (signedIn: () => boolean) => <A, E, R>(write: Effect.Effect<A, E, R>): Effect.Effect<A, E | ResetNeedsSignIn, R> =>
+    Effect.suspend((): Effect.Effect<A, E | ResetNeedsSignIn, R> =>
+      signedIn() ? write : Effect.fail(new ResetNeedsSignIn())
+    )
 
 /** A pool over the memory store and run log, with fakes that record every AWS-side call. */
 const fixture = (options: FakeOptions = {}, initial: ReadonlyArray<Sandbox> = seedPool(contract)) =>
@@ -201,6 +209,73 @@ describe("sandbox jobs", () => {
       yield* Semaphore.release(hold, 1)
       expect(yield* Fiber.join(sweep)).toMatchObject({ expired: 1 })
       expect((yield* f.store.get(again.accountId)).state._tag).toBe("Available")
+    }))
+
+  // A reset needs the hub's AWS sign-in from its first step. Signed out, the move into Cleaning is refused, so
+  // the account stays as it was instead of starting a reset that would fail and quarantine it.
+  it.effect("signed out, a release, a retry, a sweep expiry and a sweep resume leave the account as it was", () =>
+    Effect.gen(function*() {
+      let signedIn = true
+      const f = yield* fixture({
+        runs: [{ exitCode: 1, output: "boom" }],
+        cleaning: whileSignedIn(() => signedIn)
+      })
+      const quarantined = yield* f.job(
+        { kind: "sandbox.reset", accountId: accountA, reason: "Manual", observed: availableObserved },
+        "owner",
+        "job-1",
+        true
+      )
+      expect(quarantined.state._tag).toBe("Quarantined")
+      const leased = yield* f.job({ kind: "sandbox.lease" }, "agent-a", "job-2")
+      expect(leased.accountId).toBe(accountB)
+      signedIn = false
+      const nukes = f.calls.length
+
+      const release = yield* Effect.flip(f.job({ kind: "sandbox.release", accountId: accountB }, "agent-a", "job-3"))
+      expect([release.disposition, release.detail]).toEqual(["rejected", JSON.stringify({ _tag: "ResetNeedsSignIn" })])
+      expect(yield* f.store.get(accountB)).toEqual(leased)
+      const retry = yield* Effect.flip(
+        f.job(
+          { kind: "sandbox.reset", accountId: accountA, reason: "Retry", observed: observe(quarantined) },
+          "owner",
+          "job-4",
+          true
+        )
+      )
+      expect(retry.detail).toBe(JSON.stringify({ _tag: "ResetNeedsSignIn" }))
+      expect(yield* f.store.get(accountA)).toEqual(quarantined)
+
+      yield* TestClock.adjust(Duration.hours(9))
+      expect(yield* f.pool.sweepOnce).toMatchObject({ expired: 0, resumed: 0, failed: 0 })
+      expect(yield* f.store.get(accountB)).toEqual(leased)
+      expect(f.calls.length).toBe(nukes)
+
+      signedIn = true
+      expect(yield* f.pool.sweepOnce).toMatchObject({ expired: 1 })
+      expect((yield* f.store.get(accountB)).state._tag).toBe("Available")
+    }))
+
+  it.effect("signed out, a reset left in Cleaning waits for the sign-in instead of failing into quarantine", () =>
+    Effect.gen(function*() {
+      let signedIn = false
+      const stuck = Schema.decodeUnknownSync(Sandbox)({
+        accountId: accountA,
+        name: "sandbox-a",
+        state: { _tag: "Cleaning", since: "1970-01-01T00:00:00Z", runId: "job-crashed", reason: "Released" },
+        version: 3
+      })
+      const [, other] = seedPool(contract)
+      const f = yield* fixture(
+        { cleaning: whileSignedIn(() => signedIn) },
+        other === undefined ? [stuck] : [stuck, other]
+      )
+      expect(yield* f.pool.sweepOnce).toMatchObject({ resumed: 0, failed: 0 })
+      expect(yield* f.store.get(accountA)).toEqual(stuck)
+      expect(f.calls).toEqual([])
+      signedIn = true
+      expect(yield* f.pool.sweepOnce).toMatchObject({ resumed: 1 })
+      expect((yield* f.store.get(accountA)).state._tag).toBe("Available")
     }))
 
   it.effect("another actor can neither extend nor release a lease, and nothing is written", () =>
