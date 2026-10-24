@@ -5309,6 +5309,74 @@ esac
     )
   })
 
+  // A script on a fleet host runs under the owner's tailnet login. It can read the dashboard for a proof
+  // and set any Origin header, so only the node keeps it from approving: the hub checks approval nodes
+  // exactly as a peer's approval listener does.
+  it.effect("approves on the hub only from an approval node, even for an allowed login holding a proof", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-serve-approval-node-"))
+    const caller = join(root, "caller-node")
+    writeFileSync(caller, "node-alpha")
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '{"Node":{"StableID":"%s"},"UserProfile":{"LoginName":"owner@example.com"}}\n' "$(cat '${caller}')" ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig: HostConfiguration = {
+      ...config(root),
+      approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:0/" },
+      approvalNodes: ["node-phone"],
+      approvalPort: 0,
+      approvalTls: directTls,
+      applyMachines: ["SER8"],
+      crossHost: true,
+      host: "SER8",
+      port: 0,
+      tailscaleCommand
+    }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const fleet = yield* makeFleetService({ approvalEnabled: true, host: hostConfig.host, operations, store })
+          yield* store.put(pendingRecord("SER8", 0))
+          yield* store.put(pendingRecord("SER8", 1))
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() => startHttpServer(hostConfig, fleet, assets, { terminalConnector: unusedTerminal })),
+            (running) => Effect.promise(running.close)
+          )
+          const serveUrl = yield* Schema.decodeUnknownEffect(Schema.String)(server.serveUrl)
+          const scripted = { host: "ser8.example.test:0", origin: "https://ser8.example.test:0" }
+          const approveAs = (node: string, jobId: string) =>
+            Effect.promise(async () => {
+              writeFileSync(caller, node)
+              const dashboard = await secureRequestBody(`${serveUrl}/v1/dashboard`, scripted)
+              const cookie = dashboard.setCookie?.split(";", 1).join("") ?? ""
+              return secureRequestBody(`${serveUrl}/v1/jobs/${jobId}/approve`, { ...scripted, cookie }, {
+                method: "POST"
+              })
+            })
+
+          const fromFleetHost = yield* approveAs("node-alpha", "ser8-job-00")
+          expect(fromFleetHost.status, fromFleetHost.body).toBe(403)
+          expect((yield* store.get("ser8-job-00"))?.status).toBe("pending_approval")
+
+          const fromPhone = yield* approveAs("node-phone", "ser8-job-01")
+          expect(fromPhone.status, fromPhone.body).toBe(200)
+        }).pipe(Effect.scoped),
+      (store) => Effect.sync(() => store.close())
+    ).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
   it.effect("interrupts active runner work before close completes", () =>
     Effect.gen(function*() {
       const started = yield* Deferred.make<void>()
@@ -7190,6 +7258,8 @@ esac
           const hubConfig: HostConfiguration = {
             ...config(root),
             approvalHub: { host: "SER8", nodeId: "node-ser8", url: `https://127.0.0.1:${approvalPort}/` },
+            // The fixture's caller is the phone, the one node that decides approvals.
+            approvalNodes: ["node-phone"],
             approvalPort,
             approvalTls: directTls,
             applyMachines: ["SER8"],
