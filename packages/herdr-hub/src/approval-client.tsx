@@ -62,11 +62,13 @@ import { makeCodeModuleViews } from "./code-module-view.js"
 import { loadStack, loadStackPlan, loadStacksOverview, type StacksModuleReads } from "./stacks-client.js"
 import { makeStacksModuleViews } from "./stacks-module-view.js"
 import {
+  loadSandboxAwsSession,
   loadSandboxesCaller,
   loadSandboxesOverview,
   loadSandboxRequests,
   loadSandboxRunLog,
   loadSandboxRuns,
+  startSandboxAwsSignIn,
   submitSandboxJob
 } from "./sandboxes-client.js"
 import {
@@ -865,7 +867,8 @@ const sandboxesReads: SandboxesModuleReads = {
   caller: runCodeRead(loadSandboxesCaller),
   runs: (accountId) => runCodeRead(loadSandboxRuns(accountId)),
   runLog: (accountId, runId) => runCodeRead(loadSandboxRunLog(accountId, runId)),
-  requests: runCodeRead(loadSandboxRequests)
+  requests: runCodeRead(loadSandboxRequests),
+  awsSession: runCodeRead(loadSandboxAwsSession)
 }
 /** The hub refuses these unless the page runs on its own node; the page shows them only to that owner. */
 const sandboxesWrites: SandboxesModuleWrites = {
@@ -873,7 +876,8 @@ const sandboxesWrites: SandboxesModuleWrites = {
   extend: (accountId) => runCodeRead(submitSandboxJob({ _tag: "Extend", accountId })).pipe(Effect.asVoid),
   release: (accountId) => runCodeRead(submitSandboxJob({ _tag: "Release", accountId })).pipe(Effect.asVoid),
   retry: (accountId) => runCodeRead(submitSandboxJob({ _tag: "Retry", accountId })).pipe(Effect.asVoid),
-  liftBudget: (accountId) => runCodeRead(submitSandboxJob({ _tag: "BudgetLift", accountId })).pipe(Effect.asVoid)
+  liftBudget: (accountId) => runCodeRead(submitSandboxJob({ _tag: "BudgetLift", accountId })).pipe(Effect.asVoid),
+  startAwsSignIn: runCodeRead(startSandboxAwsSignIn)
 }
 const relayConversations = makeRelayConversations(
   makeRelayClient({ base: "/v1/relay", origin: window.location.href }),

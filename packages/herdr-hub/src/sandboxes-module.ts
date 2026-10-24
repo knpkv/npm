@@ -326,6 +326,14 @@ export const makeSandboxesModule = (
             Effect.map(sessionOf),
             Effect.mapError(() => new ModuleRouteFailure({ status: 503, code: "unavailable" }))
           )
+      // Anyone but the owner learns only whether the hub is signed in; an unreadable state is not known.
+      const awsSignedIn = (caller: ModuleCaller): Effect.Effect<boolean | null> =>
+        caller.sameNode || mounted._tag === "Unavailable" || awsSignIn === null
+          ? Effect.succeed(null)
+          : awsSignIn.state.pipe(
+            Effect.map((state): boolean | null => state._tag === "SignedIn"),
+            Effect.catchTag("AwsSignInUnavailable", () => Effect.succeed(null))
+          )
       /**
        * Before a retry or lift reaches Fleet: the account is in the pool, in the state the job needs, and no
        * request of that kind already waits. Fleet re-checks the bound record when the approved job runs.
@@ -385,11 +393,13 @@ export const makeSandboxesModule = (
             NoQuery,
             SandboxesCaller,
             (_query, caller) =>
-              Effect.succeed({
+              awsSignedIn(caller).pipe(Effect.map((signedIn) => ({
                 login: caller.login,
                 owner: caller.sameNode,
-                signIn: caller.sameNode && pool !== null ? signInOf(pool) : null
-              })
+                signIn: caller.sameNode && pool !== null ? signInOf(pool) : null,
+                poolMode: pool === null ? null : configuration.poolMode ?? null,
+                awsSignedIn: signedIn
+              })))
           ),
           moduleWriteRoute(
             "POST",

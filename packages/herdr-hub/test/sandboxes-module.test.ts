@@ -501,12 +501,16 @@ describe("host-local Sandboxes module", () => {
         expect((yield* request("sandboxes/caller"))?.body).toEqual({
           login: "example-viewer",
           owner: false,
-          signIn: null
+          signIn: null,
+          poolMode: "live",
+          awsSignedIn: null
         })
         expect((yield* request("sandboxes/caller", "serve", "GET", { sameNode: true }))?.body).toEqual({
           login: "example-viewer",
           owner: true,
-          signIn: null
+          signIn: null,
+          poolMode: "live",
+          awsSignedIn: null
         })
       })
     ))
@@ -518,7 +522,9 @@ describe("host-local Sandboxes module", () => {
         expect((yield* request("sandboxes/caller"))?.body).toEqual({
           login: "example-viewer",
           owner: false,
-          signIn: null
+          signIn: null,
+          poolMode: "live",
+          awsSignedIn: null
         })
         expect((yield* request("sandboxes/caller", "serve", "GET", { sameNode: true }))?.body).toEqual({
           login: "example-viewer",
@@ -528,11 +534,46 @@ describe("host-local Sandboxes module", () => {
             ssoSession: "example-session",
             roleName: "ExampleDeveloper",
             region: "eu-central-1"
-          }
+          },
+          poolMode: "live",
+          awsSignedIn: null
         })
       }),
       { pool: signInPool }
     ))
+
+  it.effect("tells a viewer only whether the hub is signed in to AWS, and the pool's mode; never the code", () =>
+    Effect.gen(function*() {
+      const caller = (state: AwsSignInState, sameNode: boolean, poolMode: SandboxPoolMode = "live") =>
+        withModule(
+          host,
+          request("sandboxes/caller", "serve", "GET", { sameNode }),
+          { awsSignIn: fakeSignIn(state).signIn, poolMode }
+        ).pipe(Effect.map((answer) => answer?.body))
+      const pending: AwsSignInState = {
+        _tag: "SignInPending",
+        verificationUri: "https://portal.example.test/start/#/device?user_code=ABCD-EFGH",
+        userCode: "ABCD-EFGH",
+        expiresAt: Date.UTC(2026, 9, 23, 12, 32)
+      }
+      expect(yield* caller({ _tag: "SignedIn", expiresAt: Date.UTC(2026, 9, 23, 18, 5) }, false)).toMatchObject({
+        owner: false,
+        awsSignedIn: true
+      })
+      expect(yield* caller(pending, false)).toEqual({
+        login: "example-viewer",
+        owner: false,
+        signIn: null,
+        poolMode: "live",
+        awsSignedIn: false
+      })
+      expect(yield* caller({ _tag: "SignInRequired", reason: "ended" }, false, "observe")).toMatchObject({
+        poolMode: "observe",
+        awsSignedIn: false
+      })
+      // The owner reads the whole state from aws-session.
+      expect(yield* caller(pending, true)).toMatchObject({ owner: true, awsSignedIn: null })
+    }))
 
   it.effect("serves a run's log and stored line to the hub's own node only, and reads nothing for anyone else", () => {
     const reads: Array<string> = []
@@ -592,6 +633,15 @@ describe("host-local Sandboxes module", () => {
         expect(calls).toEqual([])
         const owner = yield* request("sandboxes/aws-session", "serve", "GET", { sameNode: true })
         expect(owner?.body).toEqual({ _tag: "SignedIn", expiresAt: "2026-10-23T18:05:00.000Z" })
+        const reasons: ReadonlyArray<"never" | "ended"> = ["never", "ended"]
+        for (const reason of reasons) {
+          const required = yield* withModule(
+            host,
+            request("sandboxes/aws-session", "serve", "GET", { sameNode: true }),
+            { awsSignIn: fakeSignIn({ _tag: "SignInRequired", reason }).signIn }
+          )
+          expect(required?.body).toEqual({ _tag: "SignInRequired", reason })
+        }
         const unconfigured = yield* withModule(
           host,
           request("sandboxes/aws-session", "serve", "GET", { sameNode: true }),
@@ -604,7 +654,7 @@ describe("host-local Sandboxes module", () => {
   })
 
   it.effect("starts an AWS sign-in for the hub's own node only and answers what to approve", () => {
-    const { calls, signIn } = fakeSignIn({ _tag: "SignInRequired" })
+    const { calls, signIn } = fakeSignIn({ _tag: "SignInRequired", reason: "never" })
     return withModule(
       host,
       Effect.gen(function*() {
