@@ -1,0 +1,62 @@
+name: Hub apps on macOS and Windows
+# The hub supervises apps as child processes over Unix sockets (macOS) and named pipes (Windows); Check runs
+# them on Linux only. This runs the hub-app, supervisor and hub-paths tests on the other two when anything
+# they exercise changes. Advisory: a paths-filtered workflow does not report on other PRs, so it cannot be
+# a required check.
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths: &paths
+      - packages/hub-app/**
+      - packages/hub-app-fixture/**
+      - packages/browser-pairing/**
+      - packages/herdr-hub/src/apps/**
+      - packages/herdr-hub/src/socket.ts
+      - packages/herdr-hub/test/supervisor.test.ts
+      - packages/herdr-hub/test/apps.test.ts
+      - packages/herdr-hub/test/fixtures/**
+      - packages/herdr-hub/vitest.config.ts
+      - packages/herdr-fleet/src/paths.ts
+      - packages/herdr-fleet/src/sqlite*
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - vitest.workspace-sources.ts
+      - .github/actions/setup/**
+      - .github/workflows/hub-apps-os.yml
+  push:
+    branches: [main]
+    paths: *paths
+
+# Same rule as Check: a newer push to a pull request supersedes its run; main is never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+jobs:
+  hub-apps:
+    name: Hub apps (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    # A cold Socket Firewall install on windows-latest is the slow part; trim once timings are known.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install dependencies
+        uses: ./.github/actions/setup
+        with:
+          node-version: 26.7.0
+      # Tests read workspace sources; only the fixture app the supervisor spawns runs from dist.
+      - run: pnpm --filter "@knpkv/hub-app-fixture..." run build
+      - run: pnpm --filter @knpkv/hub-app run test
+      - run: pnpm --filter @knpkv/herdr-fleet run test test/paths.test.ts
+      - run: pnpm --filter @knpkv/herdr-hub run test test/supervisor.test.ts test/apps.test.ts

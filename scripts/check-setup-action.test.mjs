@@ -26,6 +26,9 @@ const actionText = await runtime.runPromise(
 const install = parseDocument(actionText)
   .toJS()
   .runs.steps.find((step) => step.name === "Install dependencies")
+const firewall = parseDocument(actionText)
+  .toJS()
+  .runs.steps.find((step) => step.name === "Install Socket Firewall")
 
 // Stand-ins for Socket Firewall and pnpm. `sfw` logs its call and runs its arguments; a scenario's `sfw-results`
 // lines decide whether that call fails (the firewall refusing). `pnpm install --offline` is the completeness check:
@@ -113,4 +116,75 @@ test("a firewall refusal fails the step without a completeness check passing it"
   const result = await runInstall({ sfw: [1, 1, 1], offline: [] })
   assert.equal(result.exitCode, ChildProcessSpawner.ExitCode(1))
   assert.deepEqual(result.calls, ["sfw", "sfw", "sfw"])
+})
+
+/** Runs the firewall step for one `runner.os`-`runner.arch` with a `curl` stand-in that logs the URL and fails. */
+const runFirewall = (platform) =>
+  runtime.runPromise(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "setup-firewall-" })
+      const log = path.join(dir, "log")
+      yield* fileSystem.writeFileString(log, "")
+      yield* fileSystem.writeFileString(
+        path.join(dir, "curl"),
+        `#!/usr/bin/env bash\necho "\${@: -1}" >> "$FAKE_LOG"\nexit 22\n`
+      )
+      yield* fileSystem.chmod(path.join(dir, "curl"), 0o755)
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const inheritedPath = yield* Config.String("PATH")
+      const handle = yield* spawner.spawn(
+        ChildProcess.make("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", firewall.run], {
+          cwd: dir,
+          env: {
+            ...firewall.env,
+            RUNNER_PLATFORM: platform,
+            RUNNER_TEMP: dir,
+            GITHUB_PATH: path.join(dir, "github-path"),
+            PATH: `${dir}:${inheritedPath}`,
+            FAKE_LOG: log
+          },
+          extendEnv: true
+        })
+      )
+      const [stdout, exitCode] = yield* Effect.all(
+        [Stream.mkString(Stream.decodeText(handle.stdout)), handle.exitCode],
+        { concurrency: "unbounded" }
+      )
+      const urls = (yield* fileSystem.readFileString(log)).split("\n").filter((line) => line.length > 0)
+      return { exitCode, stdout, urls }
+    }).pipe(Effect.scoped)
+  )
+
+// Each runner OS and architecture downloads its own release asset; the macOS and Windows hub-app legs need them.
+test("the firewall step downloads the binary for the runner's OS and architecture", async () => {
+  const expected = [
+    ["Linux-X64", "sfw-free-linux-x86_64"],
+    ["Linux-ARM64", "sfw-free-linux-arm64"],
+    ["macOS-ARM64", "sfw-free-macos-arm64"],
+    ["macOS-X64", "sfw-free-macos-x86_64"],
+    ["Windows-X64", "sfw-free-windows-x86_64.exe"]
+  ]
+  for (const [platform, asset] of expected) {
+    const result = await runFirewall(platform)
+    assert.notEqual(result.exitCode, ChildProcessSpawner.ExitCode(0))
+    assert.equal(result.urls.length, 1, platform)
+    assert.match(result.urls[0], new RegExp(`/v1\\.15\\.0/${asset.replaceAll(".", "\\.")}$`, "u"), platform)
+  }
+})
+
+// No pinned binary means no install: the step fails rather than running pnpm unfirewalled or unpinned.
+test("a runner without a pinned firewall binary fails the step before downloading anything", async () => {
+  const result = await runFirewall("Windows-ARM64")
+  assert.equal(result.exitCode, ChildProcessSpawner.ExitCode(1))
+  assert.deepEqual(result.urls, [])
+  assert.match(result.stdout, /::error title=No pinned Socket Firewall::/u)
+})
+
+test("every pinned firewall binary is checked against a sha256 before it is put on PATH", () => {
+  const pins = [...firewall.run.matchAll(/sha256=([0-9a-f]+)/gu)].map((match) => match[1])
+  assert.equal(pins.length, 5)
+  for (const pin of pins) assert.match(pin, /^[0-9a-f]{64}$/u)
+  assert.ok(firewall.run.indexOf("--check --strict") < firewall.run.indexOf("GITHUB_PATH"))
 })
