@@ -2,6 +2,12 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.62.0
+
+### Minor Changes
+
+- [#1125](https://github.com/knpkv/npm/pull/1125) [`b473696`](https://github.com/knpkv/npm/commit/b4736960c1017ef0f39b03981389be11c13493da) Thanks [@konopkov](https://github.com/konopkov)! - A reset no longer starts while the hub is signed out of AWS: a release, retry or lift fails as `ResetNeedsSignIn` with the account unchanged, and the sweep waits to expire a lease or resume a reset until the hub is signed in, instead of quarantining the account.
+
 ## 0.61.0
 
 ### Minor Changes
