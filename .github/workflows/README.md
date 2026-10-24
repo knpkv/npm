@@ -133,7 +133,7 @@ Linux only.
 
 - Pull requests to `main` and pushes to `main` that touch `packages/hub-app/**`,
   `packages/hub-app-fixture/**`, `packages/browser-pairing/**`, `packages/herdr-hub/src/apps/**`, `packages/herdr-hub/src/socket.ts`,
-  the hub's supervisor, apps and fixture tests and its `vitest.config.ts`, `packages/herdr-fleet/src/paths.ts` or `sqlite*`,
+  the hub's supervisor, apps and fixture tests and its `vitest.config.ts`, `packages/herdr-fleet/src/paths.ts`, `sqlite*` or `test/paths.test.ts`, rly's `vite*.config.ts` and `scripts/build-assets.ts` (rly is in the fixture's build chain),
   `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `vitest.workspace-sources.ts`, `.github/actions/setup/**`
   or the workflow itself
 - Manual workflow dispatch

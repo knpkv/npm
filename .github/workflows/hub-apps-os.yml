@@ -11,6 +11,8 @@ on:
       - packages/hub-app/**
       - packages/hub-app-fixture/**
       - packages/browser-pairing/**
+      - packages/rly/vite*.config.ts
+      - packages/rly/scripts/build-assets.ts
       - packages/herdr-hub/src/apps/**
       - packages/herdr-hub/src/socket.ts
       - packages/herdr-hub/test/supervisor.test.ts
@@ -18,6 +20,7 @@ on:
       - packages/herdr-hub/test/fixtures/**
       - packages/herdr-hub/vitest.config.ts
       - packages/herdr-fleet/src/paths.ts
+      - packages/herdr-fleet/test/paths.test.ts
       - packages/herdr-fleet/src/sqlite*
       - pnpm-lock.yaml
       - pnpm-workspace.yaml
