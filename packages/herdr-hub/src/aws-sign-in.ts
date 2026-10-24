@@ -14,8 +14,10 @@
  * - **Sign out:** `signOut` cancels a sign-in still waiting for its code, ends the Identity Center session on
  *   AWS's side (the portal's logout), then forgets the token, so the hub can sign in again as another user. A
  *   logout AWS can't be reached for still forgets the token here and says so (`endedOnAws: false`). The database
- *   runs with `secure_delete` and is checkpointed after a sign-out, so no copy of the token stays in the file or
- *   its write-ahead log. Role credentials AWS already issued stay valid there until they expire.
+ *   runs with `secure_delete` and is checkpointed after a sign-out, so SQLite overwrites the token in its file
+ *   and drops it from the write-ahead log. Copies outside SQLite's reach, such as filesystem snapshots, backups
+ *   or blocks a disk remapped, may outlive it. Role credentials AWS already issued stay valid there until they
+ *   expire.
  * - **Credentials:** `awsRoleCredentials` builds a `Credentials` service for one account and permission set.
  *   Without a sign-in it fails as an expired SSO token, so every AWS adapter keeps its typed error
  *   channel. It never starts a sign-in: only a person does, through `begin`. Cached role credentials are used
@@ -101,6 +103,12 @@ export interface AwsSignIn {
    * not be told; the token is forgotten here either way. With nothing held it calls nothing.
    */
   readonly signOut: Effect.Effect<{ readonly endedOnAws: boolean }, AwsSignInUnavailable>
+  /**
+   * Runs `effect` holding the sign-in, one holder at a time. Each write that starts a reset (an account moving
+   * into Cleaning) and the sign-out route, around its no-reset-running check and `signOut`, hold it, so a reset
+   * can't start between that check and the sign-out. Not reentrant: `signOut` itself doesn't take it.
+   */
+  readonly hold: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
   /** Drop `accessToken` if it is still the held one: AWS no longer accepts it. */
   readonly revoked: (accessToken: Redacted.Redacted<string>) => Effect.Effect<void, AwsSignInUnavailable>
   /** The Identity Center region, for the portal. */
@@ -265,6 +273,7 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
     Effect.asVoid
   )
   const refreshing = yield* Semaphore.make(1)
+  const held = yield* Semaphore.make(1)
 
   const client = Effect.gen(function*() {
     const stored = yield* read
@@ -506,7 +515,9 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
       return { endedOnAws }
     }))).pipe(Effect.withSpan("AwsSignIn.signOut"))
 
-  return { state, accessToken, begin, signOut, revoked, region: options.region } satisfies AwsSignIn
+  const hold = <A, E, R>(effect: Effect.Effect<A, E, R>) => Semaphore.withPermit(held, effect)
+
+  return { state, accessToken, begin, signOut, hold, revoked, region: options.region } satisfies AwsSignIn
 })
 
 export interface AwsRoleOptions {

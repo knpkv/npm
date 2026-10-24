@@ -214,7 +214,9 @@ export const makeSandboxPoolFromConfig = Effect.fn("SandboxPool.fromConfig")(fun
     nuke: adapters.nuke,
     budget: adapters.budget,
     spend: adapters.spend,
-    sweep: adapters.registersJobs ? "full" : "spend-only"
+    sweep: adapters.registersJobs ? "full" : "spend-only",
+    // Each move into Cleaning holds the sign-in, so sign-out can't slip between its check and a reset's start.
+    cleaning: signIn.hold
   })
   return {
     mode,
