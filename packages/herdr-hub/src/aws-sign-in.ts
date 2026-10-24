@@ -8,7 +8,8 @@
  *   file's path only, never the code, and polls Identity Center until the code is approved or expires. The
  *   file is deleted when the sign-in ends either way. One sign-in runs at a time.
  * - **Tokens:** the access token is refreshed when under five minutes remain. A refused refresh (the
- *   Identity Center session ended) clears the token: the state is `SignInRequired` until the next sign-in.
+ *   Identity Center session ended) clears the token: the state is `SignInRequired` with reason `ended` until
+ *   the next sign-in (`never` when no sign-in was ever held). The ended mark survives a restart.
  *   A transport failure keeps the token and fails as `AwsSignInUnavailable`.
  * - **Credentials:** `awsRoleCredentials` builds a `Credentials` service for one account and permission set.
  *   Without a sign-in it fails as an expired SSO token, so every AWS adapter keeps its typed error
@@ -51,7 +52,11 @@ export type AwsSignInState =
     readonly userCode: string
     readonly expiresAt: number
   }
-  | { readonly _tag: "SignInRequired" }
+  | {
+    readonly _tag: "SignInRequired"
+    /** `never`: no sign-in was held. `ended`: one was, and its Identity Center session ran out or was refused. */
+    readonly reason: "never" | "ended"
+  }
 
 export interface AwsSignInOptions {
   /** The AWS access portal's start URL. */
@@ -97,7 +102,12 @@ const Token = Schema.Struct({
   refreshToken: Schema.NullOr(Schema.String),
   expiresAt: Schema.Number
 })
-const Stored = Schema.Struct({ client: Schema.NullOr(Client), token: Schema.NullOr(Token) })
+// `ended` remembers that a held session ran out, so a later read says ended rather than never signed in.
+const Stored = Schema.Struct({
+  client: Schema.NullOr(Client),
+  token: Schema.NullOr(Token),
+  ended: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false)))
+})
 type Stored = typeof Stored.Type
 const StoredJson = Schema.fromJsonString(Stored)
 
@@ -203,7 +213,7 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
   }).pipe(
     Effect.flatMap((row) =>
       row === undefined
-        ? Effect.succeed<Stored>({ client: null, token: null })
+        ? Effect.succeed<Stored>({ client: null, token: null, ended: false })
         : Schema.decodeUnknownEffect(Schema.Struct({ value: StoredJson }))(row).pipe(
           Effect.map(({ value }) => value),
           Effect.mapError(fixedFailure("read", "unreadable"))
@@ -303,7 +313,7 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
       if (answer._tag === "Success") {
         const stored = yield* read
         yield* removePending
-        yield* write({ ...stored, token: grant(yield* Clock.currentTimeMillis, answer.success, null) })
+        yield* write({ ...stored, token: grant(yield* Clock.currentTimeMillis, answer.success, null), ended: false })
         return
       }
       const failure = answer.failure
@@ -384,7 +394,7 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
     if (token.expiresAt - now > refreshMargin) return Redacted.make(token.accessToken)
     if (options.readOnly === true) return yield* required
     if (token.refreshToken === null || stored.client === null) {
-      yield* write({ ...stored, token: null })
+      yield* write({ ...stored, token: null, ended: true })
       return yield* required
     }
     const refreshed = yield* exchange(
@@ -401,9 +411,9 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
       Effect.catchTag("Refused", (refused) =>
         // A gone registration takes its tokens with it; begin registers again.
         refused.code === "invalid_client"
-          ? write({ client: null, token: null }).pipe(Effect.andThen(required))
+          ? write({ client: null, token: null, ended: true }).pipe(Effect.andThen(required))
           : sessionEnded.has(refused.code)
-          ? write({ ...stored, token: null }).pipe(Effect.andThen(required))
+          ? write({ ...stored, token: null, ended: true }).pipe(Effect.andThen(required))
           // Throttled or malformed: the session may still be good, so keep it.
           : Effect.fail(new AwsSignInUnavailable({ operation: refused.operation, detail: refused.code })))
     )
@@ -413,21 +423,25 @@ export const makeAwsSignIn = Effect.fn("AwsSignIn.make")(function*(options: AwsS
   })).pipe(Effect.withSpan("AwsSignIn.accessToken"))
 
   const state = Effect.gen(function*() {
-    const token = (yield* read).token
+    const stored = yield* read
+    const token = stored.token
     const now = yield* Clock.currentTimeMillis
     if (token !== null && (token.expiresAt > now || token.refreshToken !== null)) {
       return { _tag: "SignedIn", expiresAt: token.expiresAt } satisfies AwsSignInState
     }
     const held = yield* Ref.get(current)
+    // A token past its end that can't be refreshed is a session that ran out, cleared or not yet.
     return held === null || held.verification === null
-      ? { _tag: "SignInRequired" } satisfies AwsSignInState
+      ? { _tag: "SignInRequired", reason: token !== null || stored.ended ? "ended" : "never" } satisfies AwsSignInState
       : { _tag: "SignInPending", ...held.verification } satisfies AwsSignInState
   })
 
   const revoked = (accessToken: Redacted.Redacted<string>) =>
     refreshing.withPermits(1)(Effect.gen(function*() {
       const stored = yield* read
-      if (stored.token?.accessToken === Redacted.value(accessToken)) yield* write({ ...stored, token: null })
+      if (stored.token?.accessToken === Redacted.value(accessToken)) {
+        yield* write({ ...stored, token: null, ended: true })
+      }
     }))
 
   return { state, accessToken, begin, revoked, region: options.region } satisfies AwsSignIn

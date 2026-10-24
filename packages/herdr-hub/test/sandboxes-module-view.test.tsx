@@ -14,7 +14,7 @@ import { act, type ReactNode, useLayoutEffect } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ModulePageMount } from "../src/modules.js"
-import { SandboxRequests } from "../src/sandboxes-contract.js"
+import { type SandboxAwsSession, SandboxRequests } from "../src/sandboxes-contract.js"
 import {
   makeSandboxesModuleViews,
   SandboxesClientError,
@@ -170,10 +170,11 @@ const buttons = (selector = "button"): Array<string | null> =>
 const button = (label: string, scope = "") =>
   [...document.querySelectorAll<HTMLButtonElement>(`${scope} button`)].find((node) => node.textContent === label)
 
-/** Retry and lift writes for tests that only lease, extend or release. */
-const noRequestWrites: Pick<SandboxesModuleWrites, "retry" | "liftBudget"> = {
+/** Retry, lift and AWS sign-in writes for tests that only lease, extend or release. */
+const noRequestWrites: Pick<SandboxesModuleWrites, "retry" | "liftBudget" | "startAwsSignIn"> = {
   retry: () => Effect.void,
-  liftBudget: () => Effect.void
+  liftBudget: () => Effect.void,
+  startAwsSignIn: Effect.succeed({ _tag: "NotConfigured" })
 }
 
 const settle = () => act(async () => await vi.advanceTimersByTimeAsync(0))
@@ -207,6 +208,9 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       readonly runs?: SandboxesModuleReads["runs"]
       readonly runLog?: SandboxesModuleReads["runLog"]
       readonly requests?: SandboxesModuleReads["requests"]
+      readonly awsSession?: SandboxesModuleReads["awsSession"]
+      readonly poolMode?: "off" | "observe" | "live" | null
+      readonly awsSignedIn?: boolean | null
     } = {}
   ) => {
     if (root === null) {
@@ -219,10 +223,17 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       overview: options.read ?? Effect.succeed(overview),
       caller:
         options.caller ??
-        Effect.succeed({ login: "agent-a", owner: options.owner ?? true, signIn: options.signIn ?? null }),
+        Effect.succeed({
+          login: "agent-a",
+          owner: options.owner ?? true,
+          signIn: options.signIn ?? null,
+          poolMode: options.poolMode === undefined ? "live" : options.poolMode,
+          awsSignedIn: options.awsSignedIn ?? null
+        }),
       runs: options.runs ?? (() => Effect.succeed(quarantineRuns)),
       runLog: options.runLog ?? (() => Effect.succeed(retryLog)),
-      requests: options.requests ?? Effect.succeed(noRequests)
+      requests: options.requests ?? Effect.succeed(noRequests),
+      awsSession: options.awsSession ?? Effect.succeed({ _tag: "NotConfigured" })
     }
     const module = makeSandboxesModuleViews({
       reads,
@@ -867,7 +878,9 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       ready([
         leased("ephemeral-01", "999999999990", "agent-b", "2026-10-17T09:20:00.000Z", "2026-10-17T17:20:00.000Z")
       ]),
-      { caller: Effect.succeed({ login: "agent-b", owner: true, signIn: null }) }
+      {
+        caller: Effect.succeed({ login: "agent-b", owner: true, signIn: null, poolMode: "live", awsSignedIn: null })
+      }
     )
     expect(buttons('[data-account="ephemeral-01"] button')).toEqual(["Copy", "Extend", "Release"])
   })
@@ -1122,10 +1135,11 @@ describe("Sandboxes overview", { concurrent: false }, () => {
   it("never paints the last run's log or stored line on another run while its own log is read", async () => {
     const reads: SandboxesModuleReads = {
       overview: Effect.succeed(ready([quarantinedCard(nukeBlocker)])),
-      caller: Effect.succeed({ login: "agent-a", owner: true, signIn: null }),
+      caller: Effect.succeed({ login: "agent-a", owner: true, signIn: null, poolMode: "live", awsSignedIn: null }),
       runs: () => Effect.succeed(quarantineRuns),
       runLog: (_accountId, runId) => (runId === "retry-1248" ? Effect.succeed(retryLog) : Effect.never),
-      requests: Effect.succeed(noRequests)
+      requests: Effect.succeed(noRequests),
+      awsSession: Effect.succeed({ _tag: "NotConfigured" })
     }
     const module = makeSandboxesModuleViews({ reads, writes: null, timeZone: "UTC" })
     const mount: ModulePageMount = { active: true, navigate: () => undefined, closeSelection: () => undefined }
@@ -1249,7 +1263,8 @@ describe("Sandboxes overview", { concurrent: false }, () => {
         extend: () => Effect.void,
         release: () => Effect.void,
         retry,
-        liftBudget: () => Effect.void
+        liftBudget: () => Effect.void,
+        startAwsSignIn: noRequestWrites.startAwsSignIn
       }
     })
     expect(text("[data-request-note]")).toBe("Starts a fresh run. Goes to Fleet / Approvals first.")
@@ -1309,7 +1324,8 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       extend: () => Effect.void,
       release: () => Effect.void,
       retry: () => Effect.void,
-      liftBudget
+      liftBudget,
+      startAwsSignIn: noRequestWrites.startAwsSignIn
     }
     await render(ready([quarantinedCard(budgetBlocker)]), { page: "account", search: { id: "999999999991" }, writes })
     expect(button("Retry reset")).toBeUndefined()
@@ -1775,6 +1791,191 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       ])
       // The blocker has its own section on this page; the failed step does not repeat it.
       expect(steps?.querySelector("[data-step-blocker]")).toBeNull()
+    })
+  })
+
+  describe("AWS sign-in", () => {
+    const pendingSession: SandboxAwsSession = {
+      _tag: "SignInPending",
+      verificationUri: "https://portal.example.test/start/#/device?user_code=ABCD-EFGH",
+      userCode: "ABCD-EFGH",
+      expiresAt: DateTime.makeUnsafe("2026-10-17T13:15:00.000Z")
+    }
+    const signedIn: SandboxAwsSession = {
+      _tag: "SignedIn",
+      expiresAt: DateTime.makeUnsafe("2026-10-17T18:05:00.000Z")
+    }
+    const verificationUri = "https://portal.example.test/start/#/device?user_code=ABCD-EFGH"
+    const spent = (usd: number) => ({ usd, asOf: DateTime.makeUnsafe("2026-10-17T12:50:00.000Z").epochMilliseconds })
+    const own = leased(
+      "ephemeral-01",
+      "999999999990",
+      "agent-a",
+      "2026-10-17T09:20:00.000Z",
+      "2026-10-17T17:20:00.000Z"
+    )
+    const quarantined = quarantinedCard(nukeBlocker)
+    const stopped = card({
+      accountId: "999999999992",
+      name: "ephemeral-03",
+      label: null,
+      state: { _tag: "Quarantined", runId: "run-stop", step: null, blocker: budgetBlocker }
+    })
+    const pool = (sandboxes: ReadonlyArray<SandboxCardType>) => ({
+      ...ready(sandboxes),
+      spendLimits: { alarm: 20, stop: 50 }
+    })
+    const allWrites = (startAwsSignIn: SandboxesModuleWrites["startAwsSignIn"]): SandboxesModuleWrites => ({
+      lease: Effect.void,
+      extend: () => Effect.void,
+      release: () => Effect.void,
+      retry: () => Effect.void,
+      liftBudget: () => Effect.void,
+      startAwsSignIn
+    })
+    const card$ = () => document.querySelector('[role="status"][aria-label="AWS sign-in"]')
+    const describedBy = (label: string) =>
+      [...document.querySelectorAll<HTMLButtonElement>("button")]
+        .filter((node) => node.textContent === label)
+        .map((node) => [node.disabled, node.getAttribute("aria-describedby")])
+
+    it("asks the owner to sign in, shows no spend, and holds back what needs AWS in live mode", async () => {
+      await render(pool([own, quarantined, stopped, available("ephemeral-04", "999999999993", null)]), {
+        awsSession: Effect.succeed({ _tag: "SignInRequired", reason: "never" }),
+        writes: allWrites(Effect.succeed(pendingSession))
+      })
+      expect(card$()?.querySelector(".stacks-state-eyebrow")?.textContent).toBe("Not signed in")
+      expect(card$()?.querySelector("h2")?.textContent).toBe("Sign in to AWS to read spend.")
+      expect(card$()?.querySelector("p:not(.stacks-state-eyebrow)")?.textContent).toBe(
+        "The hub signs in to the management account itself; nothing on this computer is used."
+      )
+      expect(button("Sign in to AWS")?.disabled).toBe(false)
+      const why = document.querySelector("[data-aws-first]")
+      expect(why?.textContent).toBe("Sign in to AWS first: Release, Retry reset and Request to lift the stop need it.")
+      const id = why?.id ?? ""
+      expect(id).not.toBe("")
+      expect(describedBy("Release")).toEqual([[true, id]])
+      expect(describedBy("Request to lift the stop")).toEqual([[true, id]])
+      expect(describedBy("Extend")).toEqual([[false, null]])
+      expect(describedBy("Lease an account")).toEqual([[false, null]])
+    })
+
+    it("holds back Retry reset on the account page the same way, live and signed out or in observe mode", async () => {
+      const cases: ReadonlyArray<readonly ["live" | "observe", SandboxAwsSession, string]> = [
+        ["live", { _tag: "SignInRequired", reason: "never" }, "[data-aws-first]"],
+        ["observe", signedIn, "[data-observe-mode]"]
+      ]
+      for (const [poolMode, session, marker] of cases) {
+        await render(pool([quarantined]), {
+          page: "account",
+          search: { id: "999999999991" },
+          poolMode,
+          awsSession: Effect.succeed(session),
+          writes: allWrites(Effect.succeed(pendingSession))
+        })
+        const id = document.querySelector(marker)?.id ?? ""
+        expect(id, poolMode).not.toBe("")
+        expect(describedBy("Retry reset"), poolMode).toEqual([[true, id]])
+        await act(async () => root?.unmount())
+        root = null
+        document.body.replaceChildren()
+      }
+    })
+
+    it("starts a sign-in on the owner’s press, shows the code and a link, and polls every 5 s until signed in", async () => {
+      let session: SandboxAwsSession = { _tag: "SignInRequired", reason: "never" }
+      const reads = vi.fn(() => session)
+      const start = vi.fn(() => {
+        session = pendingSession
+        return pendingSession
+      })
+      await render(pool([own]), {
+        awsSession: Effect.sync(reads),
+        writes: allWrites(Effect.sync(start))
+      })
+      await act(async () => button("Sign in to AWS")?.click())
+      await settle()
+      expect(start).toHaveBeenCalledTimes(1)
+      expect(card$()?.querySelector(".stacks-state-eyebrow")?.textContent).toBe("Waiting for you")
+      expect(card$()?.querySelector("h2")?.textContent).toBe("Finish signing in to AWS.")
+      expect(card$()?.textContent).toContain(
+        "Open the sign-in page, check the code matches and approve. It expires at 13:15."
+      )
+      expect(card$()?.querySelector("[data-aws-code]")?.textContent).toBe("ABCD-EFGH")
+      const link = [...(card$()?.querySelectorAll<HTMLAnchorElement>("a") ?? [])].find(
+        (node) => node.textContent === "Open sign-in page"
+      )
+      expect(link?.getAttribute("href")).toBe(verificationUri)
+      expect(link?.getAttribute("target")).toBe("_blank")
+      expect(link?.getAttribute("rel")).toBe("noopener noreferrer")
+      expect(button("Sign in to AWS")).toBeUndefined()
+      const before = reads.mock.calls.length
+      await act(async () => await vi.advanceTimersByTimeAsync(5_000))
+      expect(reads.mock.calls.length).toBe(before + 1)
+      session = signedIn
+      await act(async () => await vi.advanceTimersByTimeAsync(5_000))
+      expect(card$()).toBeNull()
+      expect(text("[data-aws-signed-in]")).toBe("Signed in to AWS until 18:05")
+      expect(document.querySelector("[data-aws-first]")).toBeNull()
+      expect(describedBy("Release")).toEqual([[false, null]])
+      // Signed in: back to the page’s own 30 s cadence.
+      const settled = reads.mock.calls.length
+      await act(async () => await vi.advanceTimersByTimeAsync(25_000))
+      expect(reads.mock.calls.length).toBe(settled)
+    })
+
+    it("stops polling every 5 s after 10 minutes of waiting", async () => {
+      const reads = vi.fn(() => pendingSession)
+      await render(pool([own]), { awsSession: Effect.sync(reads), writes: allWrites(Effect.succeed(pendingSession)) })
+      await act(async () => await vi.advanceTimersByTimeAsync(600_000))
+      const after = reads.mock.calls.length
+      expect(after).toBeGreaterThanOrEqual(120)
+      await act(async () => await vi.advanceTimersByTimeAsync(25_000))
+      expect(reads.mock.calls.length).toBe(after)
+    })
+
+    it("says an ended sign-in ended, and marks the spend it read last as last known", async () => {
+      await render(pool([{ ...available("ephemeral-02", "999999999991", null), spend: spent(7.4) }]), {
+        awsSession: Effect.succeed({ _tag: "SignInRequired", reason: "ended" }),
+        writes: allWrites(Effect.succeed(pendingSession))
+      })
+      expect(card$()?.querySelector(".stacks-state-eyebrow")?.textContent).toBe("Signed out")
+      expect(card$()?.querySelector("h2")?.textContent).toBe("The AWS sign-in ended.")
+      expect(card$()?.textContent).toContain("Sign in again to read spend.")
+      expect(button("Sign in to AWS")?.disabled).toBe(false)
+      expect(text("[data-spend-old]")).toBe("Last known at 12:50")
+    })
+
+    it("tells a viewer who signs in, with no button and no read of the sign-in", async () => {
+      const reads = vi.fn(() => pendingSession)
+      await render(pool([available("ephemeral-02", "999999999991", null)]), {
+        owner: false,
+        awsSignedIn: false,
+        awsSession: Effect.sync(reads)
+      })
+      expect(card$()?.querySelector("h2")?.textContent).toBe("Sign in to AWS to read spend.")
+      expect(card$()?.textContent).toContain("The owner signs the hub in to AWS.")
+      expect(button("Sign in to AWS")).toBeUndefined()
+      expect(reads).not.toHaveBeenCalled()
+    })
+
+    it("in observe mode says so once and disables every job up front, pointing each at that line", async () => {
+      await render(pool([available("ephemeral-01", "999999999990", null), quarantined, stopped]), {
+        poolMode: "observe",
+        awsSession: Effect.succeed(signedIn),
+        signIn,
+        writes: allWrites(Effect.succeed(pendingSession))
+      })
+      expect(text("[data-aws-signed-in]")).toBe("Signed in to AWS until 18:05")
+      const why = document.querySelector("[data-observe-mode]")
+      expect(why?.textContent).toBe("The pool is in observe mode: it reads spend and runs no jobs.")
+      const id = why?.id ?? ""
+      expect(id).not.toBe("")
+      expect(describedBy("Lease an account")).toEqual([[true, id]])
+      expect(describedBy("Request to lift the stop")).toEqual([[true, id]])
+      expect(
+        [...document.querySelectorAll("a")].filter((node) => node.textContent === "Open console").length
+      ).toBeGreaterThan(0)
     })
   })
 })

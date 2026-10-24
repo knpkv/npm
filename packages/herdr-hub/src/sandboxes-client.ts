@@ -14,7 +14,13 @@ import {
 import { Effect, Schema } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
-import { SandboxesCaller, SandboxJobOrder, SandboxJobSubmitted, SandboxRequests } from "./sandboxes-contract.js"
+import {
+  SandboxAwsSession,
+  SandboxesCaller,
+  SandboxJobOrder,
+  SandboxJobSubmitted,
+  SandboxRequests
+} from "./sandboxes-contract.js"
 
 /** The overview read failed before a pool payload arrived. */
 export class SandboxesClientError extends Schema.TaggedError<SandboxesClientError>()("SandboxesClientError", {
@@ -86,6 +92,29 @@ export const loadSandboxRunLog = (accountId: SandboxCard["accountId"], runId: Sa
 export const loadSandboxRequests = readJson("/v1/modules/sandboxes/requests", SandboxRequests, 262_144).pipe(
   Effect.withSpan("SandboxesClient.loadRequests")
 )
+
+/** The hub's AWS sign-in. The hub answers its own node only; anyone else gets a status failure. */
+export const loadSandboxAwsSession = readJson("/v1/modules/sandboxes/aws-session", SandboxAwsSession, 4_096).pipe(
+  Effect.withSpan("SandboxesClient.loadAwsSession")
+)
+
+/**
+ * Starts the hub's AWS sign-in, or joins the one already waiting, and answers what to approve. Same origin, body
+ * `{}`. 403 is the owner rule; any other refusal is `rejected`, and a lost answer may have started one.
+ */
+export const startSandboxAwsSignIn = Effect.gen(function*() {
+  const client = yield* HttpClient.HttpClient
+  const response = yield* client.execute(
+    HttpClientRequest.post("/v1/modules/sandboxes/aws-sign-in").pipe(
+      HttpClientRequest.bodyJsonUnsafe({})
+    )
+  ).pipe(Effect.mapError(() => new SandboxesWriteFailed({ reason: "network" })))
+  if (response.status === 403) return yield* new SandboxesWriteFailed({ reason: "unauthorized" })
+  if (response.status < 200 || response.status >= 300) return yield* new SandboxesWriteFailed({ reason: "rejected" })
+  return yield* decodeBoundedResponseJson(response, SandboxAwsSession, 4_096).pipe(
+    Effect.mapError(() => new SandboxesWriteFailed({ reason: "network" }))
+  )
+}).pipe(Effect.withSpan("SandboxesClient.startAwsSignIn"))
 
 /**
  * Submits one job from this page. The browser sends its own origin; the hub accepts it only from its own node.
