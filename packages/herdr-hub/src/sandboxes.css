@@ -249,6 +249,14 @@
     margin: 0;
   }
 
+  /* Page 21 state 8: the signed-in line and Sign out of AWS share a row, wrapping under it on a phone. */
+  .sandboxes-aws-signed-in {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--rly-space-8);
+  }
+
   .sandboxes-aws-pending {
     display: flex;
     flex-wrap: wrap;

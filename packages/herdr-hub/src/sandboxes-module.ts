@@ -311,21 +311,35 @@ export const makeSandboxesModule = (
         )
       const refuse = (status: ModuleRouteFailure["status"], code: string) =>
         Effect.fail(new ModuleRouteFailure({ status, code }))
-      // The AWS sign-in is the owner's: its pending URL and code finish a sign-in, so nothing is read or
-      // started for anyone else. Only the owner's press starts one; no read ever does.
+      // The AWS sign-in is the owner's: its pending URL and code finish a sign-in, so nothing is read, started or
+      // ended for anyone else. Only the owner's press starts one or signs the hub out; no read ever does.
       const awsSignIn = configuration.awsSignIn ?? null
-      const awsSession = (caller: ModuleCaller, start: boolean): Effect.Effect<SandboxAwsSession, ModuleRouteFailure> =>
+      const awsSession = (
+        caller: ModuleCaller,
+        action: "read" | "start" | "signOut"
+      ): Effect.Effect<SandboxAwsSession, ModuleRouteFailure> =>
         mounted._tag === "Unavailable"
           ? Effect.succeed(mounted)
           : !caller.owner
           ? refuse(403, "owner_only")
           : awsSignIn === null
           ? Effect.succeed({ _tag: "NotConfigured" })
-          : (start ? Effect.asVoid(awsSignIn.begin) : Effect.void).pipe(
-            Effect.andThen(awsSignIn.state),
-            Effect.map(sessionOf),
-            Effect.mapError(() => new ModuleRouteFailure({ status: 503, code: "unavailable" }))
-          )
+          : (action === "start"
+            ? Effect.asVoid(awsSignIn.begin)
+            : action === "signOut"
+            ? awsSignIn.signOut.pipe(
+              Effect.tap(({ endedOnAws }) =>
+                endedOnAws
+                  ? Effect.void
+                  : Effect.logWarning("AWS sign-out: AWS could not be told; the hub forgot its token")
+              ),
+              Effect.asVoid
+            )
+            : Effect.void).pipe(
+              Effect.andThen(awsSignIn.state),
+              Effect.map(sessionOf),
+              Effect.mapError(() => new ModuleRouteFailure({ status: 503, code: "unavailable" }))
+            )
       // Anyone but the owner learns only whether the hub is signed in; an unreadable state is not known.
       const awsSignedIn = (caller: ModuleCaller): Effect.Effect<boolean | null> =>
         caller.owner || mounted._tag === "Unavailable" || awsSignIn === null
@@ -379,14 +393,22 @@ export const makeSandboxesModule = (
           moduleReadRoute("/runs", SandboxRunsQuery, SandboxRuns, runs),
           moduleReadRoute("/run-log", SandboxRunLogQuery, SandboxRunLog, runLog),
           moduleReadRoute("/requests", NoQuery, SandboxRequests, () => requests),
-          moduleReadRoute("/aws-session", NoQuery, SandboxAwsSession, (_query, caller) => awsSession(caller, false)),
+          moduleReadRoute("/aws-session", NoQuery, SandboxAwsSession, (_query, caller) => awsSession(caller, "read")),
           moduleWriteRoute(
             "POST",
             "/aws-sign-in",
             NoQuery,
             NoBody,
             SandboxAwsSession,
-            (_body, _query, caller) => awsSession(caller, true)
+            (_body, _query, caller) => awsSession(caller, "start")
+          ),
+          moduleWriteRoute(
+            "POST",
+            "/aws-sign-out",
+            NoQuery,
+            NoBody,
+            SandboxAwsSession,
+            (_body, _query, caller) => awsSession(caller, "signOut")
           ),
           moduleReadRoute(
             "/caller",

@@ -89,7 +89,7 @@ class OriginRefused extends Schema.TaggedError<OriginRefused>()("OriginRefused",
 
 /** An AWS sign-in whose state the test sets; `begin` moves it to pending and is counted, as are state reads. */
 const fakeSignIn = (initial: AwsSignInState) => {
-  const calls: Array<"state" | "begin"> = []
+  const calls: Array<"state" | "begin" | "signOut"> = []
   let current = initial
   const signIn: AwsSignIn = {
     state: Effect.sync(() => {
@@ -106,6 +106,11 @@ const fakeSignIn = (initial: AwsSignInState) => {
         expiresAt: Date.UTC(2026, 9, 23, 12, 32)
       }
       return { ended: Effect.void }
+    }),
+    signOut: Effect.sync(() => {
+      calls.push("signOut")
+      current = { _tag: "SignInRequired", reason: "ended" }
+      return { endedOnAws: true }
     }),
     revoked: () => Effect.void,
     region: "eu-central-1"
@@ -673,6 +678,40 @@ describe("host-local Sandboxes module", () => {
           expiresAt: "2026-10-23T12:32:00.000Z"
         })
         expect(calls).toEqual(["begin", "state"])
+      }),
+      { awsSignIn: signIn }
+    )
+  })
+
+  // Signing out lets the owner sign the hub in again as another AWS user; nobody else may end the hub's sign-in.
+  it.effect("signs the hub out of AWS for the owner only, and answers that a sign-in is required", () => {
+    const { calls, signIn } = fakeSignIn({ _tag: "SignedIn", expiresAt: Date.UTC(2026, 9, 23, 18, 5) })
+    return withModule(
+      host,
+      Effect.gen(function*() {
+        const viewer = yield* Effect.result(
+          request("sandboxes/aws-sign-out", "serve", "POST", { owner: false, body: {} })
+        )
+        expect(Result.isFailure(viewer) && viewer.failure).toMatchObject({ status: 403, code: "owner_only" })
+        expect(calls).toEqual([])
+        const crossOrigin = yield* Effect.result(
+          request("sandboxes/aws-sign-out", "serve", "POST", {
+            owner: true,
+            body: {},
+            sameOrigin: Effect.fail(new OriginRefused())
+          })
+        )
+        expect(Result.isFailure(crossOrigin) && crossOrigin.failure._tag).toBe("OriginRefused")
+        expect(calls).toEqual([])
+        const signedOut = yield* request("sandboxes/aws-sign-out", "serve", "POST", { owner: true, body: {} })
+        expect(signedOut?.body).toEqual({ _tag: "SignInRequired", reason: "ended" })
+        expect(calls).toEqual(["signOut", "state"])
+        const unconfigured = yield* withModule(
+          host,
+          request("sandboxes/aws-sign-out", "serve", "POST", { owner: true, body: {} }),
+          { awsSignIn: null }
+        )
+        expect(unconfigured?.body).toEqual({ _tag: "NotConfigured" })
       }),
       { awsSignIn: signIn }
     )

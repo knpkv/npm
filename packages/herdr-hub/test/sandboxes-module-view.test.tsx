@@ -171,10 +171,11 @@ const button = (label: string, scope = "") =>
   [...document.querySelectorAll<HTMLButtonElement>(`${scope} button`)].find((node) => node.textContent === label)
 
 /** Retry, lift and AWS sign-in writes for tests that only lease, extend or release. */
-const noRequestWrites: Pick<SandboxesModuleWrites, "retry" | "liftBudget" | "startAwsSignIn"> = {
+const noRequestWrites: Pick<SandboxesModuleWrites, "retry" | "liftBudget" | "startAwsSignIn" | "signOutAws"> = {
   retry: () => Effect.void,
   liftBudget: () => Effect.void,
-  startAwsSignIn: Effect.succeed({ _tag: "NotConfigured" })
+  startAwsSignIn: Effect.succeed({ _tag: "NotConfigured" }),
+  signOutAws: Effect.succeed({ _tag: "NotConfigured" })
 }
 
 const settle = () => act(async () => await vi.advanceTimersByTimeAsync(0))
@@ -1264,7 +1265,8 @@ describe("Sandboxes overview", { concurrent: false }, () => {
         release: () => Effect.void,
         retry,
         liftBudget: () => Effect.void,
-        startAwsSignIn: noRequestWrites.startAwsSignIn
+        startAwsSignIn: noRequestWrites.startAwsSignIn,
+        signOutAws: noRequestWrites.signOutAws
       }
     })
     expect(text("[data-request-note]")).toBe("Starts a fresh run. Goes to Fleet / Approvals first.")
@@ -1325,7 +1327,8 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       release: () => Effect.void,
       retry: () => Effect.void,
       liftBudget,
-      startAwsSignIn: noRequestWrites.startAwsSignIn
+      startAwsSignIn: noRequestWrites.startAwsSignIn,
+      signOutAws: noRequestWrites.signOutAws
     }
     await render(ready([quarantinedCard(budgetBlocker)]), { page: "account", search: { id: "999999999991" }, writes })
     expect(button("Retry reset")).toBeUndefined()
@@ -1825,13 +1828,17 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       ...ready(sandboxes),
       spendLimits: { alarm: 20, stop: 50 }
     })
-    const allWrites = (startAwsSignIn: SandboxesModuleWrites["startAwsSignIn"]): SandboxesModuleWrites => ({
+    const allWrites = (
+      startAwsSignIn: SandboxesModuleWrites["startAwsSignIn"],
+      signOutAws: SandboxesModuleWrites["signOutAws"] = Effect.succeed({ _tag: "SignInRequired", reason: "ended" })
+    ): SandboxesModuleWrites => ({
       lease: Effect.void,
       extend: () => Effect.void,
       release: () => Effect.void,
       retry: () => Effect.void,
       liftBudget: () => Effect.void,
-      startAwsSignIn
+      startAwsSignIn,
+      signOutAws
     })
     const card$ = () => document.querySelector('[role="status"][aria-label="AWS sign-in"]')
     const describedBy = (label: string) =>
@@ -1858,6 +1865,69 @@ describe("Sandboxes overview", { concurrent: false }, () => {
       expect(describedBy("Request to lift the stop")).toEqual([[true, id]])
       expect(describedBy("Extend")).toEqual([[false, null]])
       expect(describedBy("Lease an account")).toEqual([[false, null]])
+    })
+
+    // Page 21, states 8 and 9: the owner signs the hub out from beside the signed-in line, after one confirm.
+    it("signs the hub out of AWS for the owner after a confirm, then asks for a sign-in again", async () => {
+      let session: SandboxAwsSession = signedIn
+      const signOut = vi.fn(() => {
+        session = { _tag: "SignInRequired", reason: "ended" }
+        return session
+      })
+      await render(pool([own]), {
+        awsSession: Effect.sync(() => session),
+        writes: allWrites(Effect.succeed(pendingSession), Effect.sync(signOut))
+      })
+      expect(text("[data-aws-signed-in]")).toBe("Signed in to AWS until 18:05")
+      const sheet = await openDialog(button("Sign out of AWS"))
+      expect(sheet?.querySelector("h2")?.textContent).toBe("Sign the hub out of AWS?")
+      expect(sheet?.textContent).toContain(
+        "Spend stops updating, and Release, Retry reset and Request to lift the stop wait until someone signs in again. Any reset already running finishes first."
+      )
+      expect(signOut).not.toHaveBeenCalled()
+      await act(async () => button("Sign out", '[role="dialog"]')?.click())
+      await settle()
+      expect(signOut).toHaveBeenCalledTimes(1)
+      expect(document.querySelector('[role="dialog"]')).toBeNull()
+      expect(card$()?.querySelector(".stacks-state-eyebrow")?.textContent).toBe("Signed out")
+      expect(card$()?.querySelector("h2")?.textContent).toBe("The AWS sign-in ended.")
+      expect(document.querySelector("[data-aws-signed-in]")).toBeNull()
+      expect(button("Sign out of AWS")).toBeUndefined()
+    })
+
+    it("keeps the sign-out sheet open and says so when the hub didn’t sign out; Cancel changes nothing", async () => {
+      const signOut = vi.fn(() => Effect.fail(new SandboxesWriteFailed({ reason: "network" })))
+      await render(pool([own]), {
+        awsSession: Effect.succeed(signedIn),
+        writes: allWrites(Effect.succeed(pendingSession), Effect.suspend(signOut))
+      })
+      await openDialog(button("Sign out of AWS"))
+      await act(async () => button("Sign out", '[role="dialog"]')?.click())
+      await settle()
+      expect(document.querySelector('[role="dialog"] [role="alert"]')?.textContent).toBe(
+        "The hub didn’t sign out. Try again."
+      )
+      await act(async () => button("Cancel", '[role="dialog"]')?.click())
+      await settle()
+      expect(document.querySelector('[role="dialog"]')).toBeNull()
+      expect(signOut).toHaveBeenCalledTimes(1)
+      expect(text("[data-aws-signed-in]")).toBe("Signed in to AWS until 18:05")
+    })
+
+    it("offers Sign out of AWS only to the owner, only on the pool page, and only while signed in", async () => {
+      const cases: ReadonlyArray<readonly [string, Parameters<typeof render>[1]]> = [
+        ["viewer", { owner: false, awsSignedIn: true, awsSession: Effect.succeed(signedIn) }],
+        ["account page", { page: "account", search: { id: "999999999990" }, awsSession: Effect.succeed(signedIn) }],
+        ["signed out", { awsSession: Effect.succeed({ _tag: "SignInRequired", reason: "never" }) }],
+        ["no writes", { awsSession: Effect.succeed(signedIn), writes: null }]
+      ]
+      for (const [name, options] of cases) {
+        await render(pool([own]), { writes: allWrites(Effect.succeed(pendingSession)), ...options })
+        expect(button("Sign out of AWS"), name).toBeUndefined()
+        await act(async () => root?.unmount())
+        root = null
+        document.body.replaceChildren()
+      }
     })
 
     it("holds back Retry reset on the account page the same way, live and signed out or in observe mode", async () => {

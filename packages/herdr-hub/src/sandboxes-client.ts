@@ -117,6 +117,21 @@ export const startSandboxAwsSignIn = Effect.gen(function*() {
   )
 }).pipe(Effect.withSpan("SandboxesClient.startAwsSignIn"))
 
+/** Signs the hub out of AWS; the hub answers the sign-in it now holds. 403 is the owner rule. */
+export const signOutSandboxAws = Effect.gen(function*() {
+  const client = yield* HttpClient.HttpClient
+  const response = yield* client.execute(
+    HttpClientRequest.post("/v1/modules/sandboxes/aws-sign-out").pipe(
+      HttpClientRequest.bodyJsonUnsafe({})
+    )
+  ).pipe(Effect.mapError(() => new SandboxesWriteFailed({ reason: "network" })))
+  if (response.status === 403) return yield* new SandboxesWriteFailed({ reason: "unauthorized" })
+  if (response.status < 200 || response.status >= 300) return yield* new SandboxesWriteFailed({ reason: "rejected" })
+  return yield* decodeBoundedResponseJson(response, SandboxAwsSession, 4_096).pipe(
+    Effect.mapError(() => new SandboxesWriteFailed({ reason: "rejected" }))
+  )
+}).pipe(Effect.withSpan("SandboxesClient.signOutAws"))
+
 /**
  * Submits one job from this page. The browser sends its own origin; the hub accepts it only from its own node.
  * 403 is the owner rule, 409 a job the hub or Fleet refused, with the hub's reason when it names one;

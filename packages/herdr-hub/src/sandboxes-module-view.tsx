@@ -49,6 +49,8 @@ export interface SandboxesModuleWrites {
   readonly liftBudget: (accountId: SandboxCard["accountId"]) => Effect.Effect<void, SandboxesWriteFailed>
   /** Starts the hub's AWS sign-in, or joins the one waiting, and answers what to approve. */
   readonly startAwsSignIn: Effect.Effect<SandboxAwsSession, SandboxesWriteFailed>
+  /** Signs the hub out of AWS, on AWS's side too, and answers the sign-in it now holds. */
+  readonly signOutAws: Effect.Effect<SandboxAwsSession, SandboxesWriteFailed>
 }
 
 /** Page reads. Each must keep its identity across renders, or the page reads again on every render. */
@@ -460,27 +462,104 @@ const useAws = (reads: SandboxesModuleReads, active: boolean) => {
   return { caller, session, started, aws }
 }
 
-/** The quiet lines under the heading: until when the hub is signed in, and why jobs are held back. */
+/**
+ * Sign out of AWS beside the signed-in line, after one confirm. A refusal keeps the sheet open and says the hub
+ * didn't sign out; success closes it and hands the new sign-in state to `done`.
+ */
+const SignOutAws = ({
+  done,
+  signOut
+}: {
+  readonly done: (next: SandboxAwsSession) => void
+  readonly signOut: SandboxesModuleWrites["signOutAws"]
+}): ReactElement => {
+  const [open, setOpen] = useState(false)
+  const [phase, setPhase] = useState<"Idle" | "Sending" | "Failed">("Idle")
+  const opener = useRef<HTMLButtonElement | null>(null)
+  const send = () => {
+    setPhase("Sending")
+    void Effect.runPromiseExit(signOut).then((exit) => {
+      if (Exit.isSuccess(exit)) {
+        setPhase("Idle")
+        setOpen(false)
+        done(exit.value)
+      } else {
+        setPhase("Failed")
+      }
+    })
+  }
+  return (
+    <>
+      <Button
+        onClick={() => {
+          setPhase((current) => (current === "Sending" ? current : "Idle"))
+          setOpen(true)
+        }}
+        ref={opener}
+        size="compact"
+        variant="quiet"
+      >
+        Sign out of AWS
+      </Button>
+      <Sheet.Root onOpenChange={setOpen} open={open} restoreFocus={() => opener.current ?? undefined}>
+        <Sheet.Content className="sandboxes-sheet" closeLabel="Close panel" title="Sign the hub out of AWS?">
+          <Sheet.Body className="sandboxes-sheet-body">
+            <p className="sandboxes-sheet-lead">
+              Spend stops updating, and Release, Retry reset and Request to lift the stop wait until someone signs in
+              again. Any reset already running finishes first.
+            </p>
+            {phase === "Failed" ? (
+              <p className="sandboxes-refusal" role="alert">
+                The hub didn’t sign out. Try again.
+              </p>
+            ) : null}
+          </Sheet.Body>
+          <Sheet.Footer className="sandboxes-sheet-foot">
+            <Button onClick={() => setOpen(false)} variant="secondary">
+              Cancel
+            </Button>
+            <Button disabled={phase === "Sending"} onClick={send} variant="primary">
+              Sign out
+            </Button>
+          </Sheet.Footer>
+        </Sheet.Content>
+      </Sheet.Root>
+    </>
+  )
+}
+
+/**
+ * The quiet lines under the heading: until when the hub is signed in, and why jobs are held back. `signOut`
+ * adds Sign out of AWS beside the signed-in line; the pool page passes it for the owner, other pages don't.
+ */
 const AwsLines = ({
   caller,
-  session
+  session,
+  signOut = null
 }: {
   readonly caller: SandboxesCaller
   readonly session: SandboxAwsSession | null
+  readonly signOut?: {
+    readonly write: SandboxesModuleWrites["signOutAws"]
+    readonly done: (next: SandboxAwsSession) => void
+  } | null
 }): ReactElement => {
   const times = useContext(TimesContext)
   const { heldBy } = useContext(AwsContext)
   return (
     <>
       {caller.owner && session?._tag === "SignedIn" ? (
-        <span className="sandboxes-aws-line" data-aws-signed-in="">
-          <StateLabel
-            icon="check"
-            label={`Signed in to AWS until ${times.clock(session.expiresAt)}`}
-            size="compact"
-            tone="positive"
-          />
-        </span>
+        <div className="sandboxes-aws-signed-in">
+          <span className="sandboxes-aws-line" data-aws-signed-in="">
+            <StateLabel
+              icon="check"
+              label={`Signed in to AWS until ${times.clock(session.expiresAt)}`}
+              size="compact"
+              tone="positive"
+            />
+          </span>
+          {signOut === null ? null : <SignOutAws done={signOut.done} signOut={signOut.write} />}
+        </div>
       ) : null}
       {caller.poolMode === "observe" ? (
         <p className="sandboxes-muted sandboxes-aws-line" data-observe-mode="" id={observeLineId}>
@@ -1597,7 +1676,13 @@ const OverviewPage = ({
           <div className="sandboxes-title">
             <h1>Sandboxes</h1>
             {count === undefined ? null : <p>{count === 1 ? "1 account" : `${count} accounts`}</p>}
-            {pool === null ? null : <AwsLines caller={caller} session={session} />}
+            {pool === null ? null : (
+              <AwsLines
+                caller={caller}
+                session={session}
+                signOut={owner && !pool.stale && writes !== null ? { write: writes.signOutAws, done: started } : null}
+              />
+            )}
             <div aria-live="polite" role="status">
               {pool !== null && pool.stale ? (
                 <StateLabel icon="clock" label={staleWords(pool.readAt, now)} tone="caution" />

@@ -68,6 +68,7 @@ import {
   loadSandboxRequests,
   loadSandboxRunLog,
   loadSandboxRuns,
+  signOutSandboxAws,
   startSandboxAwsSignIn,
   submitSandboxJob
 } from "./sandboxes-client.js"
@@ -877,7 +878,8 @@ const sandboxesWrites: SandboxesModuleWrites = {
   release: (accountId) => runCodeRead(submitSandboxJob({ _tag: "Release", accountId })).pipe(Effect.asVoid),
   retry: (accountId) => runCodeRead(submitSandboxJob({ _tag: "Retry", accountId })).pipe(Effect.asVoid),
   liftBudget: (accountId) => runCodeRead(submitSandboxJob({ _tag: "BudgetLift", accountId })).pipe(Effect.asVoid),
-  startAwsSignIn: runCodeRead(startSandboxAwsSignIn)
+  startAwsSignIn: runCodeRead(startSandboxAwsSignIn),
+  signOutAws: runCodeRead(signOutSandboxAws)
 }
 const relayConversations = makeRelayConversations(
   makeRelayClient({ base: "/v1/relay", origin: window.location.href }),
