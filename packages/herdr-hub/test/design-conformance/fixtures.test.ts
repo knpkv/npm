@@ -7,7 +7,13 @@ import { Fixture } from "../../../design-conformance/src/schema.js"
 import { fontPreloadLink } from "../../src/font-preload.js"
 import { dashboardPage } from "../../src/internal/dashboard-page.js"
 import { renderCaptureDocument, resolveFixtureRead } from "./adapter.js"
-import { CODE_REFERENCE, makeCodeReadings, makeReviewContents, makeReviewFixture } from "./fixtures.js"
+import {
+  CODE_REFERENCE,
+  makeCodeReadings,
+  makeReviewContents,
+  makeReviewFixture,
+  signedOutLocalSession
+} from "./fixtures.js"
 import { ReviewState } from "./inventory.js"
 
 const loadFixture = Effect.gen(function*() {
@@ -194,6 +200,16 @@ it.layer(NodeServices.layer)("Code fixture projections", (it) => {
           { id: "T3", messages: [{ author: "Jonas" }] }
         ]
       })
+    }))
+
+  // The page reads who is logged in; these refs were drawn with the shell's own session line, which a local
+  // page without a session keeps.
+  it.effect("answers the session read as a local page without a session", () =>
+    Effect.gen(function*() {
+      const fixture = yield* loadFixture
+      const readings = makeCodeReadings(fixture.data)
+      expect(resolveFixtureRead(readings, new URL("http://127.0.0.1/v1/session"))).toEqual(signedOutLocalSession)
+      expect(signedOutLocalSession).toEqual({ signedIn: false, kind: "local" })
     }))
 
   it.effect("serves only its opaque subject and exact immutable content selectors", () =>

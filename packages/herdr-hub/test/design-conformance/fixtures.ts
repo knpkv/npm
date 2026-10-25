@@ -653,3 +653,12 @@ export const makeCodeReadings = (data: Fixture["data"], state: ReviewFixtureStat
     commits
   }
 }
+
+/**
+ * The page's session read in these captures: a local page without a session. The session control then draws
+ * nothing and the shell keeps the session line the code-review and review-canvas refs were drawn with.
+ */
+export const signedOutLocalSession = { signedIn: false, kind: "local" } satisfies {
+  readonly signedIn: false
+  readonly kind: "local"
+}

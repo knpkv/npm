@@ -11,7 +11,7 @@ import type { dashboardPage } from "../../src/internal/dashboard-page.js"
 import type { loadUiAssets } from "../../src/internal/ui-assets.js"
 import { CANVAS_REFERENCE, CanvasState, makeCanvasReadings } from "./canvas-fixtures.js"
 import { canvasInventory, readCanvasCapability } from "./canvas-inventory.js"
-import { designCommitResult } from "./fixtures.js"
+import { designCommitResult, signedOutLocalSession } from "./fixtures.js"
 
 const PageModule = Schema.Struct({
   dashboardPage: Schema.declare((value): value is typeof dashboardPage => Predicate.isFunction(value))
@@ -94,6 +94,8 @@ export const resolveCanvasRead = (readings: Readings, url: URL) => {
       return readings.session
     case "/v1/relay/backends":
       return readings.backends
+    case "/v1/session":
+      return signedOutLocalSession
     case "/v1/modules/code/queue":
       return readings.queue
     case "/v1/modules/code/detail":
