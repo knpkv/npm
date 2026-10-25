@@ -172,6 +172,8 @@ const recordObservation = (
  */
 export class AgentArchiveStore {
   readonly #taintedHosts = new Map<string, number>()
+  /** How many optional passes in flight observe each host. */
+  readonly #optionalPasses = new Map<string, number>()
   readonly #database: DatabaseSync
   readonly #transactions: Semaphore.Semaphore
   readonly #secureFiles: PrivateSqlite["secureFiles"]
@@ -246,12 +248,25 @@ export class AgentArchiveStore {
     input: ConnectArchiveObservation,
     options: { readonly retryBusy?: boolean } = {}
   ) {
+    return yield* this.#observe(input, options.retryBusy !== false, false)
+  })
+
+  /**
+   * `inPass`: called from an optional pass, which counts itself in `#optionalPasses`. A busy optional write skips
+   * quietly when another pass in flight observes the same host: that pass carries the same evidence, so this read
+   * neither fails nor resets the host's absence count.
+   */
+  readonly #observe = Effect.fn("AgentArchiveStore.observeOne")(function*(
+    this: AgentArchiveStore,
+    input: ConnectArchiveObservation,
+    retryBusy: boolean,
+    inPass: boolean
+  ) {
     const observation = yield* Schema.decodeUnknownEffect(ConnectArchiveObservation)(input).pipe(
       Effect.mapError(failWith("observe.decode"))
     )
     const host = observation.host.toLowerCase()
     const markTainted = Effect.sync(() => this.taintHost(host, observation.observedAt))
-    const retryBusy = options.retryBusy !== false
     const write = connectSqliteWrite(
       "observe.transaction",
       () => {
@@ -283,16 +298,21 @@ export class AgentArchiveStore {
       ? write
       : this.#transactions.withPermitsIfAvailable(1)(write).pipe(Effect.flatMap(Option.match({
         onNone: () =>
-          new ConnectArchiveStoreError({
-            operation: "observe.transaction",
-            cause: "archive transaction already in progress"
-          }),
+          inPass && (this.#optionalPasses.get(host) ?? 0) > 1
+            ? Effect.void
+            : new ConnectArchiveStoreError({
+              operation: "observe.transaction",
+              cause: "archive transaction already in progress"
+            }),
         onSome: () => Effect.void
       })))
     return yield* guarded.pipe(Effect.tapError(() => markTainted), Effect.onInterrupt(() => markTainted))
   })
 
-  /** One optional pass stops at its first failure; skipped hosts lose any prior absence evidence. */
+  /**
+   * One optional pass stops at its first failure; skipped hosts lose any prior absence evidence. A host another pass
+   * in flight is writing is skipped quietly instead (see `#observe`).
+   */
   readonly observeAvailable = Effect.fn("AgentArchiveStore.observeAvailable")(function*(
     this: AgentArchiveStore,
     input: ReadonlyArray<ConnectArchiveObservation>
@@ -304,14 +324,26 @@ export class AgentArchiveStore {
     const taintPending = Effect.sync(() => {
       for (const observation of observations.slice(completed)) this.taintHost(observation.host, observation.observedAt)
     })
-    return yield* Effect.forEach(observations, (observation) =>
-      this.observe(observation, { retryBusy: false }).pipe(
+    const hosts = [...new Set(observations.map(({ host }) => host.toLowerCase()))]
+    const enter = Effect.sync(() => {
+      for (const host of hosts) this.#optionalPasses.set(host, (this.#optionalPasses.get(host) ?? 0) + 1)
+    })
+    const leave = Effect.sync(() => {
+      for (const host of hosts) {
+        const passes = (this.#optionalPasses.get(host) ?? 1) - 1
+        if (passes === 0) this.#optionalPasses.delete(host)
+        else this.#optionalPasses.set(host, passes)
+      }
+    })
+    const pass = Effect.forEach(observations, (observation) =>
+      this.#observe(observation, false, true).pipe(
         Effect.tap(() =>
           Effect.sync(() => {
             completed++
           })
         )
       ), { discard: true }).pipe(Effect.tapError(() => taintPending), Effect.onInterrupt(() => taintPending))
+    return yield* Effect.acquireUseRelease(enter, () => pass, () => leave)
   })
 
   private taintHost(host: string, observedAt: number): void {

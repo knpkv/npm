@@ -111,6 +111,38 @@ describe("closed agent archive", () => {
         expect((yield* store.page()).agents).toHaveLength(1)
       }).pipe(Effect.scoped))
 
+    it.effect("concurrent requests don't delay archiving: an overlapping optional pass skips its host quietly", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const armed = yield* Ref.make(false)
+        const securing = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const delegated = FileSystem.FileSystem.of({
+          ...fs,
+          chmod: (path, mode) =>
+            Effect.gen(function*() {
+              yield* fs.chmod(path, mode)
+              if (path.endsWith("archive.sqlite") && (yield* Ref.getAndSet(armed, false))) {
+                yield* Deferred.succeed(securing, undefined)
+                yield* Deferred.await(release)
+              }
+            })
+        })
+        const store = yield* openStore().pipe(Effect.provideService(FileSystem.FileSystem, delegated))
+        yield* observe(store, 0, [agent()])
+        const absent = (observedAt: number) =>
+          store.observeAvailable([{ host: "HOST-A", agents: [], complete: true, observedAt }])
+        yield* Ref.set(armed, true)
+        const first = yield* Effect.forkScoped(absent(1))
+        yield* Deferred.await(securing)
+        const overlapping = yield* Effect.exit(absent(2))
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(first)
+        expect(overlapping._tag).toBe("Success")
+        yield* absent(300_001)
+        expect((yield* store.page()).agents).toHaveLength(1)
+      }).pipe(Effect.scoped))
+
     it.effect("remembers an absent parent's latest name on its own host, before and after closure", () =>
       Effect.gen(function*() {
         const store = yield* openStore()
