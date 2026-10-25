@@ -53,7 +53,9 @@ export const NeedsYouFailureCandidate = Schema.Struct({
   createdAt: Timestamp,
   failedAt: Timestamp,
   reason: JobFailureReason,
-  approved: Schema.Boolean
+  approved: Schema.Boolean,
+  /** The ref a `nix.apply` applied; a page offers "Apply main instead" when it isn't `main`. */
+  applyRef: Schema.optionalKey(Schema.String)
 })
 export interface NeedsYouFailureCandidate extends Schema.Schema.Type<typeof NeedsYouFailureCandidate> {}
 
@@ -123,7 +125,8 @@ export const NeedsYouFailure = Schema.Struct({
   createdAt: NeedsYouFailureCandidate.fields.createdAt,
   failedAt: NeedsYouFailureCandidate.fields.failedAt,
   reason: NeedsYouFailureCandidate.fields.reason,
-  approved: NeedsYouFailureCandidate.fields.approved
+  approved: NeedsYouFailureCandidate.fields.approved,
+  applyRef: NeedsYouFailureCandidate.fields.applyRef
 })
 export interface NeedsYouFailure extends Schema.Schema.Type<typeof NeedsYouFailure> {}
 
