@@ -472,6 +472,1014 @@
           }
         }
       }
+    },
+    "identity": {
+      "meta": {
+        "about": "Synthetic fixture for 22 Identity and sign-in. The hub knows the person, not just the device: a browser session lasts 8 hours; approving a job and owner actions ask for a passkey every time; plain this-computer access without signing in is view only; approvals for every host go through the hub. All people, devices and hosts are invented. Times are en-GB, 24-hour.",
+        "locale": "en-GB",
+        "now": "13:05",
+        "defaultState": "tailscale-continue",
+        "source": "22 Identity and sign-in.dc.html",
+        "reuses": [
+          "data.fleet.fleet.approvals.rows",
+          "data.fleet.shell.hubHost",
+          "data.shellStandalone"
+        ]
+      },
+      "person": {
+        "name": "Mira",
+        "login": "mira@example.test",
+        "devices": {
+          "mira-phone": {
+            "approvalDevice": true
+          },
+          "mira-laptop": {
+            "approvalDevice": false
+          }
+        },
+        "sessionHours": 8,
+        "until": "21:05"
+      },
+      "hosts": {
+        "hub": "atlas",
+        "fleetHost": "build-01",
+        "peer": "birch"
+      },
+      "approvals": {
+        "rowsFrom": "data.fleet.fleet.approvals.rows",
+        "lead": "3 requests across your hosts. Review the exact action before deciding.",
+        "detail": {
+          "id": "pins",
+          "kind": "nix.apply",
+          "target": "atlas, Nix configuration",
+          "revision": "main, Pin nixpkgs for atlas, 13:52",
+          "evidence": "nix.check passed at 13:58",
+          "exact": "nix.apply atlas main",
+          "askedBy": "coord on atlas",
+          "askedAt": "13:59"
+        }
+      },
+      "peerJob": {
+        "agent": "rev-usage",
+        "host": "birch",
+        "title": "Create a writable test directory on birch",
+        "meta": "rev-usage on birch, asked at 13:44",
+        "label": "Waiting for the hub",
+        "hubLink": "Open on the hub"
+      },
+      "lines": {
+        "viewOnly": "View only until you log in.",
+        "fleetHost": "This computer runs agents. They stay view only and can submit jobs; only you, logged in here, can do more.",
+        "firstPasskey": "Add your first passkey from your approval device.",
+        "hubDown": "Approve on the hub. The hub isn\u2019t answering, so this job waits."
+      },
+      "cards": {
+        "tailscale": {
+          "eyebrow": "Not logged in",
+          "title": "Continue as mira@example.test?",
+          "body": "Tailscale says this is {device}. Logging in keeps you signed in here for 8 hours.",
+          "button": "Log in with Tailscale"
+        },
+        "loopback": {
+          "eyebrow": "View only",
+          "title": "Log in as local user",
+          "body": "Run this in a terminal on this computer. It opens this page logged in.",
+          "command": "herdr-hub login",
+          "button": "Copy"
+        }
+      },
+      "popover": {
+        "who": "mira@example.test",
+        "how": "Logged in with Tailscale on {device}",
+        "until": "Until 21:05",
+        "canLabel": "You can",
+        "can": [
+          "Approve jobs, asks for your passkey each time",
+          "Own Sandboxes, asks for your passkey each time",
+          "Submit jobs"
+        ],
+        "passkeys": "Passkeys: none yet",
+        "addPasskey": "Add a passkey",
+        "logOut": "Log out"
+      },
+      "sheet": {
+        "title": "Confirm with your passkey",
+        "rows": [
+          [
+            "Host",
+            "atlas"
+          ],
+          [
+            "Job",
+            "nix.apply, Apply the new pins on atlas"
+          ],
+          [
+            "Asked by",
+            "coord on atlas"
+          ],
+          [
+            "Asked at",
+            "13:59"
+          ]
+        ],
+        "use": "Use passkey",
+        "cancel": "Cancel",
+        "failed": "The passkey check didn\u2019t finish. Nothing was approved.",
+        "retry": "Try again"
+      },
+      "banner": {
+        "text": "Your session ended. Log in again to act.",
+        "button": "Log in with Tailscale"
+      },
+      "states": {
+        "tailscale-continue": {
+          "name": "Over Tailscale, not logged in",
+          "device": "mira-laptop",
+          "access": "tailscale",
+          "session": "none",
+          "page": "approvals",
+          "viewOnly": true,
+          "card": "tailscale"
+        },
+        "signed-in-person": {
+          "name": "Logged in, session open",
+          "device": "mira-laptop",
+          "access": "tailscale",
+          "session": "person",
+          "page": "approvals",
+          "popover": true
+        },
+        "fleet-host-before-login": {
+          "name": "On a fleet host, not logged in",
+          "device": "build-01",
+          "access": "tailscale",
+          "session": "none",
+          "page": "approvals",
+          "viewOnly": true,
+          "card": "tailscale",
+          "cardLine": "fleetHost"
+        },
+        "this-computer-view-only": {
+          "name": "This computer, view only",
+          "device": "atlas",
+          "access": "loopback",
+          "session": "local-none",
+          "page": "approvals",
+          "viewOnly": true,
+          "card": "loopback"
+        },
+        "passkey-register": {
+          "name": "Add a first passkey",
+          "access": "tailscale",
+          "session": "person",
+          "page": "approvals",
+          "popover": true,
+          "passkeys": true,
+          "variants": [
+            {
+              "id": "mira-phone",
+              "device": "mira-phone",
+              "addDisabled": false
+            },
+            {
+              "id": "mira-laptop",
+              "device": "mira-laptop",
+              "addDisabled": true,
+              "line": "firstPasskey"
+            }
+          ]
+        },
+        "approve-passkey": {
+          "name": "Approve, confirm with passkey",
+          "device": "mira-laptop",
+          "access": "tailscale",
+          "session": "person",
+          "page": "approvals",
+          "sheet": "confirm"
+        },
+        "passkey-failed": {
+          "name": "Passkey check failed",
+          "device": "mira-laptop",
+          "access": "tailscale",
+          "session": "person",
+          "page": "approvals",
+          "sheet": "failed"
+        },
+        "session-expired": {
+          "name": "Session ended",
+          "device": "mira-laptop",
+          "access": "tailscale",
+          "session": "ended",
+          "page": "approvals",
+          "viewOnly": true,
+          "banner": true
+        },
+        "peer-waiting-hub-down": {
+          "name": "Peer host, hub not answering",
+          "device": "birch",
+          "access": "loopback",
+          "session": "peer",
+          "page": "peer"
+        }
+      }
+    },
+    "fleet": {
+      "meta": {
+        "about": "Synthetic fixture for Fleet (screens/fleet.html), from 08 Navigation. All data is invented. Times are en-GB, 24-hour.",
+        "locale": "en-GB",
+        "date": "Sunday 11 October 2026",
+        "defaultState": "fleet-approvals"
+      },
+      "shell": {
+        "product": "Relay",
+        "brandLabel": "Relay, go to Connect",
+        "navLabel": "Relay navigation",
+        "modulesLabel": "Modules",
+        "askRelay": "Ask Relay",
+        "askShortcut": "Ctrl J",
+        "hosts": {
+          "label": "3 hosts configured",
+          "aria": "3 hosts configured"
+        },
+        "notifications": {
+          "aria": "Notifications"
+        },
+        "more": {
+          "name": "More",
+          "icon": "grid"
+        },
+        "hubHost": "atlas",
+        "session": {
+          "title": "Session on atlas",
+          "access": "Tailscale access",
+          "aria": "Session on atlas, Tailscale access, connected"
+        },
+        "settings": {
+          "label": "Settings",
+          "href": "#settings",
+          "aria": "Settings: host access and notifications"
+        }
+      },
+      "modules": {
+        "connect": {
+          "name": "Connect",
+          "icon": "home",
+          "href": "#connect",
+          "purpose": "Who\u2019s working, who\u2019s blocked, who needs you",
+          "tabs": []
+        },
+        "fleet": {
+          "name": "Fleet",
+          "icon": "fleet",
+          "href": "#fleet/approvals",
+          "purpose": "Hosts, approvals and what they apply",
+          "tabs": [
+            "Approvals",
+            "Work"
+          ]
+        },
+        "design": {
+          "name": "Design",
+          "icon": "doc",
+          "href": "#design/projects",
+          "purpose": "Claude Design projects, exported refs and design | live",
+          "tabs": [
+            "Projects",
+            "Refs",
+            "Compare"
+          ]
+        },
+        "code": {
+          "name": "Code",
+          "icon": "code",
+          "href": "#code/pull-requests",
+          "purpose": "Pull requests, reviews and diffs",
+          "tabs": [
+            "Pull requests",
+            "Reviews",
+            "Diffs"
+          ]
+        },
+        "usage": {
+          "name": "Usage",
+          "icon": "usage",
+          "href": "#usage/limits",
+          "purpose": "Limits and tokens, per host, tool and model",
+          "tabs": [
+            "Limits",
+            "Tokens",
+            "By tool"
+          ]
+        },
+        "delivery": {
+          "name": "Delivery",
+          "icon": "delivery",
+          "href": "#delivery/releases",
+          "purpose": "Releases, services, Jira and Confluence",
+          "tabs": [
+            "Releases",
+            "Services",
+            "Jira",
+            "Confluence"
+          ]
+        },
+        "stacks": {
+          "name": "Stacks",
+          "icon": "stacks",
+          "href": "#stacks/overview",
+          "purpose": "Infrastructure state, read-only",
+          "tabs": []
+        },
+        "time": {
+          "name": "Time",
+          "icon": "time",
+          "href": "#time/week",
+          "purpose": "Your week in Jira and Clockify",
+          "tabs": [
+            "Week",
+            "Entries"
+          ]
+        }
+      },
+      "navs": {
+        "standard": {
+          "primary": [
+            "connect",
+            "fleet"
+          ],
+          "secondary": [
+            "code",
+            "usage"
+          ],
+          "bar": [
+            "connect",
+            "fleet",
+            "code",
+            "usage"
+          ]
+        }
+      },
+      "approvals": {
+        "badge": "3",
+        "badgeAria": "3 approvals waiting",
+        "navAria": "Fleet, 3 approvals waiting"
+      },
+      "fleet": {
+        "approvals": {
+          "label": "Approvals waiting",
+          "foot": "Opening a request never approves it. Read 14:02.",
+          "rows": [
+            {
+              "id": "pins",
+              "agent": "coord",
+              "host": "atlas",
+              "title": "Apply the new pins on atlas",
+              "meta": "Fleet, coord on atlas",
+              "expiry": "Expires in 3m 12s"
+            },
+            {
+              "id": "herdr",
+              "agent": "release",
+              "host": "atlas",
+              "title": "Publish herdr 0.18",
+              "meta": "From Delivery, release on atlas",
+              "expiry": "Expires in 14m"
+            },
+            {
+              "id": "storefront",
+              "agent": "release",
+              "host": "atlas",
+              "title": "Deploy storefront to prod",
+              "meta": "From Stacks, release on atlas",
+              "expiry": "Expires in 12m"
+            }
+          ]
+        },
+        "request": {
+          "aria": "Approval request",
+          "page": "Approval",
+          "back": "\u2190 Back to Approvals",
+          "approve": "Approve",
+          "decline": "Decline",
+          "sending": "Approving\u2026",
+          "facts": [
+            {
+              "k": "Agent",
+              "v": "coord, Primary, atlas",
+              "agent": true
+            },
+            {
+              "k": "Host",
+              "v": "atlas"
+            },
+            {
+              "k": "Requested",
+              "v": "11 Oct 2026, 13:58"
+            }
+          ],
+          "note": "Opening a request never approves it. Read 14:02."
+        },
+        "requestStates": {
+          "ready": {
+            "label": "Expires in 3m 12s",
+            "tone": "caution",
+            "desc": "The new pins are checked. Nothing is applied until you approve.",
+            "actions": "pair"
+          },
+          "precheck": {
+            "label": "Expires in 3m 12s",
+            "tone": "caution",
+            "desc": "Nothing is applied until you approve.",
+            "actions": "none",
+            "msg": {
+              "label": "Checking this request\u2026",
+              "tone": "progress",
+              "text": "Approve and Decline appear once atlas confirms the request is still current and the pins are unchanged."
+            }
+          },
+          "sending": {
+            "label": "Expires in 2m 40s",
+            "tone": "caution",
+            "desc": "The new pins are checked. Nothing is applied until you approve.",
+            "actions": "sending"
+          },
+          "expired": {
+            "label": "Expired",
+            "tone": "neutral",
+            "desc": "Nothing was applied.",
+            "actions": "none",
+            "msg": {
+              "label": "Expired",
+              "tone": "neutral",
+              "text": "This request expired at 14:10. coord can ask again.",
+              "back": "Back to Approvals"
+            }
+          },
+          "unavailable": {
+            "label": "Can\u2019t be checked",
+            "tone": "critical",
+            "desc": "Nothing is applied until you approve.",
+            "actions": "none",
+            "msg": {
+              "label": "Check failed",
+              "tone": "critical",
+              "text": "atlas didn\u2019t answer the check, so this request can\u2019t be approved yet. It still expires at 14:10.",
+              "retry": "Retry"
+            }
+          }
+        },
+        "hosts": {
+          "label": "Hosts",
+          "columns": [
+            "Host",
+            "Connection",
+            "Agents",
+            "Last seen"
+          ],
+          "loading": "Reading hosts\u2026",
+          "foot": "Read 14:02. Each host is read on its own; counts are never summed across hosts.",
+          "footError": "Last good reading 13:48.",
+          "error": {
+            "label": "Hosts couldn\u2019t be read",
+            "text": "Showing the last good reading from 13:48. Connection and last seen may have changed since.",
+            "retry": "Retry"
+          },
+          "rows": [
+            {
+              "name": "atlas",
+              "conn": "Connected",
+              "tone": "positive",
+              "agents": "4 agents",
+              "seen": "Last seen 14:02",
+              "seenError": "Last seen 13:48"
+            },
+            {
+              "name": "birch",
+              "conn": "Connected",
+              "tone": "positive",
+              "agents": "2 agents",
+              "seen": "Last seen 14:01",
+              "seenError": "Last seen 13:47"
+            },
+            {
+              "name": "cedar",
+              "conn": "Not answering",
+              "tone": "caution",
+              "agents": "Unknown",
+              "seen": "Last seen 13:51",
+              "seenError": "Last seen 13:51"
+            }
+          ]
+        }
+      },
+      "unknownState": {
+        "title": "Unknown state",
+        "text": "No state with that id in fixture.json.",
+        "known": "Known states"
+      },
+      "states": {
+        "fleet-approvals": {
+          "name": "Fleet, Approvals",
+          "nav": "standard",
+          "module": "fleet",
+          "tab": "Approvals",
+          "view": "approvals",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer"
+            ]
+          }
+        },
+        "approval-phone": {
+          "name": "Approval request",
+          "nav": "standard",
+          "module": "fleet",
+          "tab": "Approvals",
+          "view": "approvals",
+          "request": "pins",
+          "requestState": "ready",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "detail",
+              "action"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer",
+              "detail",
+              "action"
+            ]
+          }
+        },
+        "approval-precheck": {
+          "name": "Approval, checking",
+          "nav": "standard",
+          "module": "fleet",
+          "tab": "Approvals",
+          "view": "approvals",
+          "request": "pins",
+          "requestState": "precheck",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "detail",
+              "notice"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer",
+              "detail",
+              "notice"
+            ]
+          }
+        },
+        "approval-sending": {
+          "name": "Approval, sending",
+          "nav": "standard",
+          "module": "fleet",
+          "tab": "Approvals",
+          "view": "approvals",
+          "request": "pins",
+          "requestState": "sending",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "detail",
+              "notice"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer",
+              "detail",
+              "notice"
+            ]
+          }
+        },
+        "approval-expired": {
+          "name": "Approval, expired",
+          "nav": "standard",
+          "module": "fleet",
+          "tab": "Approvals",
+          "view": "approvals",
+          "request": "pins",
+          "requestState": "expired",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "detail",
+              "notice",
+              "action"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer",
+              "detail",
+              "notice",
+              "action"
+            ]
+          }
+        },
+        "approval-unavailable": {
+          "name": "Approval, check failed",
+          "nav": "standard",
+          "module": "fleet",
+          "tab": "Approvals",
+          "view": "approvals",
+          "request": "pins",
+          "requestState": "unavailable",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "detail",
+              "notice",
+              "action"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer",
+              "detail",
+              "notice",
+              "action"
+            ]
+          }
+        },
+        "fleet-hosts": {
+          "name": "Fleet, Hosts",
+          "nav": "standard",
+          "module": "fleet",
+          "tab": "Hosts",
+          "view": "hosts",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list",
+              "footer"
+            ]
+          },
+          "tabs": [
+            "Approvals",
+            "Hosts",
+            "Work"
+          ],
+          "future": "future: Hosts tab not installed"
+        },
+        "fleet-hosts-loading": {
+          "name": "Fleet, Hosts, loading",
+          "nav": "standard",
+          "module": "fleet",
+          "tab": "Hosts",
+          "view": "hosts",
+          "hosts": "loading",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "tabs",
+              "list"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "list"
+            ]
+          },
+          "tabs": [
+            "Approvals",
+            "Hosts",
+            "Work"
+          ],
+          "future": "future: Hosts tab not installed"
+        },
+        "fleet-hosts-error": {
+          "name": "Fleet, Hosts, error",
+          "nav": "standard",
+          "module": "fleet",
+          "tab": "Hosts",
+          "view": "hosts",
+          "hosts": "error",
+          "regions": {
+            "phone": [
+              "nav",
+              "header",
+              "tabs",
+              "notice",
+              "action",
+              "list",
+              "footer"
+            ],
+            "desktop": [
+              "nav",
+              "header",
+              "tabs",
+              "notice",
+              "action",
+              "list",
+              "footer"
+            ]
+          },
+          "tabs": [
+            "Approvals",
+            "Hosts",
+            "Work"
+          ],
+          "future": "future: Hosts tab not installed"
+        },
+        "unknown": {
+          "name": "Unknown state",
+          "kind": "unknown",
+          "regions": {
+            "phone": [
+              "notice"
+            ],
+            "desktop": [
+              "notice"
+            ]
+          }
+        }
+      }
+    },
+    "shellStandalone": {
+      "meta": {
+        "about": "Synthetic fixture for 19 Shell - this computer. The super-app runs on every computer at its own loopback address; a standalone computer has no Fleet module. All data is invented. Times are en-GB, 24-hour.",
+        "locale": "en-GB",
+        "date": "Sunday 11 October 2026",
+        "defaultState": "standalone-home",
+        "source": "19 Shell - this computer.dc.html",
+        "reuses": [
+          "data.connectHome.agents",
+          "data.connectHome.readyAgents",
+          "data.connectHome.modules",
+          "data.connectHome.shell.settings"
+        ]
+      },
+      "states": {
+        "standalone-home": {
+          "name": "Standalone computer, Connect",
+          "module": "connect",
+          "shell": {
+            "fleet": false,
+            "sidebar": [
+              "connect",
+              "code",
+              "usage",
+              "hostResources",
+              "stacks",
+              "|",
+              "settings"
+            ],
+            "phoneBar": [
+              "connect",
+              "code",
+              "usage",
+              "more"
+            ],
+            "more": [
+              "hostResources",
+              "stacks",
+              "settings"
+            ],
+            "hosts": {
+              "label": "This computer",
+              "aria": "This computer, loopback access"
+            },
+            "session": {
+              "title": "Session on this computer",
+              "access": "loopback",
+              "line": "This computer, loopback access",
+              "aria": "Your session on this computer, loopback access, connected"
+            }
+          },
+          "connect": {
+            "hostSwitcher": false,
+            "groups": [
+              {
+                "title": "This computer",
+                "meta": "3 agents, 1 needs you",
+                "agents": [
+                  {
+                    "ref": "data.connectHome.agents",
+                    "id": "rev-usage",
+                    "where": "Primary",
+                    "time": "Last activity 13:44"
+                  },
+                  {
+                    "ref": "data.connectHome.readyAgents",
+                    "id": "docs-sync",
+                    "where": "Primary",
+                    "time": "Idle since 13:40",
+                    "voice": "Waiting for the next task."
+                  },
+                  {
+                    "ref": "data.connectHome.agents",
+                    "id": "pkgsrc",
+                    "where": "Primary",
+                    "time": "Last activity 13:20"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "code-not-set-up": {
+          "name": "Standalone computer, Code not set up",
+          "module": "code",
+          "shell": {
+            "fleet": false,
+            "sidebar": [
+              "connect",
+              "code",
+              "usage",
+              "hostResources",
+              "stacks",
+              "|",
+              "settings"
+            ],
+            "phoneBar": [
+              "connect",
+              "code",
+              "usage",
+              "more"
+            ],
+            "more": [
+              "hostResources",
+              "stacks",
+              "settings"
+            ],
+            "hosts": {
+              "label": "This computer",
+              "aria": "This computer, loopback access"
+            },
+            "session": {
+              "title": "Session on this computer",
+              "access": "loopback",
+              "line": "This computer, loopback access",
+              "aria": "Your session on this computer, loopback access, connected"
+            }
+          },
+          "card": {
+            "eyebrow": "Not available",
+            "tone": "neutral",
+            "title": "Code isn\u2019t set up on this computer.",
+            "body": [
+              {
+                "text": "Set "
+              },
+              {
+                "text": "RELAY_CODE_HOST",
+                "setting": true
+              },
+              {
+                "text": " to the host that holds the CodeCommit credentials."
+              }
+            ]
+          }
+        },
+        "stacks-not-set-up": {
+          "name": "Standalone computer, Stacks not available",
+          "module": "stacks",
+          "shell": {
+            "fleet": false,
+            "sidebar": [
+              "connect",
+              "code",
+              "usage",
+              "hostResources",
+              "stacks",
+              "|",
+              "settings"
+            ],
+            "phoneBar": [
+              "connect",
+              "code",
+              "usage",
+              "more"
+            ],
+            "more": [
+              "hostResources",
+              "stacks",
+              "settings"
+            ],
+            "hosts": {
+              "label": "This computer",
+              "aria": "This computer, loopback access"
+            },
+            "session": {
+              "title": "Session on this computer",
+              "access": "loopback",
+              "line": "This computer, loopback access",
+              "aria": "Your session on this computer, loopback access, connected"
+            }
+          },
+          "card": {
+            "eyebrow": "Not available",
+            "tone": "neutral",
+            "title": "Stacks aren\u2019t available on this computer.",
+            "body": [
+              {
+                "text": "Set "
+              },
+              {
+                "text": "RELAY_STACKS_HOST",
+                "setting": true
+              },
+              {
+                "text": " to the host that holds the AWS profiles."
+              }
+            ]
+          }
+        },
+        "hub-loopback": {
+          "name": "Fleet hub on its own loopback",
+          "module": "today",
+          "shell": {
+            "fleet": true,
+            "sidebar": [
+              "connect",
+              "fleet",
+              "|",
+              "code",
+              "usage",
+              "hostResources",
+              "sandboxes",
+              "stacks"
+            ],
+            "phoneBar": [
+              "connect",
+              "fleet",
+              "code",
+              "usage",
+              "more"
+            ],
+            "more": [
+              "hostResources",
+              "sandboxes",
+              "stacks"
+            ],
+            "hosts": {
+              "label": "3 hosts connected",
+              "aria": "3 hosts connected"
+            },
+            "approvals": "data.connectHome.approvals.live",
+            "session": {
+              "title": "Session on atlas",
+              "access": "loopback",
+              "line": "atlas, loopback access",
+              "aria": "Your session on atlas, loopback access, connected"
+            }
+          },
+          "notifications": {
+            "open": true,
+            "label": "Not on this address",
+            "tone": "neutral",
+            "title": "Notifications live on the hub\u2019s tailnet address.",
+            "text": "This page is open on atlas\u2019s loopback address, so it doesn\u2019t receive them. Open Relay through Tailscale to read them; approvals and agents still work here.",
+            "action": null,
+            "bellAria": "Notifications, on the hub\u2019s tailnet address only"
+          }
+        }
+      }
     }
   }
 }
