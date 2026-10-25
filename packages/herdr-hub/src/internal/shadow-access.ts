@@ -18,6 +18,7 @@
  * @module
  */
 import type { Principal } from "@knpkv/herdr-fleet"
+import type { Result } from "effect"
 import { Clock, Effect } from "effect"
 import type { ListenerMode } from "./listener.js"
 import { meets, type Requirement, type RouteFamily, routeFamily } from "./route-families.js"
@@ -81,11 +82,12 @@ export const shadowFinding = (config: Grants, request: ShadowRequest): ShadowFin
 
 /**
  * One principal of each kind a listener can see, each as refusable as that kind gets: loopback is the local
- * user without a session; a tailnet person is on no approval node, once per allowed login.
+ * user without a session, or no one when it names a login; a tailnet person is on no approval node, once per
+ * allowed login.
  */
 const candidates = (config: Grants, listener: ListenerMode): ReadonlyArray<Principal> =>
   listener === "local"
-    ? [{ _tag: "Local", session: false }]
+    ? [{ _tag: "Local", session: false }, { _tag: "Anonymous" }]
     : [
       { _tag: "Host", nodeId: "" },
       { _tag: "Service", nodeId: "" },
@@ -114,22 +116,28 @@ export const makeShadowLog = (config: Grants) => {
   }
 }
 
-/** Reuses `lookup`'s answer for the same key for `ttlMillis`, keeping at most `limit` keys. */
+/**
+ * Reuses `lookup`'s answer for the same key for `ttlMillis`, keeping at most `limit` keys. A failure is
+ * remembered too, so a key the lookup can't answer is asked once per window, not on every call.
+ */
 export const makeRecentLookup = <A, E, R>(
   lookup: (key: string) => Effect.Effect<A, E, R>,
   options: { readonly ttlMillis: number; readonly limit: number }
 ) => {
-  const recent = new Map<string, { readonly at: number; readonly value: A }>()
+  const recent = new Map<string, { readonly at: number; readonly answer: Result.Result<A, E> }>()
   return (key: string): Effect.Effect<A, E, R> =>
     Effect.gen(function*() {
       const now = yield* Clock.currentTimeMillis
       const hit = recent.get(key)
-      if (hit !== undefined && now - hit.at < options.ttlMillis) return hit.value
-      const value = yield* lookup(key)
-      recent.delete(key)
-      recent.set(key, { at: now, value })
-      const oldest = recent.size > options.limit ? recent.keys().next().value : undefined
-      if (oldest !== undefined) recent.delete(oldest)
-      return value
+      const answer = hit !== undefined && now - hit.at < options.ttlMillis
+        ? hit.answer
+        : yield* Effect.result(lookup(key))
+      if (answer !== hit?.answer) {
+        recent.delete(key)
+        recent.set(key, { at: now, answer })
+        const oldest = recent.size > options.limit ? recent.keys().next().value : undefined
+        if (oldest !== undefined) recent.delete(oldest)
+      }
+      return yield* Effect.fromResult(answer)
     })
 }

@@ -72,6 +72,41 @@ describe("shadow access", () => {
       expect(shadow.settled("serve", family)).toBe(true)
     }))
 
+  // Loopback naming a login is no one, and that is the case worth seeing: a plain loopback finding doesn't
+  // settle the family until the no-one finding is logged too.
+  it.effect("keeps reading loopback callers until both the local user and no one are logged", () =>
+    Effect.gen(function*() {
+      const shadow = makeShadowLog(config)
+      const family = routeFamily("POST", "/v1/jobs")
+      if (family === null) return yield* Effect.die("expected a family")
+      const local = (principal: Principal) =>
+        shadowFinding(config, { listener: "local", method: "POST", pathname: "/v1/jobs", status: 202, principal })
+      const plain = local({ _tag: "Local", session: false })
+      const named = local({ _tag: "Anonymous" })
+      if (plain === null || named === null) return yield* Effect.die("expected refused findings")
+      yield* shadow.log(plain)
+      expect(shadow.settled("local", family)).toBe(false)
+      yield* shadow.log(named)
+      expect(named.key).toBe("refused local Anonymous jobs.submit")
+      expect(shadow.settled("local", family)).toBe(true)
+    }))
+
+  // An address WhoIs can't answer would otherwise spawn a lookup on every request.
+  it.effect("remembers a failed lookup for the same window", () =>
+    Effect.gen(function*() {
+      let asked = 0
+      const lookup = makeRecentLookup(
+        (_key: string) => Effect.sync(() => asked++).pipe(Effect.andThen(Effect.fail("unanswered"))),
+        { ttlMillis: 30_000, limit: 2 }
+      )
+      expect(yield* Effect.flip(lookup("a"))).toBe("unanswered")
+      expect(yield* Effect.flip(lookup("a"))).toBe("unanswered")
+      expect(asked).toBe(1)
+      yield* TestClock.adjust("31 seconds")
+      yield* Effect.flip(lookup("a"))
+      expect(asked).toBe(2)
+    }))
+
   // A WhoIs is a child process: the same address within the window reuses the last answer.
   it.effect("reuses a lookup for the same key within its window, and looks again after it", () =>
     Effect.gen(function*() {
