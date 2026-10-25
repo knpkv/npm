@@ -2,6 +2,14 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.62.2
+
+### Patch Changes
+
+- [#1129](https://github.com/knpkv/npm/pull/1129) [`0b2d854`](https://github.com/knpkv/npm/commit/0b2d854e4417e4377908e6df39333763728556ff) Thanks [@konopkov](https://github.com/konopkov)! - Log, without refusing anything, where identity-based access would decide differently from today's checks: each route family's requirement for the caller's principal (a fleet host's node is always a host, plain loopback is the local user without a session), once per principal, family and listener, plus any route no family names.
+- Updated dependencies [[`0b2d854`](https://github.com/knpkv/npm/commit/0b2d854e4417e4377908e6df39333763728556ff)]:
+  - @knpkv/herdr-fleet@0.21.1
+
 ## 0.62.1
 
 ### Patch Changes

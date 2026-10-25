@@ -1,5 +1,11 @@
 # @knpkv/herdr-fleet
 
+## 0.21.1
+
+### Patch Changes
+
+- [#1129](https://github.com/knpkv/npm/pull/1129) [`0b2d854`](https://github.com/knpkv/npm/commit/0b2d854e4417e4377908e6df39333763728556ff) Thanks [@konopkov](https://github.com/konopkov)! - Refuse a fleet configuration that lists one node both as a fleet machine and in `approvalNodes`. Fleet machines run agents under the owner's login, so a machine never approves.
+
 ## 0.21.0
 
 ### Minor Changes
