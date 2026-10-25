@@ -7,7 +7,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { AppId, appPaths, hubHeaders, type InstalledApp } from "@knpkv/hub-app"
-import { Effect, FileSystem, Path, Redacted, Schedule, Schema } from "effect"
+import { Effect, FileSystem, Logger, Path, Redacted, Schedule, Schema } from "effect"
 import { spawn } from "node:child_process"
 import { Agent, request as httpRequest } from "node:http"
 import { tmpdir, userInfo } from "node:os"
@@ -217,6 +217,38 @@ describe("supervisor rules", () => {
 
 describe("supervisor", () => {
   it.layer(NodeServices.layer, { excludeTestServices: true })((it) => {
+    // An embedding that didn't hand the hub its Node starts no app. One journal line says so and what to do; it repeats
+    // only when the set of apps it can't start changes, so the 30 s reload doesn't spam the journal.
+    it.effect("warns once in the journal when listed apps can't start for want of a Node path", () =>
+      Effect.gen(function*() {
+        const root = yield* tempRoot
+        const user = userInfo()
+        const supervisor = yield* makeSupervisor({
+          node: null,
+          runtimeDirectory: windows ? null : `${root}/run`,
+          shortRuntimeDirectory: `${root}/short`,
+          logsDirectory: `${root}/logs`,
+          hubUrl: Effect.succeed("http://127.0.0.1:9"),
+          tokens: yield* makeAppTokens,
+          user: { name: user.username, uid: user.uid },
+          timing: fast
+        })
+        const usage = yield* installed(root, "usage", "ok")
+        const notes = yield* installed(root, "notes", "ok", { enabled: false })
+        const messages: Array<unknown> = []
+        const logger = Logger.make<unknown, void>((entry) => messages.push(entry.message))
+        yield* Effect.gen(function*() {
+          yield* supervisor.sync([notes])
+          yield* supervisor.sync([usage, notes])
+          yield* supervisor.sync([usage, notes])
+        }).pipe(Effect.withLogger(logger))
+        const warnings = messages.flat().filter((message) => String(message).includes("without its Node path"))
+        expect(warnings).toEqual([
+          "Hub apps are listed but this hub was started without its Node path, so none of them run: usage. " +
+          "Pass node (the Node binary's path) to makeHostdProgram, or apps.node to startHttpServer."
+        ])
+      }).pipe(Effect.scoped))
+
     it.effect("runs an app, which answers only with its secret, and stops it when its entry goes", () =>
       Effect.gen(function*() {
         const root = yield* tempRoot
