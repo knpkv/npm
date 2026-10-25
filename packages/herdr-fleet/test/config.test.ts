@@ -69,6 +69,21 @@ describe("standalone fallback", () => {
         })
       }).pipe(Effect.scoped))
 
+    // A fleet host runs agents under the owner's login, so it is never where the owner approves: a node
+    // listed as both would silently lose approving once hosts are told apart, so the file is refused.
+    it.effect("refuses a node that is both a fleet machine and an approval node", () =>
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "fleet-overlap-" })
+        const { config } = yield* loadConfigurationOrStandalone(path.join(directory, "config.json")).pipe(withPaths())
+        expect(Schema.decodeUnknownResult(HostConfiguration)({ ...config, approvalNodes: ["node-phone"] })._tag)
+          .toBe("Success")
+        const overlapping = Schema.decodeUnknownResult(HostConfiguration)({ ...config, approvalNodes: ["local"] })
+        expect(overlapping._tag).toBe("Failure")
+        expect(String(overlapping)).toContain("no node that is both a fleet machine and an approval node")
+      }).pipe(Effect.scoped))
+
     // A file that exists is the operator's: never replace it, even when it is wrong.
     it.effect("still fails on a malformed or invalid file", () =>
       Effect.gen(function*() {

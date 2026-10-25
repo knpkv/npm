@@ -943,7 +943,7 @@ describe("fleet local authority", () => {
         nodeId: "node-ser8",
         url: "https://ser8.example.test:4779/"
       },
-      approvalNodes: ["node-ser8"],
+      approvalNodes: ["node-phone"],
       approvalPort: 4_779,
       checkCommand: ["nix", "flake", "check"],
       coordinatorCommand: ["coordinator"],

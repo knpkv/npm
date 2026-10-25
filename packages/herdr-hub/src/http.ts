@@ -171,8 +171,11 @@ import {
   listenerServesSuperapp,
   listenerServesWork
 } from "./internal/listener.js"
+import { principalFor } from "./internal/principal.js"
 import { decodeRelayPostRequest } from "./internal/relay-post-validation.js"
 import { decodeRelaySelfBody } from "./internal/relay-self-validation.js"
+import { routeFamily } from "./internal/route-families.js"
+import { makeShadowLog, shadowFinding } from "./internal/shadow-access.js"
 import { requireRemoteTerminalTakeover } from "./internal/terminal-capabilities.js"
 import { releaseTerminalScope } from "./internal/terminal-controller.js"
 import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
@@ -1839,6 +1842,50 @@ export const startHttpServer = async (
       () => activeRequestControllers.delete(controller)
     )
   }
+  const shadowLog = makeShadowLog()
+  // Who identity says a served request's caller is; null when today's answer leaves nothing to compare.
+  const shadowPrincipal = (
+    mode: ListenerMode,
+    facts: { readonly remoteAddress: string | undefined; readonly headerLogin: string | undefined },
+    serviceRoute: boolean
+  ) =>
+    mode === "local"
+      ? Effect.succeed(principalFor(config, {
+        _tag: "Loopback",
+        remoteAddress: facts.remoteAddress ?? "",
+        headerLogin: facts.headerLogin
+      }))
+      : Effect.gen(function*() {
+        if (facts.remoteAddress === undefined) return null
+        const tailscale = yield* Tailscale
+        const identity = yield* tailscale.whois(facts.remoteAddress)
+        return principalFor(config, {
+          _tag: "Tailnet",
+          login: identity.UserProfile.LoginName,
+          nodeId: identity.Node.StableID,
+          serviceRoute
+        })
+      }).pipe(
+        Effect.catch((error) => Effect.logDebug("identity shadow: caller not read", error).pipe(Effect.as(null)))
+      )
+  // Shadow mode: once today's handler has answered, log where identity would have answered differently.
+  // It reads only server facts and refuses nothing.
+  const observeShadow = (request: IncomingMessage, response: ServerResponse, mode: ListenerMode, pathname: string) => {
+    const method = request.method ?? "GET"
+    const facts = { remoteAddress: request.socket.remoteAddress, headerLogin: header(request, "tailscale-user-login") }
+    response.once("finish", () => {
+      const status = response.statusCode
+      const family = routeFamily(method, pathname)
+      const compared = family !== null && status < 400 && family.requirement._tag !== "Public" &&
+        family.requirement._tag !== "Grant"
+      httpRuntime.runFork(
+        (compared ? shadowPrincipal(mode, facts, family.id === "connect.service") : Effect.succeed(null)).pipe(
+          Effect.map((principal) => shadowFinding(config, { listener: mode, method, pathname, status, principal })),
+          Effect.flatMap((finding) => finding === null ? Effect.void : shadowLog(finding))
+        )
+      )
+    })
+  }
   // A read older than 30 seconds is refreshed in the background, so a peer answers the hub's
   // 1.5-second fetch from its last read even while agent-usage is slow.
   const spawner = await httpRuntime.runPromise(Effect.service(ChildProcessSpawner.ChildProcessSpawner))
@@ -2938,6 +2985,7 @@ export const startHttpServer = async (
             json(response, 503, { error: "starting" })
             return
           }
+          if (mode !== "work" && mode !== "lan") observeShadow(request, response, mode, url.pathname)
           // Agents report to the notification hub only; any super-app listener may read the posts back.
           const postsRead = request.method === "GET" && url.pathname === "/v1/connect/posts" &&
             listenerServesSuperapp(mode)

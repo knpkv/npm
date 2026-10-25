@@ -3609,6 +3609,7 @@ esac
     const hostConfig: HostConfiguration = {
       ...config(root),
       approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:0/" },
+      approvalNodes: ["node-phone"],
       approvalPort: 0,
       approvalTls: directTls,
       applyMachines: ["SER8"],
@@ -3885,7 +3886,7 @@ esac
     return Effect.gen(function*() {
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
       // Both listeners bind port 0; fleetctl gets the ports hostd actually bound.
-      const hostConfig = { ...config(root), localPort: 0, port: 0 }
+      const hostConfig = { ...config(root), approvalNodes: ["node-phone"], localPort: 0, port: 0 }
       const workStore = yield* WorkStore.open(join(root, "approval-app.sqlite"))
       yield* Effect.addFinalizer(() => Effect.sync(() => workStore.close()))
       const work = yield* makeWorkService(workStore)
