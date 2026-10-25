@@ -24,8 +24,16 @@ const request = (
     readJson: () => Effect.die("Code has no write routes")
   })
 
-/** The hub's own config, and another server's: only `host` and `approvalHub` decide the caller. */
-const hubConfig = { host, approvalHub: { host, nodeId: "node-hub", url: "https://atlas.example/" } }
+/**
+ * The hub's own config, and another server's: `host`, `approvalHub`, `allowedUsers` and the fleet's
+ * `machines` decide the caller.
+ */
+const hubConfig = {
+  host,
+  approvalHub: { host, nodeId: "node-hub", url: "https://atlas.example/" },
+  allowedUsers: ["owner@example.test"],
+  machines: [{ host, nodeId: "node-hub" }, { host: other, nodeId: "node-cedar" }]
+}
 const peerConfig = { ...hubConfig, host: other }
 const queueAs = (caller: { readonly login: string; readonly sameNode: boolean }) =>
   dispatchModuleRoute({
@@ -69,7 +77,20 @@ describe("hub-node caller", () => {
     expect(onHubNode(peerConfig, "node-hub")).toBe(false)
     expect(moduleCallerFor(peerConfig, { login: "example-viewer", nodeId: "node-hub" })).toEqual({
       login: "example-viewer",
-      sameNode: false
+      sameNode: false,
+      owner: false
+    })
+  })
+
+  // Fleet hosts run agents under the owner's login, so a fleet host's node is never the owner, except the
+  // hub's own. Any other node under an allowed login is the owner's own device.
+  it("is the owner on the hub's own node or on a device that is not a fleet host, never from a fleet host", () => {
+    const owner = (nodeId: string) => moduleCallerFor(hubConfig, { login: "owner@example.test", nodeId }).owner
+    expect([owner("node-hub"), owner("node-laptop"), owner("node-cedar")]).toEqual([true, true, false])
+    expect(moduleCallerFor(hubConfig, { login: "owner@example.test", nodeId: "node-laptop" })).toEqual({
+      login: "owner@example.test",
+      sameNode: false,
+      owner: true
     })
   })
 })

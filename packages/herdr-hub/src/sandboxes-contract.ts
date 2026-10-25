@@ -12,11 +12,16 @@ const AccountId = SandboxCard.fields.accountId
 /**
  * Who is reading the page. `owner` is true only for the hub's own tailnet node, the one that may submit jobs.
  * `signIn` is the pool's console and CLI sign-in, for the owner only; null for anyone else or a pool without it.
+ * `poolMode` is the mode this host runs the pool in (only live runs jobs); null where no pool is served.
+ * `awsSignedIn` tells anyone but the owner only whether the hub holds an AWS sign-in, never what to approve; null
+ * for the owner, who reads the whole state from aws-session, and where it is not known.
  */
 export const SandboxesCaller = Schema.Struct({
   login: Schema.String,
   owner: Schema.Boolean,
-  signIn: Schema.NullOr(SandboxSignIn)
+  signIn: Schema.NullOr(SandboxSignIn),
+  poolMode: Schema.NullOr(Schema.Literals(["off", "observe", "live"])),
+  awsSignedIn: Schema.NullOr(Schema.Boolean)
 })
 export type SandboxesCaller = typeof SandboxesCaller.Type
 
@@ -64,17 +69,26 @@ export type SandboxRequests = typeof SandboxRequests.Type
 /**
  * The hub's own AWS sign-in, for the owner only: `NotConfigured` when this pool has no AWS sign-in,
  * `SignInPending` with what to approve (its URL and code let whoever holds them finish the sign-in), or
- * `SignInRequired`. Or why the pool is not served here.
+ * `SignInRequired`: `never` signed in, or the sign-in it held `ended`. Or why the pool is not served here.
  */
+/** The page a waiting sign-in is approved on. Only an https URL decodes, so the link can never run script. */
+const VerificationUri = Schema.String.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter(
+    (value) => URL.canParse(value) && new URL(value).protocol === "https:" && new URL(value).hostname.length > 0,
+    { expected: "an https URL" }
+  )
+)
+
 export const SandboxAwsSession = Schema.Union([
   SandboxesUnavailable,
   Schema.TaggedStruct("NotConfigured", {}),
   Schema.TaggedStruct("SignedIn", { expiresAt: Instant }),
   Schema.TaggedStruct("SignInPending", {
-    verificationUri: Schema.String,
+    verificationUri: VerificationUri,
     userCode: Schema.String,
     expiresAt: Instant
   }),
-  Schema.TaggedStruct("SignInRequired", {})
+  Schema.TaggedStruct("SignInRequired", { reason: Schema.Literals(["never", "ended"]) })
 ])
 export type SandboxAwsSession = typeof SandboxAwsSession.Type

@@ -37,8 +37,8 @@ import {
 } from "@knpkv/sandbox-pool/aws"
 import { Effect, Path, Schema } from "effect"
 import { HttpClient } from "effect/http"
-import { awsRoleCredentials, makeAwsSignIn } from "./aws-sign-in.js"
-import { makeSandboxPool, runSandboxSweep, withSandboxOperations } from "./sandbox-jobs.js"
+import { awsRoleCredentials, type AwsSignIn, makeAwsSignIn } from "./aws-sign-in.js"
+import { makeSandboxPool, ResetNeedsSignIn, runSandboxSweep, withSandboxOperations } from "./sandbox-jobs.js"
 import { openSandboxDatabase } from "./sandbox-store.js"
 
 export const SandboxPoolMode = Schema.Literals(["off", "observe", "live"])
@@ -169,6 +169,27 @@ export interface SandboxPoolFromConfigOptions {
  * opens the pool's store and the AWS sign-in under `stateDirectory`, in the caller's scope. The caller forks
  * `sweep` in its lifetime and serves `withOperations(base)`, which adds the job kinds in live mode only.
  */
+/**
+ * The pool's `cleaning`: a move into Cleaning runs holding the sign-in (so sign-out can't slip between its check
+ * and a reset's start) and only with a usable access token. It asks for the token itself, refreshing it, because
+ * the stored state reads as signed in for an expired token until AWS refuses its refresh. No sign-in, a pending
+ * one, or one that can't be read or refreshed fails as `ResetNeedsSignIn` and writes nothing.
+ */
+export const cleaningUnderSignIn =
+  (signIn: AwsSignIn) => <A, E, R>(write: Effect.Effect<A, E, R>): Effect.Effect<A, E | ResetNeedsSignIn, R> =>
+    signIn.hold(
+      signIn.accessToken.pipe(
+        Effect.as(true),
+        Effect.catchTags({
+          AwsSignInRequired: () => Effect.succeed(false),
+          AwsSignInUnavailable: () => Effect.succeed(false)
+        }),
+        Effect.flatMap((signedIn): Effect.Effect<A, E | ResetNeedsSignIn, R> =>
+          signedIn ? write : Effect.fail(new ResetNeedsSignIn())
+        )
+      )
+    )
+
 export const makeSandboxPoolFromConfig = Effect.fn("SandboxPool.fromConfig")(function*(
   options: SandboxPoolFromConfigOptions
 ) {
@@ -214,7 +235,9 @@ export const makeSandboxPoolFromConfig = Effect.fn("SandboxPool.fromConfig")(fun
     nuke: adapters.nuke,
     budget: adapters.budget,
     spend: adapters.spend,
-    sweep: adapters.registersJobs ? "full" : "spend-only"
+    sweep: adapters.registersJobs ? "full" : "spend-only",
+    // Each move into Cleaning holds the sign-in and needs it signed in.
+    cleaning: cleaningUnderSignIn(signIn)
   })
   return {
     mode,

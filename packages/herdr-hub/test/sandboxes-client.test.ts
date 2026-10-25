@@ -5,10 +5,13 @@ import { Effect, Schema } from "effect"
 import type { HttpBody } from "effect/http"
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http"
 import {
+  loadSandboxAwsSession,
   loadSandboxesCaller,
   loadSandboxRequests,
   loadSandboxRunLog,
   loadSandboxRuns,
+  signOutSandboxAws,
+  startSandboxAwsSignIn,
   submitSandboxJob
 } from "../src/sandboxes-client.js"
 
@@ -68,10 +71,130 @@ it.effect("reads the caller", () =>
     const caller = yield* loadSandboxesCaller.pipe(
       Effect.provideService(
         HttpClient.HttpClient,
-        answering(200, { login: "viewer@example.test", owner: false, signIn: null })
+        answering(200, {
+          login: "viewer@example.test",
+          owner: false,
+          signIn: null,
+          poolMode: "observe",
+          awsSignedIn: false
+        })
       )
     )
-    expect(caller).toEqual({ login: "viewer@example.test", owner: false, signIn: null })
+    expect(caller).toEqual({
+      login: "viewer@example.test",
+      owner: false,
+      signIn: null,
+      poolMode: "observe",
+      awsSignedIn: false
+    })
+  }))
+
+it.effect("reads the hub's AWS sign-in, including why one is required", () =>
+  Effect.gen(function*() {
+    const seen: Array<Seen> = []
+    const reasons: ReadonlyArray<"never" | "ended"> = ["never", "ended"]
+    for (const reason of reasons) {
+      const session = yield* loadSandboxAwsSession.pipe(
+        Effect.provideService(
+          HttpClient.HttpClient,
+          answering(200, { _tag: "SignInRequired", reason }, (request) => seen.push(request))
+        )
+      )
+      expect(session).toEqual({ _tag: "SignInRequired", reason })
+    }
+    expect(seen.map(({ method, url }) => [url, method])).toEqual([
+      ["/v1/modules/sandboxes/aws-session", "GET"],
+      ["/v1/modules/sandboxes/aws-session", "GET"]
+    ])
+    const refused = yield* loadSandboxAwsSession.pipe(
+      Effect.provideService(HttpClient.HttpClient, answering(403, { error: "owner_only" })),
+      Effect.flip
+    )
+    expect(refused.detail).toBe("status")
+  }))
+
+it.effect("refuses a sign-in page that isn't https, so it can never become a script link", () =>
+  Effect.gen(function*() {
+    for (const verificationUri of ["javascript:alert(1)", "http://portal.example.test/device", "not a url"]) {
+      const pending = {
+        _tag: "SignInPending",
+        verificationUri,
+        userCode: "ABCD-EFGH",
+        expiresAt: "2026-10-23T13:15:00.000Z"
+      }
+      const read = yield* loadSandboxAwsSession.pipe(
+        Effect.provideService(HttpClient.HttpClient, answering(200, pending)),
+        Effect.flip
+      )
+      expect([verificationUri, read._tag, read.detail]).toEqual([
+        verificationUri,
+        "SandboxesClientError",
+        "invalid_response"
+      ])
+      const started = yield* startSandboxAwsSignIn.pipe(
+        Effect.provideService(HttpClient.HttpClient, answering(200, pending)),
+        Effect.flip
+      )
+      expect([verificationUri, started._tag, started.reason]).toEqual([
+        verificationUri,
+        "SandboxesWriteFailed",
+        "rejected"
+      ])
+    }
+  }))
+
+it.effect("starts an AWS sign-in with an empty body and returns what to approve; another node is refused", () =>
+  Effect.gen(function*() {
+    const seen: Array<Seen> = []
+    const pending = {
+      _tag: "SignInPending",
+      verificationUri: "https://portal.example.test/start/#/device?user_code=ABCD-EFGH",
+      userCode: "ABCD-EFGH",
+      expiresAt: "2026-10-23T13:15:00.000Z"
+    }
+    const started = yield* startSandboxAwsSignIn.pipe(
+      Effect.provideService(HttpClient.HttpClient, answering(200, pending, (request) => seen.push(request)))
+    )
+    expect(started._tag).toBe("SignInPending")
+    expect(started._tag === "SignInPending" ? started.userCode : null).toBe("ABCD-EFGH")
+    expect(seen.map(({ method, url }) => [url, method])).toEqual([["/v1/modules/sandboxes/aws-sign-in", "POST"]])
+    const body = seen[0]?.body
+    expect(body?._tag === "Uint8Array" ? new TextDecoder().decode(body.body) : null).toBe("{}")
+    const refused = yield* startSandboxAwsSignIn.pipe(
+      Effect.provideService(HttpClient.HttpClient, answering(403, { error: "owner_only" })),
+      Effect.flip
+    )
+    expect(refused.reason).toBe("unauthorized")
+  }))
+
+it.effect("signs the hub out of AWS with an empty body; another caller is refused", () =>
+  Effect.gen(function*() {
+    const seen: Array<Seen> = []
+    const signedOut = yield* signOutSandboxAws.pipe(
+      Effect.provideService(
+        HttpClient.HttpClient,
+        answering(200, { _tag: "SignInRequired", reason: "ended" }, (request) => seen.push(request))
+      )
+    )
+    expect(signedOut).toEqual({ _tag: "SignInRequired", reason: "ended" })
+    expect(seen.map(({ method, url }) => [url, method])).toEqual([["/v1/modules/sandboxes/aws-sign-out", "POST"]])
+    const body = seen[0]?.body
+    expect(body?._tag === "Uint8Array" ? new TextDecoder().decode(body.body) : null).toBe("{}")
+    const refused = yield* signOutSandboxAws.pipe(
+      Effect.provideService(HttpClient.HttpClient, answering(403, { error: "owner_only" })),
+      Effect.flip
+    )
+    expect(refused.reason).toBe("unauthorized")
+    const running = yield* signOutSandboxAws.pipe(
+      Effect.provideService(HttpClient.HttpClient, answering(409, { error: "reset_running" })),
+      Effect.flip
+    )
+    expect(running.reason).toBe("reset_running")
+    const other = yield* signOutSandboxAws.pipe(
+      Effect.provideService(HttpClient.HttpClient, answering(409, { error: "something new" })),
+      Effect.flip
+    )
+    expect(other.reason).toBe("rejected")
   }))
 
 const failedRun = {

@@ -12,7 +12,7 @@ import {
 } from "@knpkv/sandbox-pool"
 import { SandboxesOverview, SandboxRunLog, type SandboxRuns } from "@knpkv/sandbox-pool/host"
 import type { SandboxHostReads } from "@knpkv/sandbox-pool/host/server"
-import { ConfigProvider, Effect, FileSystem, Layer, Result, Schema } from "effect"
+import { ConfigProvider, Effect, Fiber, FileSystem, Layer, Result, Schema, Semaphore } from "effect"
 import type { AwsSignIn, AwsSignInState } from "../src/aws-sign-in.js"
 import { connectModule, sandboxesModule } from "../src/module-contract.js"
 import { dispatchModuleRoute, makeModuleLayer, ModuleHandlers, ModuleRouteFailure } from "../src/module-server.js"
@@ -60,6 +60,7 @@ const request = (
   method = "GET",
   options: {
     readonly sameNode?: boolean
+    readonly owner?: boolean
     readonly provenance?: "verified_local_listener" | "authenticated_remote"
     readonly body?: Schema.Json
     readonly sameOrigin?: Effect.Effect<void, OriginRefused>
@@ -75,6 +76,7 @@ const request = (
       Effect.succeed({
         login: "example-viewer",
         sameNode: options.sameNode ?? false,
+        owner: options.owner ?? false,
         provenance: options.provenance ?? "authenticated_remote"
       }),
     sameOrigin: options.sameOrigin ?? Effect.void,
@@ -86,10 +88,11 @@ class CallerRefused extends Schema.TaggedError<CallerRefused>()("CallerRefused",
 class OriginRefused extends Schema.TaggedError<OriginRefused>()("OriginRefused", {}) {}
 
 /** An AWS sign-in whose state the test sets; `begin` moves it to pending and is counted, as are state reads. */
-const fakeSignIn = (initial: AwsSignInState) => {
-  const calls: Array<"state" | "begin"> = []
+const fakeSignIn = (initial: AwsSignInState, hold: AwsSignIn["hold"] = (effect) => effect) => {
+  const calls: Array<"state" | "begin" | "signOut"> = []
   let current = initial
   const signIn: AwsSignIn = {
+    hold,
     state: Effect.sync(() => {
       calls.push("state")
       return current
@@ -104,6 +107,11 @@ const fakeSignIn = (initial: AwsSignInState) => {
         expiresAt: Date.UTC(2026, 9, 23, 12, 32)
       }
       return { ended: Effect.void }
+    }),
+    signOut: Effect.sync(() => {
+      calls.push("signOut")
+      current = { _tag: "SignInRequired", reason: "ended" }
+      return { endedOnAws: true }
     }),
     revoked: () => Effect.void,
     region: "eu-central-1"
@@ -501,12 +509,16 @@ describe("host-local Sandboxes module", () => {
         expect((yield* request("sandboxes/caller"))?.body).toEqual({
           login: "example-viewer",
           owner: false,
-          signIn: null
+          signIn: null,
+          poolMode: "live",
+          awsSignedIn: null
         })
-        expect((yield* request("sandboxes/caller", "serve", "GET", { sameNode: true }))?.body).toEqual({
+        expect((yield* request("sandboxes/caller", "serve", "GET", { owner: true }))?.body).toEqual({
           login: "example-viewer",
           owner: true,
-          signIn: null
+          signIn: null,
+          poolMode: "live",
+          awsSignedIn: null
         })
       })
     ))
@@ -518,9 +530,11 @@ describe("host-local Sandboxes module", () => {
         expect((yield* request("sandboxes/caller"))?.body).toEqual({
           login: "example-viewer",
           owner: false,
-          signIn: null
+          signIn: null,
+          poolMode: "live",
+          awsSignedIn: null
         })
-        expect((yield* request("sandboxes/caller", "serve", "GET", { sameNode: true }))?.body).toEqual({
+        expect((yield* request("sandboxes/caller", "serve", "GET", { owner: true }))?.body).toEqual({
           login: "example-viewer",
           owner: true,
           signIn: {
@@ -528,11 +542,46 @@ describe("host-local Sandboxes module", () => {
             ssoSession: "example-session",
             roleName: "ExampleDeveloper",
             region: "eu-central-1"
-          }
+          },
+          poolMode: "live",
+          awsSignedIn: null
         })
       }),
       { pool: signInPool }
     ))
+
+  it.effect("tells a viewer only whether the hub is signed in to AWS, and the pool's mode; never the code", () =>
+    Effect.gen(function*() {
+      const caller = (state: AwsSignInState, owner: boolean, poolMode: SandboxPoolMode = "live") =>
+        withModule(
+          host,
+          request("sandboxes/caller", "serve", "GET", { owner }),
+          { awsSignIn: fakeSignIn(state).signIn, poolMode }
+        ).pipe(Effect.map((answer) => answer?.body))
+      const pending: AwsSignInState = {
+        _tag: "SignInPending",
+        verificationUri: "https://portal.example.test/start/#/device?user_code=ABCD-EFGH",
+        userCode: "ABCD-EFGH",
+        expiresAt: Date.UTC(2026, 9, 23, 12, 32)
+      }
+      expect(yield* caller({ _tag: "SignedIn", expiresAt: Date.UTC(2026, 9, 23, 18, 5) }, false)).toMatchObject({
+        owner: false,
+        awsSignedIn: true
+      })
+      expect(yield* caller(pending, false)).toEqual({
+        login: "example-viewer",
+        owner: false,
+        signIn: null,
+        poolMode: "live",
+        awsSignedIn: false
+      })
+      expect(yield* caller({ _tag: "SignInRequired", reason: "ended" }, false, "observe")).toMatchObject({
+        poolMode: "observe",
+        awsSignedIn: false
+      })
+      // The owner reads the whole state from aws-session.
+      expect(yield* caller(pending, true)).toMatchObject({ owner: true, awsSignedIn: null })
+    }))
 
   it.effect("serves a run's log and stored line to the hub's own node only, and reads nothing for anyone else", () => {
     const reads: Array<string> = []
@@ -554,18 +603,18 @@ describe("host-local Sandboxes module", () => {
         expect(Result.isFailure(refused) && refused.failure._tag).toBe("CallerRefused")
         expect(reads).toEqual([])
 
-        const owner = yield* request(path, "serve", "GET", { sameNode: true })
+        const owner = yield* request(path, "serve", "GET", { owner: true })
         expect(owner?.body).toEqual(Schema.encodeSync(SandboxRunLog)(runLogBody))
         const foreign = yield* Effect.result(
-          request(`sandboxes/run-log?id=${account}&run=run-other`, "serve", "GET", { sameNode: true })
+          request(`sandboxes/run-log?id=${account}&run=run-other`, "serve", "GET", { owner: true })
         )
         expect(Result.isFailure(foreign) && foreign.failure).toMatchObject({ status: 404, code: "not_found" })
         const missing = yield* Effect.result(
-          request("sandboxes/run-log?id=000000000000&run=run-q", "serve", "GET", { sameNode: true })
+          request("sandboxes/run-log?id=000000000000&run=run-q", "serve", "GET", { owner: true })
         )
         expect(Result.isFailure(missing) && missing.failure).toMatchObject({ status: 404, code: "not_found" })
         const noRun = yield* Effect.result(
-          request(`sandboxes/run-log?id=${account}`, "serve", "GET", { sameNode: true })
+          request(`sandboxes/run-log?id=${account}`, "serve", "GET", { owner: true })
         )
         expect(Result.isFailure(noRun) && noRun.failure).toMatchObject({ status: 400, code: "invalid_query" })
         const deniedListeners: ReadonlyArray<"approval" | "tailnet" | "lan" | "work"> = [
@@ -575,7 +624,7 @@ describe("host-local Sandboxes module", () => {
           "work"
         ]
         for (const listener of deniedListeners) {
-          expect(yield* request(path, listener, "GET", { sameNode: true })).toBeNull()
+          expect(yield* request(path, listener, "GET", { owner: true })).toBeNull()
         }
       }),
       { reads: Effect.succeed(recording) }
@@ -590,11 +639,20 @@ describe("host-local Sandboxes module", () => {
         const viewer = yield* Effect.result(request("sandboxes/aws-session"))
         expect(Result.isFailure(viewer) && viewer.failure).toMatchObject({ status: 403, code: "owner_only" })
         expect(calls).toEqual([])
-        const owner = yield* request("sandboxes/aws-session", "serve", "GET", { sameNode: true })
+        const owner = yield* request("sandboxes/aws-session", "serve", "GET", { owner: true })
         expect(owner?.body).toEqual({ _tag: "SignedIn", expiresAt: "2026-10-23T18:05:00.000Z" })
+        const reasons: ReadonlyArray<"never" | "ended"> = ["never", "ended"]
+        for (const reason of reasons) {
+          const required = yield* withModule(
+            host,
+            request("sandboxes/aws-session", "serve", "GET", { owner: true }),
+            { awsSignIn: fakeSignIn({ _tag: "SignInRequired", reason }).signIn }
+          )
+          expect(required?.body).toEqual({ _tag: "SignInRequired", reason })
+        }
         const unconfigured = yield* withModule(
           host,
-          request("sandboxes/aws-session", "serve", "GET", { sameNode: true }),
+          request("sandboxes/aws-session", "serve", "GET", { owner: true }),
           { awsSignIn: null }
         )
         expect(unconfigured?.body).toEqual({ _tag: "NotConfigured" })
@@ -604,16 +662,16 @@ describe("host-local Sandboxes module", () => {
   })
 
   it.effect("starts an AWS sign-in for the hub's own node only and answers what to approve", () => {
-    const { calls, signIn } = fakeSignIn({ _tag: "SignInRequired" })
+    const { calls, signIn } = fakeSignIn({ _tag: "SignInRequired", reason: "never" })
     return withModule(
       host,
       Effect.gen(function*() {
         const viewer = yield* Effect.result(
-          request("sandboxes/aws-sign-in", "serve", "POST", { sameNode: false, body: {} })
+          request("sandboxes/aws-sign-in", "serve", "POST", { owner: false, body: {} })
         )
         expect(Result.isFailure(viewer) && viewer.failure).toMatchObject({ status: 403, code: "owner_only" })
         expect(calls).toEqual([])
-        const started = yield* request("sandboxes/aws-sign-in", "serve", "POST", { sameNode: true, body: {} })
+        const started = yield* request("sandboxes/aws-sign-in", "serve", "POST", { owner: true, body: {} })
         expect(started?.body).toEqual({
           _tag: "SignInPending",
           verificationUri: "https://portal.example.test/start/#/device?user_code=ABCD-EFGH",
@@ -626,11 +684,128 @@ describe("host-local Sandboxes module", () => {
     )
   })
 
+  // Signing out lets the owner sign the hub in again as another AWS user; nobody else may end the hub's sign-in.
+  it.effect("signs the hub out of AWS for the owner only, and answers that a sign-in is required", () => {
+    const { calls, signIn } = fakeSignIn({ _tag: "SignedIn", expiresAt: Date.UTC(2026, 9, 23, 18, 5) })
+    return withModule(
+      host,
+      Effect.gen(function*() {
+        const viewer = yield* Effect.result(
+          request("sandboxes/aws-sign-out", "serve", "POST", { owner: false, body: {} })
+        )
+        expect(Result.isFailure(viewer) && viewer.failure).toMatchObject({ status: 403, code: "owner_only" })
+        expect(calls).toEqual([])
+        const crossOrigin = yield* Effect.result(
+          request("sandboxes/aws-sign-out", "serve", "POST", {
+            owner: true,
+            body: {},
+            sameOrigin: Effect.fail(new OriginRefused())
+          })
+        )
+        expect(Result.isFailure(crossOrigin) && crossOrigin.failure._tag).toBe("OriginRefused")
+        expect(calls).toEqual([])
+        const signedOut = yield* request("sandboxes/aws-sign-out", "serve", "POST", { owner: true, body: {} })
+        expect(signedOut?.body).toEqual({ _tag: "SignInRequired", reason: "ended" })
+        expect(calls).toEqual(["signOut", "state"])
+        const unconfigured = yield* withModule(
+          host,
+          request("sandboxes/aws-sign-out", "serve", "POST", { owner: true, body: {} }),
+          { awsSignIn: null }
+        )
+        expect(unconfigured?.body).toEqual({ _tag: "NotConfigured" })
+      }),
+      { awsSignIn: signIn }
+    )
+  })
+
+  // A reset in progress needs the sign-in until it ends: signing out would cut it off mid-nuke and leave the
+  // account in Cleaning. So sign-out is refused while one runs, and when the pool can't be read to tell.
+  it.effect("refuses to sign out while a reset runs, and when the pool can't be read, keeping the token", () => {
+    const { calls, signIn } = fakeSignIn({ _tag: "SignedIn", expiresAt: Date.UTC(2026, 9, 23, 18, 5) })
+    const resetting: SandboxHostReads = {
+      ...fakeReads,
+      overview: Effect.succeed(
+        Schema.decodeUnknownSync(SandboxesOverview)({
+          ...overview,
+          sandboxes: [{ ...overview.sandboxes[0], state: { _tag: "Cleaning", runId: "run-c", step: "nuke" } }]
+        })
+      )
+    }
+    const unreadable: SandboxHostReads = {
+      ...fakeReads,
+      overview: Effect.succeed({ _tag: "Failed", reason: "unavailable" })
+    }
+    return Effect.gen(function*() {
+      const signOut = (reads: SandboxHostReads) =>
+        withModule(
+          host,
+          Effect.result(request("sandboxes/aws-sign-out", "serve", "POST", { owner: true, body: {} })),
+          { awsSignIn: signIn, reads: Effect.succeed(reads) }
+        )
+      const running = yield* signOut(resetting)
+      expect(Result.isFailure(running) && running.failure).toMatchObject({ status: 409, code: "reset_running" })
+      const blind = yield* signOut(unreadable)
+      expect(Result.isFailure(blind) && blind.failure).toMatchObject({ status: 503, code: "unavailable" })
+      expect(calls.filter((call) => call === "signOut")).toEqual([])
+      expect((yield* signIn.state)._tag).toBe("SignedIn")
+    })
+  })
+
+  // A reset moving into Cleaning takes the sign-in's hold; sign-out takes it around its check and the sign-out,
+  // so the two can't interleave.
+  it.effect("signs out only once the sign-in's hold is free, checking for a running reset inside it", () =>
+    Effect.gen(function*() {
+      const lock = yield* Semaphore.make(1)
+      const { calls, signIn } = fakeSignIn(
+        { _tag: "SignedIn", expiresAt: Date.UTC(2026, 9, 23, 18, 5) },
+        Semaphore.withPermit(lock)
+      )
+      yield* Semaphore.take(lock, 1)
+      const signingOut = yield* Effect.forkChild(
+        withModule(
+          host,
+          request("sandboxes/aws-sign-out", "serve", "POST", { owner: true, body: {} }),
+          { awsSignIn: signIn }
+        )
+      )
+      yield* Effect.yieldNow
+      expect(calls).toEqual([])
+      yield* Semaphore.release(lock, 1)
+      expect((yield* Fiber.join(signingOut))?.body).toEqual({ _tag: "SignInRequired", reason: "ended" })
+      expect(calls).toEqual(["signOut", "state"])
+    }))
+
+  // The owner is an identity, not the hub's node: from a laptop on the tailnet they are still the owner.
+  it.effect("lets the owner sign the hub in from another node, and refuses anyone who is not the owner", () => {
+    const { calls, signIn } = fakeSignIn({ _tag: "SignInRequired", reason: "never" })
+    return withModule(
+      host,
+      Effect.gen(function*() {
+        const fromLaptop = { sameNode: false, owner: true }
+        expect((yield* request("sandboxes/caller", "serve", "GET", fromLaptop))?.body).toMatchObject({
+          owner: true,
+          awsSignedIn: null
+        })
+        const started = yield* request("sandboxes/aws-sign-in", "serve", "POST", { ...fromLaptop, body: {} })
+        expect(started?.body).toMatchObject({ _tag: "SignInPending", userCode: "ABCD-EFGH" })
+        expect(calls).toEqual(["begin", "state"])
+
+        const notOwner = { sameNode: true, owner: false, body: {} }
+        const refused = yield* Effect.result(request("sandboxes/aws-sign-in", "serve", "POST", notOwner))
+        expect(Result.isFailure(refused) && refused.failure).toMatchObject({ status: 403, code: "owner_only" })
+        const read = yield* Effect.result(request("sandboxes/aws-session", "serve", "GET", notOwner))
+        expect(Result.isFailure(read) && read.failure).toMatchObject({ status: 403, code: "owner_only" })
+        expect(calls).toEqual(["begin", "state"])
+      }),
+      { awsSignIn: signIn }
+    )
+  })
+
   it.effect("names an unserved pool on the run log, even to the hub's own node", () =>
     Effect.gen(function*() {
       const elsewhere = yield* withModule(
         other,
-        request(`sandboxes/run-log?id=${account}&run=run-q`, "serve", "GET", { sameNode: true })
+        request(`sandboxes/run-log?id=${account}&run=run-q`, "serve", "GET", { owner: true })
       )
       expect(elsewhere?.body).toMatchObject({ _tag: "Unavailable", reason: "other_host" })
     }))
@@ -640,7 +815,7 @@ describe("host-local Sandboxes module", () => {
     return withModule(
       host,
       Effect.gen(function*() {
-        const post = (body: Schema.Json) => request("sandboxes/jobs", "serve", "POST", { sameNode: true, body })
+        const post = (body: Schema.Json) => request("sandboxes/jobs", "serve", "POST", { owner: true, body })
         const leased = yield* post({ _tag: "Lease" })
         expect(leased).toEqual({ status: 202, body: { jobId: "job-1", status: "queued" } })
         yield* post({ _tag: "Extend", accountId: account })
@@ -673,7 +848,7 @@ describe("host-local Sandboxes module", () => {
       host,
       Effect.gen(function*() {
         yield* request("sandboxes/jobs", "local", "POST", {
-          sameNode: true,
+          owner: true,
           provenance: "verified_local_listener",
           body: { _tag: "Lease" }
         })
@@ -691,16 +866,16 @@ describe("host-local Sandboxes module", () => {
       host,
       Effect.gen(function*() {
         const other = yield* Effect.result(
-          request("sandboxes/jobs", "serve", "POST", { sameNode: false, body: { _tag: "Lease" } })
+          request("sandboxes/jobs", "serve", "POST", { owner: false, body: { _tag: "Lease" } })
         )
         expect(Result.isFailure(other) && other.failure).toMatchObject({ _tag: "ModuleRouteFailure", status: 403 })
         const bad = yield* Effect.result(
-          request("sandboxes/jobs", "serve", "POST", { sameNode: true, body: { _tag: "Extend", accountId: "nope" } })
+          request("sandboxes/jobs", "serve", "POST", { owner: true, body: { _tag: "Extend", accountId: "nope" } })
         )
         expect(Result.isFailure(bad) && bad.failure).toMatchObject({ _tag: "ModuleRouteFailure", status: 400 })
         const crossOrigin = yield* Effect.result(
           request("sandboxes/jobs", "serve", "POST", {
-            sameNode: true,
+            owner: true,
             body: { _tag: "Lease" },
             sameOrigin: Effect.fail(new OriginRefused())
           })
@@ -717,7 +892,7 @@ describe("host-local Sandboxes module", () => {
     return withModule(
       host,
       Effect.gen(function*() {
-        const post = (body: Schema.Json) => request("sandboxes/jobs", "serve", "POST", { sameNode: true, body })
+        const post = (body: Schema.Json) => request("sandboxes/jobs", "serve", "POST", { owner: true, body })
         expect(yield* post({ _tag: "Retry", accountId: account })).toEqual({
           status: 202,
           body: { jobId: "job-1", status: "queued" }
@@ -748,10 +923,10 @@ describe("host-local Sandboxes module", () => {
 
   it.effect("refuses a retry or lift that could not run, or is already asked for, and submits nothing", () => {
     const { submit, submitted } = recordingSubmit()
-    const refused = (body: Schema.Json, pending: ReadonlyArray<PendingSandboxApproval> = [], sameNode = true) =>
+    const refused = (body: Schema.Json, pending: ReadonlyArray<PendingSandboxApproval> = [], owner = true) =>
       withModule(
         host,
-        Effect.result(request("sandboxes/jobs", "serve", "POST", { sameNode, body })),
+        Effect.result(request("sandboxes/jobs", "serve", "POST", { owner, body })),
         { reads: Effect.succeed(attentionReads), submit, pending: Effect.succeed(pending) }
       ).pipe(Effect.map((result) => (Result.isFailure(result) ? result.failure : null)))
     return Effect.gen(function*() {
@@ -787,7 +962,7 @@ describe("host-local Sandboxes module", () => {
     const refused = (body: Schema.Json) =>
       withModule(
         host,
-        Effect.result(request("sandboxes/jobs", "serve", "POST", { sameNode: true, body })),
+        Effect.result(request("sandboxes/jobs", "serve", "POST", { owner: true, body })),
         { reads: Effect.succeed(attentionReads), submit, poolMode: "observe" }
       ).pipe(Effect.map((result) => (Result.isFailure(result) ? result.failure : null)))
     return Effect.gen(function*() {
@@ -812,7 +987,7 @@ describe("host-local Sandboxes module", () => {
       for (const body of [{ _tag: "Lease" }, { _tag: "Retry", accountId: account }]) {
         const result = yield* withModule(
           host,
-          Effect.result(request("sandboxes/jobs", "serve", "POST", { sameNode: true, body })),
+          Effect.result(request("sandboxes/jobs", "serve", "POST", { owner: true, body })),
           { reads: Effect.succeed(attentionReads), submit, poolMode: "off" }
         )
         expect(Result.isFailure(result) && result.failure, body._tag).toMatchObject({
@@ -830,7 +1005,7 @@ describe("host-local Sandboxes module", () => {
       const fleetDown = yield* withModule(
         host,
         Effect.result(
-          request("sandboxes/jobs", "serve", "POST", { sameNode: true, body: { _tag: "Retry", accountId: account } })
+          request("sandboxes/jobs", "serve", "POST", { owner: true, body: { _tag: "Retry", accountId: account } })
         ),
         { reads: Effect.succeed(attentionReads), submit, pending: Effect.fail("store down") }
       )
@@ -838,7 +1013,7 @@ describe("host-local Sandboxes module", () => {
       const poolDown = yield* withModule(
         host,
         Effect.result(
-          request("sandboxes/jobs", "serve", "POST", { sameNode: true, body: { _tag: "Retry", accountId: account } })
+          request("sandboxes/jobs", "serve", "POST", { owner: true, body: { _tag: "Retry", accountId: account } })
         ),
         {
           reads: Effect.succeed({
@@ -875,7 +1050,7 @@ describe("host-local Sandboxes module", () => {
       for (const { name, options, sandboxesHost } of places) {
         const refused = yield* withModule(
           sandboxesHost,
-          Effect.result(request("sandboxes/jobs", "serve", "POST", { sameNode: true, body: { _tag: "Lease" } })),
+          Effect.result(request("sandboxes/jobs", "serve", "POST", { owner: true, body: { _tag: "Lease" } })),
           { ...options, submit }
         )
         expect(Result.isFailure(refused) && refused.failure, name).toMatchObject({ status: 503 })
@@ -925,7 +1100,7 @@ layer(NodeServices.layer)("host-local Sandboxes module through a real Fleet", (i
       const answer = yield* withModule(
         host,
         request("sandboxes/jobs", "local", "POST", {
-          sameNode: true,
+          owner: true,
           provenance: "verified_local_listener",
           body: {
             _tag: "Retry",

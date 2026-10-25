@@ -247,3 +247,47 @@ test("cards show this month's spend against the alarm and the hard stop; a budge
   await show(page, { id: "4a", state: "attention-4a", heading: "ephemeral-01" }, "light")
   await expect(page.locator("[data-spend-over]")).toHaveText("$50.20 is past the $50 hard stop.")
 })
+
+test("the owner signs the hub in to AWS: code and sign-in page while it waits, then until when", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await show(page, { id: "signin", state: "signin-flow" }, "light")
+  const card = page.getByRole("status", { name: "AWS sign-in" })
+  await expect(card.getByRole("heading", { name: "Sign in to AWS to read spend." })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Release", exact: true })).toBeDisabled()
+  await expect(page.getByRole("button", { name: "Release", exact: true })).toHaveAttribute(
+    "aria-describedby",
+    "sandboxes-aws-first"
+  )
+  await expect(page.getByRole("button", { name: "Extend", exact: true })).toBeEnabled()
+  await card.getByRole("button", { name: "Sign in to AWS" }).click()
+  await expect(card.getByRole("heading", { name: "Finish signing in to AWS." })).toBeVisible()
+  await expect(card.locator("[data-aws-code]")).toHaveText("ABCD-EFGH")
+  const open = card.getByRole("link", { name: "Open sign-in page" })
+  await expect(open).toHaveAttribute("target", "_blank")
+  await expect(open).toHaveAttribute("rel", "noopener noreferrer")
+  await page.clock.runFor(5_000)
+  await expect(page.locator("[data-aws-signed-in]")).toHaveText("Signed in to AWS until 18:05")
+  await expect(page.getByRole("status", { name: "AWS sign-in" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Release", exact: true })).toBeEnabled()
+  // Page 21, states 8 and 9: sign out from beside the signed-in line, after one confirm.
+  await page.getByRole("button", { name: "Sign out of AWS" }).click()
+  const sheet = page.getByRole("dialog", { name: "Sign the hub out of AWS?" })
+  await expect(sheet).toBeVisible()
+  await sheet.getByRole("button", { name: "Sign out", exact: true }).click()
+  await expect(sheet).toHaveCount(0)
+  await expect(card.getByRole("heading", { name: "The AWS sign-in ended." })).toBeVisible()
+  await expect(page.locator("[data-aws-signed-in]")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Release", exact: true })).toBeDisabled()
+})
+
+test("observe mode says so once and disables every job up front", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await show(page, { id: "observe", state: "observe" }, "light")
+  await expect(page.locator("#sandboxes-observe-mode")).toHaveText(
+    "The pool is in observe mode: it reads spend and runs no jobs."
+  )
+  const lease = page.getByRole("button", { name: "Lease an account" })
+  await expect(lease).toBeDisabled()
+  await expect(lease).toHaveAttribute("aria-describedby", "sandboxes-observe-mode")
+  await expect(page.getByRole("button", { name: "Request to lift the stop" })).toBeDisabled()
+})

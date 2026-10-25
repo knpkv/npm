@@ -31,6 +31,7 @@ import {
 import { Effect, type Exit, Option, Redacted, Schema } from "effect"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import type { ListenerMode } from "../internal/listener.js"
+import { cliTokenHeader, presentsCliToken } from "./cli-token.js"
 import type { AppTokens, Grants } from "./grants.js"
 import type { AppRegistry } from "./registry.js"
 import { proxyToSocket } from "./socket.js"
@@ -58,7 +59,24 @@ export interface AppsRouteContext<E, R> {
   readonly runtime: { readonly runPromiseExit: <A, X>(effect: Effect.Effect<A, X, R>) => Promise<Exit.Exit<A, X>> }
   /** Defaults to 30 s. */
   readonly proxyTimeoutMillis?: number
+  /**
+   * `herdr-hub apps restart`: this hub start's CLI token and the supervisor's restart. Null when the token could not be
+   * written (the route then refuses everything).
+   */
+  readonly cliRestart?: {
+    readonly token: Redacted.Redacted<string> | null
+    readonly restart: (id: AppId) => Effect.Effect<boolean>
+  }
 }
+
+const restartPath = /^\/v1\/apps\/([^/]+)\/restart$/u
+const decodeAppId = Schema.decodeUnknownOption(AppIdSchema)
+/** The app id in a restart path; none for a malformed `%` escape or anything that isn't an id. */
+const restartId = (segment: string) =>
+  Option.flatMap(
+    Option.liftThrowable(decodeURIComponent)(segment),
+    decodeAppId
+  )
 
 /** Run `effect`; answer its typed failure through `refuse`, a defect as 500. Null after answering. */
 const runChecked = async <A, E, R>(
@@ -103,6 +121,34 @@ export const handleAppsRoute = async <E, R>(
       return true
     }
     send(response, 200, encodeStates({ contract: 1, apps: apps.value.map((app) => app.state) }))
+    return true
+  }
+  const restart = restartPath.exec(url.pathname)
+  if (restart !== null) {
+    if (method !== "POST") {
+      send(response, 405, { error: "method_not_allowed" })
+      return true
+    }
+    // Only this machine's user, on the loopback listener, holding the token this hub start wrote.
+    const token = context.cliRestart?.token ?? null
+    const presented = request.headers[cliTokenHeader]
+    if (
+      context.listener !== "local" || token === null || context.cliRestart === undefined ||
+      !presentsCliToken(Array.isArray(presented) ? undefined : presented, token)
+    ) {
+      send(response, 403, { error: "forbidden" })
+      return true
+    }
+    const id = restartId(restart[1] ?? "")
+    if (Option.isNone(id)) {
+      send(response, 404, { error: "not_found" })
+      return true
+    }
+    const restarted = await context.runtime.runPromiseExit(context.cliRestart.restart(id.value))
+    // A supervisor failure is the hub's, not "no such app".
+    if (restarted._tag === "Failure") send(response, 500, { error: "internal" })
+    else if (!restarted.value) send(response, 404, { error: "not_found" })
+    else send(response, 202, { restarted: id.value })
     return true
   }
   if (!url.pathname.startsWith("/apps/")) return false

@@ -41,7 +41,8 @@ describe("Icon", () => {
       "user",
       "close",
       "pin",
-      "copy"
+      "copy",
+      "info"
     ])
     expect(RLY_ICON_VARIANTS.size).toMatchObject({
       small: { pixels: 16 },
@@ -82,6 +83,16 @@ describe("Icon", () => {
       expect(icon?.getAttribute("height"), name).toBe("24")
       expect(icon?.getAttribute("width"), name).toBe("24")
     }
+  })
+
+  it("draws info as a circle with a lowercase i, in the catalog's stroke", () => {
+    const icon = render(<Icon decorative name="info" size="small" />)
+    expect(icon?.getAttribute("stroke-width")).toBe("1.75")
+    expect(icon?.querySelector("circle")?.getAttribute("r")).toBe("10")
+    expect([...(icon?.querySelectorAll("path") ?? [])].map((path) => path.getAttribute("d"))).toEqual([
+      "M12 16v-4",
+      "M12 8h.01"
+    ])
   })
 
   it("rejects empty informative labels at runtime", () => {

@@ -224,6 +224,61 @@
     }
   }
 
+  /* Open sign-in page: the same link drawn as rly's primary Button. */
+  .sandboxes-console-link.sandboxes-link-primary {
+    border-color: var(--rly-color-action-background);
+    background: var(--rly-color-action-background);
+    color: var(--rly-color-action-foreground);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .sandboxes-console-link.sandboxes-link-primary:hover {
+      background: var(--rly-color-text-2);
+    }
+  }
+
+  /* The AWS sign-in card sits between the heading and the cards; its lines under the heading. */
+  .sandboxes-aws {
+    display: grid;
+  }
+
+  .sandboxes-aws-line {
+    display: flex;
+    align-items: center;
+    gap: var(--rly-space-8);
+    margin: 0;
+  }
+
+  /* Page 21 state 8: the signed-in line and Sign out of AWS share a row, wrapping under it on a phone. */
+  .sandboxes-aws-signed-in {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--rly-space-8);
+  }
+
+  .sandboxes-aws-pending {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-12) var(--rly-space-16);
+    align-items: end;
+  }
+
+  .sandboxes-aws-code {
+    display: grid;
+    gap: var(--rly-space-4);
+  }
+
+  .sandboxes-aws-code small {
+    color: var(--rly-color-text-2);
+    font-size: 0.75rem;
+  }
+
+  .sandboxes-aws-code code {
+    font-size: 1rem;
+    letter-spacing: 0.08em;
+  }
+
   .sandboxes-facts {
     display: grid;
     grid-template-columns: 7rem minmax(0, 1fr);

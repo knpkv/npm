@@ -305,7 +305,14 @@ describe("hub apps", () => {
      * The hub's app routes on a loopback port: app services first, then the proxy, admitting every browser
      * request as `viewer`. Jobs the app submits are recorded with the caller the hub resolved.
      */
-    const serveHub = (directory: string, listener: "local" | "serve" = "local") =>
+    const serveHub = (
+      directory: string,
+      listener: "local" | "serve" = "local",
+      cliRestart: NonNullable<Parameters<typeof handleAppsRoute<never, never>>[3]["cliRestart"]> = {
+        token: null,
+        restart: () => Effect.succeed(false)
+      }
+    ) =>
       Effect.gen(function*() {
         const hub = yield* makeHub(directory)
         const grants = yield* makeGrants
@@ -341,7 +348,8 @@ describe("hub apps", () => {
                     target.end()
                   },
                   runtime: { runPromiseExit: Effect.runPromiseExit },
-                  proxyTimeoutMillis: 300
+                  proxyTimeoutMillis: 300,
+                  cliRestart
                 })
               ).then((handled) => {
                 if (!handled) {
@@ -361,6 +369,40 @@ describe("hub apps", () => {
         const { port } = Schema.decodeUnknownSync(ListeningPort)(server.address())
         return { hub, grants, port, submitted, url: `http://127.0.0.1:${port}` }
       })
+
+    // `herdr-hub apps restart`: this machine's user only, on the loopback listener, holding this hub start's token.
+    it.effect("restarts an app only for the CLI token on the loopback listener", () =>
+      Effect.gen(function*() {
+        const directory = yield* tempDirectory
+        const restarted: Array<string> = []
+        const cli = {
+          token: Redacted.make("this-start-token"),
+          restart: (id: AppIdType) =>
+            id === "broken"
+              ? Effect.die("the supervisor failed")
+              : Effect.sync(() => {
+                restarted.push(id)
+                return id === "fixture"
+              })
+        }
+        const local = yield* serveHub(directory, "local", cli)
+        const served = yield* serveHub(directory, "serve", cli)
+        const post = (url: string, path: string, token?: string) =>
+          Effect.promise(() =>
+            fetch(`${url}${path}`, { method: "POST", headers: token === undefined ? {} : { "x-hub-cli-token": token } })
+          ).pipe(Effect.map((response) => response.status))
+        expect([
+          yield* post(local.url, "/v1/apps/fixture/restart"),
+          yield* post(local.url, "/v1/apps/fixture/restart", "wrong"),
+          yield* post(served.url, "/v1/apps/fixture/restart", "this-start-token"),
+          yield* post(local.url, "/v1/apps/absent/restart", "this-start-token"),
+          // A malformed escape is no app, not a crash.
+          yield* post(local.url, "/v1/apps/%E0%A4%A/restart", "this-start-token"),
+          yield* post(local.url, "/v1/apps/broken/restart", "this-start-token"),
+          yield* post(local.url, "/v1/apps/fixture/restart", "this-start-token")
+        ]).toEqual([403, 403, 403, 404, 404, 500, 202])
+        expect(restarted).toEqual(["absent", "fixture"])
+      }).pipe(Effect.scoped))
 
     /** The hub with the fixture registered and Ready, calling back into the hub for its services. */
     const serveHubWithFixture = (directory: string, mode: FixtureMode = "ok") =>
@@ -462,7 +504,7 @@ describe("hub apps", () => {
         expect(JSON.parse(fromWrite.body)).toEqual({ jobId: "job-1", status: "queued" })
         expect(submitted).toEqual([{
           payload: { kind: "noop" },
-          caller: { login: "viewer", sameNode: false, provenance: "authenticated_remote" }
+          caller: { login: "viewer", sameNode: false, owner: false, provenance: "authenticated_remote" }
         }])
       }).pipe(Effect.scoped))
 
@@ -549,7 +591,12 @@ describe("hub apps", () => {
           [hubHeaders.app]: app,
           "content-type": "application/json"
         })
-        const viewer: ModuleCaller = { login: "viewer", sameNode: false, provenance: "authenticated_remote" }
+        const viewer: ModuleCaller = {
+          login: "viewer",
+          sameNode: false,
+          owner: false,
+          provenance: "authenticated_remote"
+        }
         const job = (headers: Record<string, string>, grant: string) =>
           call(port, "POST", "/v1/app-services/jobs", headers, JSON.stringify({ grant, payload: { kind: "noop" } }))
         const code = (answer: { readonly body: string }) =>
@@ -599,7 +646,12 @@ describe("hub apps", () => {
     it.effect("grants: one use for jobs, bound to their app, gone after 60 s", () =>
       Effect.gen(function*() {
         const grants = yield* makeGrants
-        const caller: ModuleCaller = { login: "viewer", sameNode: false, provenance: "authenticated_remote" }
+        const caller: ModuleCaller = {
+          login: "viewer",
+          sameNode: false,
+          owner: false,
+          provenance: "authenticated_remote"
+        }
         const fixture = appId("fixture")
         const { grant } = yield* grants.mint(fixture, caller, "POST")
         const reason = (use: Effect.Effect<unknown, { readonly reason: string }>) =>

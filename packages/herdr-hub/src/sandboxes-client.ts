@@ -11,10 +11,16 @@ import {
   SandboxRuns,
   type SandboxRunView
 } from "@knpkv/sandbox-pool/host"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
-import { SandboxesCaller, SandboxJobOrder, SandboxJobSubmitted, SandboxRequests } from "./sandboxes-contract.js"
+import {
+  SandboxAwsSession,
+  SandboxesCaller,
+  SandboxJobOrder,
+  SandboxJobSubmitted,
+  SandboxRequests
+} from "./sandboxes-contract.js"
 
 /** The overview read failed before a pool payload arrived. */
 export class SandboxesClientError extends Schema.TaggedError<SandboxesClientError>()("SandboxesClientError", {
@@ -37,6 +43,17 @@ export class SandboxesWriteFailed extends Schema.TaggedError<SandboxesWriteFaile
     "observe_mode"
   ])
 }) {}
+
+/**
+ * The hub was not signed out. `reset_running`: a reset still runs on the sign-in; `unauthorized`: the owner
+ * rule; `network`: it may or may not have reached the hub; anything else is `rejected`.
+ */
+export class SandboxesSignOutFailed extends Schema.TaggedError<SandboxesSignOutFailed>()("SandboxesSignOutFailed", {
+  reason: Schema.Literals(["reset_running", "rejected", "network", "unauthorized"])
+}) {}
+
+/** The hub refused a sign-out because a reset still runs on the sign-in. */
+const ResetRunning = Schema.Struct({ error: Schema.Literal("reset_running") })
 
 const RefusedRequest = Schema.Struct({
   error: Schema.Literals(["already_requested", "not_quarantined", "not_budget_held", "observe_mode"])
@@ -86,6 +103,51 @@ export const loadSandboxRunLog = (accountId: SandboxCard["accountId"], runId: Sa
 export const loadSandboxRequests = readJson("/v1/modules/sandboxes/requests", SandboxRequests, 262_144).pipe(
   Effect.withSpan("SandboxesClient.loadRequests")
 )
+
+/** The hub's AWS sign-in. The hub answers its own node only; anyone else gets a status failure. */
+export const loadSandboxAwsSession = readJson("/v1/modules/sandboxes/aws-session", SandboxAwsSession, 4_096).pipe(
+  Effect.withSpan("SandboxesClient.loadAwsSession")
+)
+
+/**
+ * Starts the hub's AWS sign-in, or joins the one already waiting, and answers what to approve. Same origin, body
+ * `{}`. 403 is the owner rule; any other refusal is `rejected`, and a lost answer may have started one.
+ */
+export const startSandboxAwsSignIn = Effect.gen(function*() {
+  const client = yield* HttpClient.HttpClient
+  const response = yield* client.execute(
+    HttpClientRequest.post("/v1/modules/sandboxes/aws-sign-in").pipe(
+      HttpClientRequest.bodyJsonUnsafe({})
+    )
+  ).pipe(Effect.mapError(() => new SandboxesWriteFailed({ reason: "network" })))
+  if (response.status === 403) return yield* new SandboxesWriteFailed({ reason: "unauthorized" })
+  if (response.status < 200 || response.status >= 300) return yield* new SandboxesWriteFailed({ reason: "rejected" })
+  // An answer that doesn't decode, such as a sign-in page that isn't https, is refused, never shown.
+  return yield* decodeBoundedResponseJson(response, SandboxAwsSession, 4_096).pipe(
+    Effect.mapError(() => new SandboxesWriteFailed({ reason: "rejected" }))
+  )
+}).pipe(Effect.withSpan("SandboxesClient.startAwsSignIn"))
+
+/** Signs the hub out of AWS; the hub answers the sign-in it now holds. 403 is the owner rule. */
+export const signOutSandboxAws = Effect.gen(function*() {
+  const client = yield* HttpClient.HttpClient
+  const response = yield* client.execute(
+    HttpClientRequest.post("/v1/modules/sandboxes/aws-sign-out").pipe(
+      HttpClientRequest.bodyJsonUnsafe({})
+    )
+  ).pipe(Effect.mapError(() => new SandboxesSignOutFailed({ reason: "network" })))
+  if (response.status === 403) return yield* new SandboxesSignOutFailed({ reason: "unauthorized" })
+  if (response.status === 409) {
+    const running = yield* decodeBoundedResponseJson(response, ResetRunning, 1_024).pipe(Effect.option)
+    return yield* new SandboxesSignOutFailed({ reason: Option.isSome(running) ? "reset_running" : "rejected" })
+  }
+  if (response.status < 200 || response.status >= 300) {
+    return yield* new SandboxesSignOutFailed({ reason: "rejected" })
+  }
+  return yield* decodeBoundedResponseJson(response, SandboxAwsSession, 4_096).pipe(
+    Effect.mapError(() => new SandboxesSignOutFailed({ reason: "rejected" }))
+  )
+}).pipe(Effect.withSpan("SandboxesClient.signOutAws"))
 
 /**
  * Submits one job from this page. The browser sends its own origin; the hub accepts it only from its own node.

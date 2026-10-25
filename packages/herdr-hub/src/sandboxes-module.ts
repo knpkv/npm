@@ -194,7 +194,7 @@ export const makeSandboxesModule = (
     /** Fleet records awaiting approval. Read per request; a failure is unavailable, never an empty list. */
     readonly pendingApprovals: Effect.Effect<ReadonlyArray<PendingSandboxApproval>, unknown>
     readonly reads?: Effect.Effect<SandboxHostReads, SandboxReaderStartError, Scope.Scope>
-    /** Fleet submission for the jobs route. Only reached for the hub's own node while the pool is served. */
+    /** Fleet submission for the jobs route. Only reached for the owner while the pool is served. */
     readonly submit: SandboxJobSubmit
     /** The hub's own AWS sign-in, when this host runs the pool; null when it doesn't. */
     readonly awsSignIn?: AwsSignIn | null
@@ -247,15 +247,15 @@ export const makeSandboxesModule = (
               code: error._tag === "SandboxNotFound" ? "not_found" : "invalid_query"
             })
           ))
-      // A run's log names the account's resources: only the hub's own node may read it, and nothing is read
-      // for anyone else.
+      // A run's log names the account's resources: only the owner may read it, and nothing is read for anyone
+      // else.
       const runLog = (
         query: SandboxRunLogQuery,
         caller: ModuleCaller
       ): Effect.Effect<SandboxRunLog, ModuleRouteFailure> =>
         mounted._tag === "Unavailable"
           ? Effect.succeed(mounted)
-          : !caller.sameNode
+          : !caller.owner
           ? Effect.fail(new ModuleRouteFailure({ status: 403, code: "owner_only" }))
           : mounted.reads.runLog(query).pipe(
             Effect.mapError(() => new ModuleRouteFailure({ status: 404, code: "not_found" }))
@@ -311,20 +311,52 @@ export const makeSandboxesModule = (
         )
       const refuse = (status: ModuleRouteFailure["status"], code: string) =>
         Effect.fail(new ModuleRouteFailure({ status, code }))
-      // The AWS sign-in is the owner's: its pending URL and code finish a sign-in, so nothing is read or
-      // started for anyone else. Only the owner's press starts one; no read ever does.
+      // A reset holds the sign-in until it ends: signing out mid-nuke would leave the account in Cleaning. So
+      // sign-out waits for every reset to end, and refuses when the pool can't be read to tell.
+      const noResetRunning = Effect.fn("SandboxesModule.noResetRunning")(function*(reads: SandboxHostReads) {
+        const pool = yield* reads.overview
+        if (pool._tag !== "Ready") return yield* refuse(503, "unavailable")
+        if (pool.sandboxes.some((card) => card.state._tag === "Cleaning")) return yield* refuse(409, "reset_running")
+      })
+      // The AWS sign-in is the owner's: its pending URL and code finish a sign-in, so nothing is read, started or
+      // ended for anyone else. Only the owner's press starts one or signs the hub out; no read ever does.
       const awsSignIn = configuration.awsSignIn ?? null
-      const awsSession = (caller: ModuleCaller, start: boolean): Effect.Effect<SandboxAwsSession, ModuleRouteFailure> =>
+      const signInUnavailable = () => new ModuleRouteFailure({ status: 503, code: "unavailable" })
+      const answer = (signIn: AwsSignIn) => signIn.state.pipe(Effect.map(sessionOf), Effect.mapError(signInUnavailable))
+      // Held with the sign-in's hold: a reset can't start between the no-reset check and the sign-out.
+      const signedOut = (signIn: AwsSignIn, reads: SandboxHostReads) =>
+        signIn.hold(
+          noResetRunning(reads).pipe(
+            Effect.andThen(signIn.signOut.pipe(Effect.mapError(signInUnavailable))),
+            Effect.tap(({ endedOnAws }) =>
+              endedOnAws
+                ? Effect.void
+                : Effect.logWarning("AWS sign-out: AWS could not be told; the hub forgot its token")
+            ),
+            Effect.andThen(answer(signIn))
+          )
+        )
+      const awsSession = (
+        caller: ModuleCaller,
+        action: "read" | "start" | "signOut"
+      ): Effect.Effect<SandboxAwsSession, ModuleRouteFailure> =>
         mounted._tag === "Unavailable"
           ? Effect.succeed(mounted)
-          : !caller.sameNode
+          : !caller.owner
           ? refuse(403, "owner_only")
           : awsSignIn === null
           ? Effect.succeed({ _tag: "NotConfigured" })
-          : (start ? Effect.asVoid(awsSignIn.begin) : Effect.void).pipe(
-            Effect.andThen(awsSignIn.state),
-            Effect.map(sessionOf),
-            Effect.mapError(() => new ModuleRouteFailure({ status: 503, code: "unavailable" }))
+          : action === "signOut"
+          ? signedOut(awsSignIn, mounted.reads)
+          : (action === "start" ? Effect.asVoid(awsSignIn.begin).pipe(Effect.mapError(signInUnavailable)) : Effect.void)
+            .pipe(Effect.andThen(answer(awsSignIn)))
+      // Anyone but the owner learns only whether the hub is signed in; an unreadable state is not known.
+      const awsSignedIn = (caller: ModuleCaller): Effect.Effect<boolean | null> =>
+        caller.owner || mounted._tag === "Unavailable" || awsSignIn === null
+          ? Effect.succeed(null)
+          : awsSignIn.state.pipe(
+            Effect.map((state): boolean | null => state._tag === "SignedIn"),
+            Effect.catchTag("AwsSignInUnavailable", () => Effect.succeed(null))
           )
       /**
        * Before a retry or lift reaches Fleet: the account is in the pool, in the state the job needs, and no
@@ -349,12 +381,12 @@ export const makeSandboxesModule = (
         if (alreadyRequested(order, pending)) return yield* refuse(409, "already_requested")
       })
       // Same origin is checked by the mount before the body is read. Here: the pool must be served, only the
-      // hub's own node may submit, and an observe-mode pool runs no jobs. Fleet then holds extend and release
+      // owner may submit, and an observe-mode pool runs no jobs. Fleet then holds extend and release
       // to the caller's own lease, and holds every retry and lift for an approval.
       const submitJob = (order: SandboxJobOrder, caller: ModuleCaller) =>
         mounted._tag === "Unavailable"
           ? refuse(503, "unavailable")
-          : !caller.sameNode
+          : !caller.owner
           ? refuse(403, "owner_only")
           : configuration.poolMode === "observe"
           ? refuse(409, "observe_mode")
@@ -371,25 +403,35 @@ export const makeSandboxesModule = (
           moduleReadRoute("/runs", SandboxRunsQuery, SandboxRuns, runs),
           moduleReadRoute("/run-log", SandboxRunLogQuery, SandboxRunLog, runLog),
           moduleReadRoute("/requests", NoQuery, SandboxRequests, () => requests),
-          moduleReadRoute("/aws-session", NoQuery, SandboxAwsSession, (_query, caller) => awsSession(caller, false)),
+          moduleReadRoute("/aws-session", NoQuery, SandboxAwsSession, (_query, caller) => awsSession(caller, "read")),
           moduleWriteRoute(
             "POST",
             "/aws-sign-in",
             NoQuery,
             NoBody,
             SandboxAwsSession,
-            (_body, _query, caller) => awsSession(caller, true)
+            (_body, _query, caller) => awsSession(caller, "start")
+          ),
+          moduleWriteRoute(
+            "POST",
+            "/aws-sign-out",
+            NoQuery,
+            NoBody,
+            SandboxAwsSession,
+            (_body, _query, caller) => awsSession(caller, "signOut")
           ),
           moduleReadRoute(
             "/caller",
             NoQuery,
             SandboxesCaller,
             (_query, caller) =>
-              Effect.succeed({
+              awsSignedIn(caller).pipe(Effect.map((signedIn) => ({
                 login: caller.login,
-                owner: caller.sameNode,
-                signIn: caller.sameNode && pool !== null ? signInOf(pool) : null
-              })
+                owner: caller.owner,
+                signIn: caller.owner && pool !== null ? signInOf(pool) : null,
+                poolMode: pool === null ? null : configuration.poolMode ?? null,
+                awsSignedIn: signedIn
+              })))
           ),
           moduleWriteRoute(
             "POST",

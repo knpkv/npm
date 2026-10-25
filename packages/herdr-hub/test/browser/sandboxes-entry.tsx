@@ -5,10 +5,10 @@
 import "../../src/assets.css"
 import { PortalProvider } from "@knpkv/rly/foundations"
 import { SandboxCard, type SandboxesOverview, SandboxRunLog, SandboxRuns } from "@knpkv/sandbox-pool/host"
-import { Effect, Schema } from "effect"
+import { DateTime, Effect, Schema } from "effect"
 import { createRoot } from "react-dom/client"
 import { SandboxesClientError, SandboxesWriteFailed } from "../../src/sandboxes-client.js"
-import { SandboxRequests } from "../../src/sandboxes-contract.js"
+import { type SandboxAwsSession, SandboxRequests } from "../../src/sandboxes-contract.js"
 import { makeSandboxesModuleViews, type SandboxesModuleWrites } from "../../src/sandboxes-module-view.js"
 
 const SandboxesState = Schema.Literals([
@@ -35,7 +35,9 @@ const SandboxesState = Schema.Literals([
   "attention-4a-lift",
   "attention-refused",
   "attention-stale",
-  "2a-refused"
+  "2a-refused",
+  "signin-flow",
+  "observe"
 ])
 const parameters = new URLSearchParams(location.search)
 const state = Schema.decodeUnknownSync(SandboxesState)(parameters.get("state") ?? "1a")
@@ -145,7 +147,9 @@ const overviews = {
   "attention-4a-lift": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok"),
   "attention-refused": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok"),
   "attention-stale": ready([ephemeral01Stopped, ephemeral02Quarantined], "ok"),
-  "2a-refused": pool
+  "2a-refused": pool,
+  "signin-flow": ready([ephemeral01(viewer, "2026-10-17T17:20:00.000Z"), ephemeral02Free]),
+  observe: ready([ephemeral01Stopped, ephemeral02Free], "ok")
 } satisfies Record<typeof state, SandboxesOverview>
 
 const runs = Schema.decodeUnknownSync(SandboxRuns)({
@@ -307,6 +311,31 @@ const overview = Effect.suspend(() => {
   return Effect.succeed(overviews[state])
 })
 
+// signin-flow starts signed out; once started, the hub reads as waiting once and then as signed in. Signing out
+// returns it to signed out (ended).
+const pendingSession: SandboxAwsSession = {
+  _tag: "SignInPending",
+  verificationUri: "https://portal.example.test/start/#/device?user_code=ABCD-EFGH",
+  userCode: "ABCD-EFGH",
+  expiresAt: DateTime.makeUnsafe("2026-10-17T13:15:00.000Z")
+}
+const signedInSession: SandboxAwsSession = {
+  _tag: "SignedIn",
+  expiresAt: DateTime.makeUnsafe("2026-10-17T18:05:00.000Z")
+}
+let awsSession: SandboxAwsSession =
+  state === "signin-flow"
+    ? { _tag: "SignInRequired", reason: "never" }
+    : state === "observe"
+      ? signedInSession
+      : { _tag: "NotConfigured" }
+let sessionReadsSinceStart = 0
+const awsSessionRead = Effect.sync((): SandboxAwsSession => {
+  sessionReadsSinceStart += 1
+  if (awsSession._tag === "SignInPending" && sessionReadsSinceStart > 1) awsSession = signedInSession
+  return awsSession
+})
+
 // The sheets confirm into a write that never settles, so a capture keeps the sheet open. The refused
 // states answer with a refusal instead: a lease Fleet refused, and a retry that is already pending.
 const writes: SandboxesModuleWrites = {
@@ -317,7 +346,16 @@ const writes: SandboxesModuleWrites = {
     state === "attention-refused"
       ? Effect.fail(new SandboxesWriteFailed({ reason: "already_requested" }))
       : Effect.never,
-  liftBudget: () => Effect.never
+  liftBudget: () => Effect.never,
+  startAwsSignIn: Effect.sync(() => {
+    awsSession = pendingSession
+    sessionReadsSinceStart = 0
+    return pendingSession
+  }),
+  signOutAws: Effect.sync((): SandboxAwsSession => {
+    awsSession = { _tag: "SignInRequired", reason: "ended" }
+    return awsSession
+  })
 }
 
 // The stale state answers the first requests read, then fails every poll after it.
@@ -335,14 +373,22 @@ const signIn = {
   roleName: "EphemeralDeveloper",
   region: "eu-central-1"
 }
-const caller = Effect.succeed({ login: viewer, owner, signIn: owner ? signIn : null })
+const poolModeOf = (screen: typeof state): "observe" | "live" => (screen === "observe" ? "observe" : "live")
+const caller = Effect.succeed({
+  login: viewer,
+  owner,
+  signIn: owner ? signIn : null,
+  poolMode: poolModeOf(state),
+  awsSignedIn: null
+})
 const module = makeSandboxesModuleViews({
   reads: {
     overview,
     caller,
     runs: () => Effect.succeed(runs),
     runLog: () => Effect.succeed(runLog),
-    requests: requestsRead
+    requests: requestsRead,
+    awsSession: awsSessionRead
   },
   timeZone: "UTC",
   writes

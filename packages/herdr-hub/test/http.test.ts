@@ -5309,6 +5309,74 @@ esac
     )
   })
 
+  // A script on a fleet host runs under the owner's tailnet login. It can read the dashboard for a proof
+  // and set any Origin header, so only the node keeps it from approving: the hub checks approval nodes
+  // exactly as a peer's approval listener does.
+  it.effect("approves on the hub only from an approval node, even for an allowed login holding a proof", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-serve-approval-node-"))
+    const caller = join(root, "caller-node")
+    writeFileSync(caller, "node-alpha")
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '{"Node":{"StableID":"%s"},"UserProfile":{"LoginName":"owner@example.com"}}\n' "$(cat '${caller}')" ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig: HostConfiguration = {
+      ...config(root),
+      approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:0/" },
+      approvalNodes: ["node-phone"],
+      approvalPort: 0,
+      approvalTls: directTls,
+      applyMachines: ["SER8"],
+      crossHost: true,
+      host: "SER8",
+      port: 0,
+      tailscaleCommand
+    }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const fleet = yield* makeFleetService({ approvalEnabled: true, host: hostConfig.host, operations, store })
+          yield* store.put(pendingRecord("SER8", 0))
+          yield* store.put(pendingRecord("SER8", 1))
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() => startHttpServer(hostConfig, fleet, assets, { terminalConnector: unusedTerminal })),
+            (running) => Effect.promise(running.close)
+          )
+          const serveUrl = yield* Schema.decodeUnknownEffect(Schema.String)(server.serveUrl)
+          const scripted = { host: "ser8.example.test:0", origin: "https://ser8.example.test:0" }
+          const approveAs = (node: string, jobId: string) =>
+            Effect.promise(async () => {
+              writeFileSync(caller, node)
+              const dashboard = await secureRequestBody(`${serveUrl}/v1/dashboard`, scripted)
+              const cookie = dashboard.setCookie?.split(";", 1).join("") ?? ""
+              return secureRequestBody(`${serveUrl}/v1/jobs/${jobId}/approve`, { ...scripted, cookie }, {
+                method: "POST"
+              })
+            })
+
+          const fromFleetHost = yield* approveAs("node-alpha", "ser8-job-00")
+          expect(fromFleetHost.status, fromFleetHost.body).toBe(403)
+          expect((yield* store.get("ser8-job-00"))?.status).toBe("pending_approval")
+
+          const fromPhone = yield* approveAs("node-phone", "ser8-job-01")
+          expect(fromPhone.status, fromPhone.body).toBe(200)
+        }).pipe(Effect.scoped),
+      (store) => Effect.sync(() => store.close())
+    ).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
   it.effect("interrupts active runner work before close completes", () =>
     Effect.gen(function*() {
       const started = yield* Deferred.make<void>()
@@ -7190,6 +7258,8 @@ esac
           const hubConfig: HostConfiguration = {
             ...config(root),
             approvalHub: { host: "SER8", nodeId: "node-ser8", url: `https://127.0.0.1:${approvalPort}/` },
+            // The fixture's caller is the phone, the one node that decides approvals.
+            approvalNodes: ["node-phone"],
             approvalPort,
             approvalTls: directTls,
             applyMachines: ["SER8"],
@@ -7768,6 +7838,47 @@ esac
       )
       expect(read.status).toBe(200)
       expect(JSON.parse(read.body)).toBe(true)
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
+  // A Relay decision lets a waiting tool call run, so it is an approval: a script on a fleet host holds the
+  // owner's login and can set any Origin, and only an approval node may decide.
+  it.effect("takes a Relay decision only from an approval node, even with the allowed login and its own Origin", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-relay-decide-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const hub = yield* startHub(
+        root,
+        join(root, "relay"),
+        scriptedBackends("Nothing waits."),
+        () => Effect.void,
+        [],
+        { approvalNodes: ["node-phone"] }
+      )
+      const decide = (node: string) =>
+        Effect.promise(() => {
+          hub.whoisNode(node)
+          return hubRequest(`${hub.serveUrl}/v1/relay/decisions`, {
+            method: "POST",
+            headers: { ...hub.headers, "content-type": "application/json", origin: hub.origin },
+            body: JSON.stringify({ ref: hubRef, callId: "call-1", allow: true })
+          })
+        })
+      const fromFleetHost = yield* decide("node-alpha")
+      expect(fromFleetHost.status, fromFleetHost.body).toBe(403)
+      // The phone is past the check; nothing waits for that call, so Relay answers it is not pending.
+      const fromPhone = yield* decide("node-phone")
+      expect(fromPhone.status, fromPhone.body).toBe(409)
+      // Loopback is the hub's own agents: the local listener decides nothing.
+      const local = new URL(hub.server.url).origin
+      const fromLoopback = yield* Effect.promise(() =>
+        fetch(`${local}/v1/relay/decisions`, {
+          method: "POST",
+          headers: { "content-type": "application/json", origin: local },
+          body: JSON.stringify({ ref: hubRef, callId: "call-1", allow: true })
+        }).then(async (response) => ({ status: response.status, body: await response.text() }))
+      )
+      expect(fromLoopback.status, fromLoopback.body).toBe(403)
     }).pipe(Effect.scoped, provideNodeServices)
   })
 

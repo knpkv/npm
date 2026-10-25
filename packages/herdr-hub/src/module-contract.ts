@@ -114,3 +114,18 @@ export const resourcesModule = defineModule({
   listeners: ["serve", "local"],
   requires: ["read"]
 })
+
+/**
+ * The ids of the hub's own modules, which no installed app may take. An embedding can add more; the hub's registry
+ * refuses those too, so this list is what the CLI checks before it installs anything.
+ */
+export const builtInModuleIds: ReadonlyArray<string> = [
+  fleetModule,
+  connectModule,
+  todayModule,
+  usageModule,
+  codeModule,
+  stacksModule,
+  sandboxesModule,
+  resourcesModule
+].map((module) => module.id)

@@ -42,6 +42,8 @@ export interface RelayRouteContext<E, R> {
   readonly mount: RelayHubMount
   /** Fails when this request may not use the hub. */
   readonly authorize: Effect.Effect<unknown, E, R>
+  /** Fails when this request may not decide a waiting tool call: a decision is an approval. */
+  readonly authorizeDecision: Effect.Effect<unknown, E, R>
   /** Fails when a POST did not come from the hub's own page. */
   readonly sameOrigin: Effect.Effect<unknown, E, R>
   readonly readJson: <A>(schema: Schema.Codec<A, unknown, never, never>) => Effect.Effect<A, E, R>
@@ -235,7 +237,14 @@ export const handleRelayRoute = async <E, R>(
         })
       )
       return true
-    default:
+    case "decisions": {
+      const decider = await context.runtime.runPromiseExit(context.authorizeDecision)
+      if (decider._tag === "Failure") {
+        const failure = decider.cause.reasons.find((reason) => reason._tag === "Fail")
+        if (failure !== undefined && failure._tag === "Fail") context.refuse(response, failure.error)
+        else send(response, 500, JSON.stringify({ error: "internal" }))
+        return true
+      }
       await answer(
         Effect.gen(function*() {
           const { allow, callId, ref } = yield* body(RelayDecisionRequest)
@@ -249,6 +258,10 @@ export const handleRelayRoute = async <E, R>(
           return { status: 204 }
         })
       )
+      return true
+    }
+    default:
+      send(response, 404, JSON.stringify({ error: "not_found" }))
       return true
   }
 }

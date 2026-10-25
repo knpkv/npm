@@ -37,6 +37,7 @@ describe("Relay's event route", () => {
         host: "SER8",
         mount: { harness: Deferred.await(started) },
         authorize: Effect.void,
+        authorizeDecision: Effect.die("unused"),
         sameOrigin: Effect.void,
         readJson: () => Effect.die("unused"),
         refuse: () => undefined,

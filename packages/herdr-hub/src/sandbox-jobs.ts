@@ -121,6 +121,13 @@ const sameObservation = (sandbox: Sandbox, observed: SandboxObservation): boolea
 /** A tagged error's tag and fields, for the job's failure detail. */
 const describe = (error: { readonly _tag: string }) => JSON.stringify(error)
 
+/**
+ * A reset was not started because the hub holds no AWS sign-in: it would fail at its first step and quarantine
+ * the account. A job fails with it as rejected, with the account unchanged; the sweep leaves the account for a
+ * later sweep.
+ */
+export class ResetNeedsSignIn extends Schema.TaggedError<ResetNeedsSignIn>()("ResetNeedsSignIn", {}) {}
+
 export interface SandboxPoolServices {
   readonly contract: PoolContract
   readonly store: SandboxStore["Service"]
@@ -135,6 +142,13 @@ export interface SandboxPoolServices {
    * lease or a reset left in Cleaning waits for a sweep that may act. Defaults to `full`.
    */
   readonly sweep?: "full" | "spend-only"
+  /**
+   * Runs one write that moves an account into Cleaning, and the sweep's check before it resumes a reset. The hub
+   * holds its AWS sign-in's `hold` (which sign-out also takes around its no-reset-running check) and fails with
+   * `ResetNeedsSignIn` unless the hub is signed in, so a reset neither starts between that check and a sign-out
+   * nor starts without a sign-in. Defaults to running the write as is.
+   */
+  readonly cleaning?: <A, E, R>(write: Effect.Effect<A, E, R>) => Effect.Effect<A, E | ResetNeedsSignIn, R>
 }
 
 /**
@@ -144,6 +158,8 @@ export interface SandboxPoolServices {
  */
 export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services: SandboxPoolServices) {
   const { contract, store } = services
+  const cleaning = services.cleaning ??
+    (<A, E, R>(write: Effect.Effect<A, E, R>): Effect.Effect<A, E | ResetNeedsSignIn, R> => write)
   const locks = new Map<string, Semaphore.Semaphore>()
   for (const { accountId } of contract.accounts) locks.set(accountId, yield* Semaphore.make(1))
   const lastSweep = yield* Ref.make<SweepReport | null>(null)
@@ -208,13 +224,13 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
     committed = false
   ) {
     const now = yield* DateTime.now
-    const cleaning = yield* transition(
+    const moved = yield* cleaning(transition(
       accountId,
       (current) => member(current).pipe(Effect.andThen(toCleaning(current, now)))
-    ).pipe(
+    )).pipe(
       Effect.mapError((error) => fail(operation, error, !committed))
     )
-    return yield* reset(cleaning, runId).pipe(Effect.mapError((error) => fail(operation, error, false)))
+    return yield* reset(moved, runId).pipe(Effect.mapError((error) => fail(operation, error, false)))
   })
 
   /**
@@ -245,7 +261,7 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
       Effect.mapError((error) => fail(operation, error, !committed))
     )
     const isOperationError = Schema.is(FleetOperationError)
-    const cleaning = yield* store.put(next).pipe(
+    const moved = yield* cleaning(store.put(next)).pipe(
       Effect.catchTag("StaleVersion", (error) =>
         Effect.fail(
           fail(
@@ -258,7 +274,7 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
         )),
       Effect.mapError((error) => isOperationError(error) ? error : fail(operation, error, !committed))
     )
-    return yield* reset(cleaning, runId).pipe(Effect.mapError((error) => fail(operation, error, false)))
+    return yield* reset(moved, runId).pipe(Effect.mapError((error) => fail(operation, error, false)))
   })
 
   const run = Effect.fn("SandboxPool.run")(function*(
@@ -389,12 +405,19 @@ export const makeSandboxPool = Effect.fn("SandboxPool.make")(function*(services:
       if (!inPool(current)) return "idle" satisfies SweepOutcome
       if (leaseEnded(current, now)) {
         const runId = Schema.decodeUnknownSync(RunId)(`sweep-${DateTime.toEpochMillis(now)}-${current.accountId}`)
-        yield* store.put(expire(current, runId, now)).pipe(Effect.flatMap((cleaning) => reset(cleaning, runId)))
-        return "expired" satisfies SweepOutcome
+        // Signed out, the lease stays as it is until a sweep finds the hub signed in again.
+        return yield* cleaning(store.put(expire(current, runId, now))).pipe(
+          Effect.flatMap((moved) => reset(moved, runId)),
+          Effect.as<SweepOutcome>("expired"),
+          Effect.catchTag("ResetNeedsSignIn", () => Effect.succeed<SweepOutcome>("idle"))
+        )
       }
       if (state._tag === "Cleaning" && pending._tag === "Cleaning" && state.runId === pending.runId) {
-        yield* reset(current, state.runId)
-        return "resumed" satisfies SweepOutcome
+        return yield* cleaning(Effect.void).pipe(
+          Effect.andThen(reset(current, state.runId)),
+          Effect.as<SweepOutcome>("resumed"),
+          Effect.catchTag("ResetNeedsSignIn", () => Effect.succeed<SweepOutcome>("idle"))
+        )
       }
       return "idle" satisfies SweepOutcome
     })

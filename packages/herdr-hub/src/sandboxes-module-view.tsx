@@ -31,11 +31,12 @@ import {
   useState
 } from "react"
 import { ShellIcon } from "./internal/shell-icon.js"
+import { StateCard } from "./internal/state-card.js"
 import { fleetHubModule, moduleHref, type ModulePageMount, type ModuleViews, sandboxesModule } from "./modules.js"
-import { SandboxesClientError, SandboxesWriteFailed } from "./sandboxes-client.js"
-import type { SandboxesCaller, SandboxRequest, SandboxRequests } from "./sandboxes-contract.js"
+import { SandboxesClientError, SandboxesSignOutFailed, SandboxesWriteFailed } from "./sandboxes-client.js"
+import type { SandboxAwsSession, SandboxesCaller, SandboxRequest, SandboxRequests } from "./sandboxes-contract.js"
 
-export { SandboxesClientError, SandboxesWriteFailed }
+export { SandboxesClientError, SandboxesSignOutFailed, SandboxesWriteFailed }
 
 /** Owner writes. Each submits the existing Fleet job kind as the caller. */
 export interface SandboxesModuleWrites {
@@ -46,6 +47,10 @@ export interface SandboxesModuleWrites {
   readonly retry: (accountId: SandboxCard["accountId"]) => Effect.Effect<void, SandboxesWriteFailed>
   /** Asks Fleet to lift a budget stop. It waits for an approval in Fleet / Approvals. */
   readonly liftBudget: (accountId: SandboxCard["accountId"]) => Effect.Effect<void, SandboxesWriteFailed>
+  /** Starts the hub's AWS sign-in, or joins the one waiting, and answers what to approve. */
+  readonly startAwsSignIn: Effect.Effect<SandboxAwsSession, SandboxesWriteFailed>
+  /** Signs the hub out of AWS, on AWS's side too, and answers the sign-in it now holds. */
+  readonly signOutAws: Effect.Effect<SandboxAwsSession, SandboxesSignOutFailed>
 }
 
 /** Page reads. Each must keep its identity across renders, or the page reads again on every render. */
@@ -55,13 +60,15 @@ export interface SandboxesModuleReads {
   readonly caller: Effect.Effect<SandboxesCaller, SandboxesClientError>
   /** The newest page of one account's runs. */
   readonly runs: (accountId: SandboxCard["accountId"]) => Effect.Effect<SandboxRuns, SandboxesClientError>
-  /** One run's log tail and stored failure line. The hub answers only its own node; read only for the owner. */
+  /** One run's log tail and stored failure line. The hub answers only the owner; read only for the owner. */
   readonly runLog: (
     accountId: SandboxCard["accountId"],
     runId: SandboxRunView["runId"]
   ) => Effect.Effect<SandboxRunLog, SandboxesClientError>
   /** Resets and budget lifts waiting in Fleet / Approvals. */
   readonly requests: Effect.Effect<SandboxRequests, SandboxesClientError>
+  /** The hub's AWS sign-in. The hub answers the owner only; read only for the owner. */
+  readonly awsSession: Effect.Effect<SandboxAwsSession, SandboxesClientError>
 }
 
 type Ready = Extract<SandboxesOverview, { readonly _tag: "Ready" }>
@@ -76,6 +83,9 @@ type PoolView =
   | { readonly _tag: "Pool"; readonly overview: Ready; readonly readAt: DateTime.Utc; readonly stale: boolean }
 
 const pollEvery = "30 seconds"
+/** While a sign-in waits for its approval, for at most 10 minutes. */
+const pendingPollEvery = "5 seconds"
+const pendingPollFor = 600_000
 const tickEvery = "15 seconds"
 
 /** A quarantine whose blocker is a budget hold: stopped by budget, in caution, after every other quarantine. */
@@ -373,6 +383,310 @@ const unchangedCopy = {
 } satisfies Record<Action, string>
 
 const observeModeCopy = "The pool is in observe mode: it reads spend and runs no jobs."
+const awsFirstCopy = "Sign in to AWS first: Release, Retry reset and Request to lift the stop need it."
+const observeLineId = "sandboxes-observe-mode"
+const awsFirstId = "sandboxes-aws-first"
+
+/** The jobs the page offers. Release, retry and lift run AWS calls; lease and extend change only the store. */
+type GatedAction = Action | RequestKind
+const needsAws: ReadonlySet<GatedAction> = new Set<GatedAction>(["release", "retry", "lift"])
+
+/** What the hub's mode and AWS sign-in hold back on this page, and whether spend readings are last known. */
+interface AwsView {
+  /** The id of the line saying why `action` is held back, or null when it isn’t. */
+  readonly heldBy: (action: GatedAction) => string | null
+  readonly spendOld: boolean
+}
+
+const AwsContext = createContext<AwsView>({ heldBy: () => null, spendOld: false })
+
+/**
+ * Observe mode holds back every job; a live pool the hub isn’t signed in to holds back the jobs that call AWS.
+ * The owner knows the sign-in from aws-session; anyone else only whether the hub is signed in.
+ */
+const awsViewOf = (caller: SandboxesCaller, session: SandboxAwsSession | null): AwsView => {
+  const signedOut = caller.owner
+    ? session !== null && (session._tag === "SignInRequired" || session._tag === "SignInPending")
+    : caller.awsSignedIn === false
+  return {
+    heldBy: (action) =>
+      caller.poolMode === "observe"
+        ? observeLineId
+        : caller.poolMode === "live" && caller.owner && signedOut && needsAws.has(action)
+          ? awsFirstId
+          : null,
+    spendOld: signedOut
+  }
+}
+
+/**
+ * The owner's AWS sign-in: read now and every 30 s, and every 5 s while a sign-in waits for its approval, for
+ * at most 10 minutes. `started` shows a sign-in the owner just started and polls it from then.
+ */
+const useAwsSession = (read: SandboxesModuleReads["awsSession"], enabled: boolean) => {
+  const [session, setSession] = useState<SandboxAwsSession | null>(null)
+  const [restart, setRestart] = useState(0)
+  useEffect(() => {
+    if (!enabled) return
+    const step: (pendingSince: number | null) => Effect.Effect<void> = Effect.fn("Sandboxes.pollAwsSession")(function* (
+      pendingSince: number | null
+    ) {
+      const exit = yield* Effect.exit(read)
+      const at = yield* Clock.currentTimeMillis
+      const value = Exit.isSuccess(exit) ? exit.value : null
+      if (value !== null) yield* Effect.sync(() => setSession(value))
+      // A failed read changes nothing known, so the 10 minutes keep counting from the first pending read.
+      const since = value === null ? pendingSince : value._tag === "SignInPending" ? (pendingSince ?? at) : null
+      yield* Effect.sleep(since !== null && at - since < pendingPollFor ? pendingPollEvery : pollEvery)
+      return yield* step(since)
+    })
+    const fiber = Effect.runFork(step(null))
+    return () => {
+      Effect.runFork(Fiber.interrupt(fiber))
+    }
+  }, [read, enabled, restart])
+  return {
+    session,
+    started: (next: SandboxAwsSession) => {
+      setSession(next)
+      setRestart((value) => value + 1)
+    }
+  }
+}
+
+/** The page's caller, AWS sign-in and what they hold back. Reads the sign-in for the owner of a served pool. */
+const useAws = (reads: SandboxesModuleReads, active: boolean) => {
+  const caller = useCaller(reads.caller, active)
+  const { session, started } = useAwsSession(reads.awsSession, active && caller.owner && caller.poolMode !== null)
+  const aws = useMemo(() => awsViewOf(caller, session), [caller, session])
+  return { caller, session, started, aws }
+}
+
+/**
+ * Sign out of AWS beside the signed-in line, after one confirm. A refusal keeps the sheet open and says the hub
+ * didn't sign out, or that a reset is running and the hub signs out only after it; success closes it and hands
+ * the new sign-in state to `done`.
+ */
+const SignOutAws = ({
+  done,
+  signOut
+}: {
+  readonly done: (next: SandboxAwsSession) => void
+  readonly signOut: SandboxesModuleWrites["signOutAws"]
+}): ReactElement => {
+  const [open, setOpen] = useState(false)
+  const [phase, setPhase] = useState<"Idle" | "Sending" | "Failed" | "ResetRunning">("Idle")
+  const opener = useRef<HTMLButtonElement | null>(null)
+  const send = () => {
+    setPhase("Sending")
+    void Effect.runPromiseExit(Effect.result(signOut)).then((exit) => {
+      if (Exit.isSuccess(exit) && Result.isSuccess(exit.value)) {
+        setPhase("Idle")
+        setOpen(false)
+        done(exit.value.success)
+      } else {
+        const resetRunning =
+          Exit.isSuccess(exit) && Result.isFailure(exit.value) && exit.value.failure.reason === "reset_running"
+        setPhase(resetRunning ? "ResetRunning" : "Failed")
+      }
+    })
+  }
+  return (
+    <>
+      <Button
+        onClick={() => {
+          setPhase((current) => (current === "Sending" ? current : "Idle"))
+          setOpen(true)
+        }}
+        ref={opener}
+        size="compact"
+        variant="quiet"
+      >
+        Sign out of AWS
+      </Button>
+      <Sheet.Root onOpenChange={setOpen} open={open} restoreFocus={() => opener.current ?? undefined}>
+        <Sheet.Content className="sandboxes-sheet" closeLabel="Close panel" title="Sign the hub out of AWS?">
+          <Sheet.Body className="sandboxes-sheet-body">
+            <p className="sandboxes-sheet-lead">
+              Spend stops updating, and Release, Retry reset and Request to lift the stop wait until someone signs in
+              again.
+            </p>
+            {phase === "Failed" || phase === "ResetRunning" ? (
+              <p className="sandboxes-refusal" role="alert">
+                {phase === "ResetRunning"
+                  ? "A reset is running. Sign out when it finishes."
+                  : "The hub didn’t sign out. Try again."}
+              </p>
+            ) : null}
+          </Sheet.Body>
+          <Sheet.Footer className="sandboxes-sheet-foot">
+            <Button onClick={() => setOpen(false)} variant="secondary">
+              Cancel
+            </Button>
+            <Button disabled={phase === "Sending"} onClick={send} variant="primary">
+              Sign out
+            </Button>
+          </Sheet.Footer>
+        </Sheet.Content>
+      </Sheet.Root>
+    </>
+  )
+}
+
+/**
+ * The quiet lines under the heading: until when the hub is signed in, and why jobs are held back. `signOut`
+ * adds Sign out of AWS beside the signed-in line; the pool page passes it for the owner, other pages don't.
+ */
+const AwsLines = ({
+  caller,
+  session,
+  signOut = null
+}: {
+  readonly caller: SandboxesCaller
+  readonly session: SandboxAwsSession | null
+  readonly signOut?: {
+    readonly write: SandboxesModuleWrites["signOutAws"]
+    readonly done: (next: SandboxAwsSession) => void
+  } | null
+}): ReactElement => {
+  const times = useContext(TimesContext)
+  const { heldBy } = useContext(AwsContext)
+  return (
+    <>
+      {caller.owner && session?._tag === "SignedIn" ? (
+        <div className="sandboxes-aws-signed-in">
+          <span className="sandboxes-aws-line" data-aws-signed-in="">
+            <StateLabel
+              icon="check"
+              label={`Signed in to AWS until ${times.clock(session.expiresAt)}`}
+              size="compact"
+              tone="positive"
+            />
+          </span>
+          {signOut === null ? null : <SignOutAws done={signOut.done} signOut={signOut.write} />}
+        </div>
+      ) : null}
+      {caller.poolMode === "observe" ? (
+        <p className="sandboxes-muted sandboxes-aws-line" data-observe-mode="" id={observeLineId}>
+          {observeModeCopy}
+        </p>
+      ) : null}
+      {heldBy("release") === awsFirstId ? (
+        <p className="sandboxes-muted sandboxes-aws-line" data-aws-first="" id={awsFirstId}>
+          {awsFirstCopy}
+        </p>
+      ) : null}
+    </>
+  )
+}
+
+/**
+ * The AWS sign-in card above the cards: Sign in to AWS while none is held or after one ended, the code and
+ * sign-in page while one waits, nothing once signed in. A viewer sees only that the owner signs in.
+ */
+const AwsSignInCard = ({
+  caller,
+  session,
+  start,
+  started
+}: {
+  readonly caller: SandboxesCaller
+  readonly session: SandboxAwsSession | null
+  readonly start: SandboxesModuleWrites["startAwsSignIn"] | null
+  readonly started: (next: SandboxAwsSession) => void
+}): ReactElement | null => {
+  const times = useContext(TimesContext)
+  const [phase, setPhase] = useState<"Idle" | "Sending" | "Failed">("Idle")
+  const press = (effect: SandboxesModuleWrites["startAwsSignIn"]) => {
+    setPhase("Sending")
+    void Effect.runPromiseExit(effect).then((exit) => {
+      if (Exit.isSuccess(exit)) {
+        setPhase("Idle")
+        started(exit.value)
+      } else {
+        setPhase("Failed")
+      }
+    })
+  }
+  const frame = (card: ReactElement) => (
+    <div aria-label="AWS sign-in" className="sandboxes-aws" role="status">
+      {card}
+    </div>
+  )
+  if (!caller.owner) {
+    return caller.awsSignedIn === false
+      ? frame(
+          <StateCard eyebrow="Not signed in" title="Sign in to AWS to read spend." tone="neutral">
+            The owner signs the hub in to AWS.
+          </StateCard>
+        )
+      : null
+  }
+  if (session === null) return null
+  switch (session._tag) {
+    case "SignInPending":
+      return frame(
+        <StateCard
+          action={
+            <div className="sandboxes-aws-pending">
+              <div className="sandboxes-aws-code">
+                <small>Code</small>
+                <code className="stacks-mono" data-aws-code="">
+                  {session.userCode}
+                </code>
+              </div>
+              <a
+                className="sandboxes-console-link sandboxes-link-primary"
+                href={session.verificationUri}
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                Open sign-in page
+                <Icon decorative name="external-link" />
+              </a>
+            </div>
+          }
+          eyebrow="Waiting for you"
+          title="Finish signing in to AWS."
+          tone="caution"
+        >
+          {`Open the sign-in page, check the code matches and approve. It expires at ${times.clock(session.expiresAt)}.`}
+        </StateCard>
+      )
+    case "SignInRequired": {
+      const ended = session.reason === "ended"
+      return frame(
+        <StateCard
+          action={
+            start === null ? undefined : (
+              <>
+                <Button disabled={phase === "Sending"} onClick={() => press(start)} variant="primary">
+                  Sign in to AWS
+                </Button>
+                {phase === "Failed" ? (
+                  <p className="sandboxes-refusal" role="alert">
+                    The AWS sign-in didn’t start. Try again.
+                  </p>
+                ) : null}
+              </>
+            )
+          }
+          eyebrow={ended ? "Signed out" : "Not signed in"}
+          title={ended ? "The AWS sign-in ended." : "Sign in to AWS to read spend."}
+          tone="neutral"
+        >
+          {ended
+            ? "Sign in again to read spend."
+            : "The hub signs in to the management account itself; nothing on this computer is used."}
+        </StateCard>
+      )
+    }
+    case "SignedIn":
+    case "NotConfigured":
+    case "Unavailable":
+      return null
+  }
+}
 
 /** Why a write was refused, then what did not change. A refusal for the owner rule or observe mode says so. */
 const refusedCopy = (action: Action, reason: SandboxesWriteFailed["reason"] | "defect"): string =>
@@ -426,6 +740,7 @@ const ConfirmSheet = ({
     | { readonly _tag: "Refused"; readonly reason: SandboxesWriteFailed["reason"] | "defect" }
   >({ _tag: "Idle" })
   const opener = useRef<HTMLButtonElement | null>(null)
+  const heldBy = useContext(AwsContext).heldBy(action)
   const send = (effect: Effect.Effect<void, SandboxesWriteFailed>) => {
     setPhase({ _tag: "Sending" })
     void Effect.runPromiseExit(Effect.result(effect)).then((exit) => {
@@ -443,8 +758,9 @@ const ConfirmSheet = ({
   return (
     <>
       <Button
+        aria-describedby={heldBy ?? undefined}
         className="sandboxes-trigger"
-        disabled={disabled}
+        disabled={disabled || heldBy !== null}
         onClick={() => {
           // A write still in flight keeps the confirm disabled; only a refusal is cleared on reopen.
           setPhase((current) => (current._tag === "Sending" ? current : { _tag: "Idle" }))
@@ -663,44 +979,53 @@ const limitMoney = (usd: number): string => (Number.isInteger(usd) ? `$${usd}` :
 const along = (usd: number, limits: SpendLimits): string =>
   `${Math.min(100, (usd / (limits.stop * 1.2)) * 100).toFixed(2)}%`
 
-/** This month's spend against the alarm and the hard stop. */
-const SpendBar = ({ limits, spend }: { readonly limits: SpendLimits; readonly spend: SandboxSpend }): ReactElement => (
-  <div className="sandboxes-spend" data-spend="">
-    <div className="sandboxes-spend-head" data-spend-head="">
-      <span>Spend this month</span>
-      <b>{money(spend.usd)}</b>
+/** This month's spend against the alarm and the hard stop; last known while the hub isn’t signed in to AWS. */
+const SpendBar = ({ limits, spend }: { readonly limits: SpendLimits; readonly spend: SandboxSpend }): ReactElement => {
+  const times = useContext(TimesContext)
+  const { spendOld } = useContext(AwsContext)
+  return (
+    <div className="sandboxes-spend" data-spend="">
+      <div className="sandboxes-spend-head" data-spend-head="">
+        <span>Spend this month</span>
+        <b>{money(spend.usd)}</b>
+        {spendOld ? (
+          <small className="sandboxes-muted" data-spend-old="">
+            {`Last known at ${times.clock(DateTime.makeUnsafe(spend.asOf))}`}
+          </small>
+        ) : null}
+      </div>
+      <div
+        aria-label={`Spend this month ${money(spend.usd)}. Alarm at ${limitMoney(limits.alarm)}, hard stop at ${limitMoney(limits.stop)}.`}
+        aria-valuemax={limits.stop}
+        aria-valuemin={0}
+        aria-valuenow={spend.usd}
+        className="sandboxes-spend-track"
+        role="meter"
+      >
+        <span className="sandboxes-spend-fill" data-spend-fill="" style={{ inlineSize: along(spend.usd, limits) }} />
+        <span
+          aria-hidden="true"
+          className="sandboxes-spend-tick"
+          style={{ insetInlineStart: along(limits.alarm, limits) }}
+        />
+        <span
+          aria-hidden="true"
+          className="sandboxes-spend-tick sandboxes-spend-stop"
+          style={{ insetInlineStart: along(limits.stop, limits) }}
+        />
+      </div>
+      <div aria-hidden="true" className="sandboxes-spend-marks">
+        <span data-spend-mark="">$0</span>
+        <span data-spend-mark="" style={{ insetInlineStart: along(limits.alarm, limits) }}>
+          {`${limitMoney(limits.alarm)} alarm`}
+        </span>
+        <span data-spend-mark="" style={{ insetInlineStart: along(limits.stop, limits) }}>
+          {`${limitMoney(limits.stop)} hard stop`}
+        </span>
+      </div>
     </div>
-    <div
-      aria-label={`Spend this month ${money(spend.usd)}. Alarm at ${limitMoney(limits.alarm)}, hard stop at ${limitMoney(limits.stop)}.`}
-      aria-valuemax={limits.stop}
-      aria-valuemin={0}
-      aria-valuenow={spend.usd}
-      className="sandboxes-spend-track"
-      role="meter"
-    >
-      <span className="sandboxes-spend-fill" data-spend-fill="" style={{ inlineSize: along(spend.usd, limits) }} />
-      <span
-        aria-hidden="true"
-        className="sandboxes-spend-tick"
-        style={{ insetInlineStart: along(limits.alarm, limits) }}
-      />
-      <span
-        aria-hidden="true"
-        className="sandboxes-spend-tick sandboxes-spend-stop"
-        style={{ insetInlineStart: along(limits.stop, limits) }}
-      />
-    </div>
-    <div aria-hidden="true" className="sandboxes-spend-marks">
-      <span data-spend-mark="">$0</span>
-      <span data-spend-mark="" style={{ insetInlineStart: along(limits.alarm, limits) }}>
-        {`${limitMoney(limits.alarm)} alarm`}
-      </span>
-      <span data-spend-mark="" style={{ insetInlineStart: along(limits.stop, limits) }}>
-        {`${limitMoney(limits.stop)} hard stop`}
-      </span>
-    </div>
-  </div>
-)
+  )
+}
 
 /** Why the owner can't open this account's console now, or null when they can: their lease, free, or quarantined. */
 const consoleRefusal = (state: CardState, viewer: string): string | null => {
@@ -1085,7 +1410,13 @@ const staleWords = (readAt: DateTime.Utc, now: DateTime.Utc): string =>
 
 /** The caller, once read. A pending or failed read is a viewer with no login, so no lease is "yours". */
 const useCaller = (read: SandboxesModuleReads["caller"], active: boolean): SandboxesCaller => {
-  const [caller, setCaller] = useState<SandboxesCaller>({ login: "", owner: false, signIn: null })
+  const [caller, setCaller] = useState<SandboxesCaller>({
+    login: "",
+    owner: false,
+    signIn: null,
+    poolMode: null,
+    awsSignedIn: null
+  })
   useEffect(() => {
     if (!active) return
     const fiber = Effect.runFork(
@@ -1264,6 +1595,7 @@ const RequestAction = ({
     | { readonly _tag: "Sending" }
     | { readonly _tag: "Refused"; readonly reason: SandboxesWriteFailed["reason"] | "defect" }
   >({ _tag: "Idle" })
+  const heldBy = useContext(AwsContext).heldBy(kind)
   const send = () => {
     setPhase({ _tag: "Sending" })
     void Effect.runPromiseExit(Effect.result(submit)).then((exit) => {
@@ -1281,8 +1613,9 @@ const RequestAction = ({
     <div className="sandboxes-request-action">
       <div className="sandboxes-request-buttons">
         <Button
+          aria-describedby={heldBy ?? undefined}
           className="sandboxes-trigger"
-          disabled={disabled || phase._tag === "Sending"}
+          disabled={disabled || heldBy !== null || phase._tag === "Sending"}
           onClick={send}
           variant={variant}
         >
@@ -1324,7 +1657,8 @@ const OverviewPage = ({
   readonly writes: SandboxesModuleWrites | null
 }): ReactElement => {
   const times = useContext(TimesContext)
-  const { login: viewer, owner, signIn } = useCaller(reads.caller, mount.active)
+  const { aws, caller, session, started } = useAws(reads, mount.active)
+  const { login: viewer, owner, signIn } = caller
   const { now, readAgain, view } = usePool(reads.overview, mount.active)
   const requestsRead = useRead(reads.requests, mount.active)
   const requests = pendingRequests(requestsRead.result)
@@ -1341,105 +1675,122 @@ const OverviewPage = ({
   const poolNow = pool !== null && pool.stale ? pool.readAt : now
   const noneFree = pool === null ? null : noneFreeWords(times, pool.overview.sandboxes, poolNow)
   return (
-    <section className="sandboxes-page">
-      <header className="sandboxes-head">
-        <div className="sandboxes-title">
-          <h1>Sandboxes</h1>
-          {count === undefined ? null : <p>{count === 1 ? "1 account" : `${count} accounts`}</p>}
-          <div aria-live="polite" role="status">
-            {pool !== null && pool.stale ? (
-              <StateLabel icon="clock" label={staleWords(pool.readAt, now)} tone="caution" />
-            ) : null}
-          </div>
-        </div>
-        {owner && pool !== null ? (
-          <LeaseAction
-            done={reread}
-            now={poolNow}
-            overview={pool.overview}
-            signIn={signIn}
-            writes={pool.stale ? null : writes}
-          />
-        ) : null}
-      </header>
-      {submitted ? (
-        <p className="sandboxes-muted" data-pool-submitted="" role="status">
-          Submitted to Fleet. The cards update when the job runs.
-        </p>
-      ) : null}
-      {!owner && pool !== null ? (
-        <p className="sandboxes-muted">
-          Only the owner can lease or reset sandboxes here. Agents lease through Fleet jobs.
-        </p>
-      ) : null}
-      {view._tag !== "Pool" ? (
-        <PoolPanel readAgain={() => readAgain(true)} view={view} />
-      ) : (
-        <div className="sandboxes-pool">
-          <div className="sandboxes-meta">
-            <div className="sandboxes-meta-line">
-              <span data-pool-summary="">{summary(view.overview.sandboxes)}</span>
-              <span data-pool-read="">{`Read ${times.clock(view.readAt)} from hostd`}</span>
-            </div>
-            {view.overview.badge.asOf === null ? (
-              <StateLabel icon="clock" label="Sweep has not run yet" size="compact" tone="caution" />
-            ) : view.overview.badge.stale ? (
-              <StateLabel
-                icon="clock"
-                label={sweepWords(times, view.overview.badge.asOf, true, now)}
-                size="compact"
-                tone="caution"
+    <AwsContext.Provider value={aws}>
+      <section className="sandboxes-page">
+        <header className="sandboxes-head">
+          <div className="sandboxes-title">
+            <h1>Sandboxes</h1>
+            {count === undefined ? null : <p>{count === 1 ? "1 account" : `${count} accounts`}</p>}
+            {pool === null ? null : (
+              <AwsLines
+                caller={caller}
+                session={session}
+                signOut={owner && !pool.stale && writes !== null ? { write: writes.signOutAws, done: started } : null}
               />
-            ) : (
-              <span>{sweepWords(times, view.overview.badge.asOf, false, now)}</span>
             )}
+            <div aria-live="polite" role="status">
+              {pool !== null && pool.stale ? (
+                <StateLabel icon="clock" label={staleWords(pool.readAt, now)} tone="caution" />
+              ) : null}
+            </div>
           </div>
-          {noneFree === null ? null : (
-            <Notice data-pool-notice="" tone="neutral">
-              {noneFree}
-            </Notice>
-          )}
-          {requests === null ? (
-            <RequestsFailed />
-          ) : requests.staleSince === null ? null : (
-            <LastKnown at={requests.staleSince} of="requests" />
-          )}
-          <div className="sandboxes-grid">
-            {[...view.overview.sandboxes].sort(byPool).map((item) => (
-              <PoolCard
-                done={reread}
-                item={item}
-                key={item.accountId}
-                lastKnown={view.stale ? view.readAt : null}
-                now={view.stale ? view.readAt : now}
-                owner={owner}
-                requests={requests?.byAccount.get(item.accountId) ?? []}
-                signIn={owner ? signIn : null}
-                spendLimits={view.overview.spendLimits}
-                lift={
-                  owner &&
-                  writes !== null &&
-                  !view.stale &&
-                  budgetStopped(item.state) &&
-                  !liftPending(requests?.byAccount.get(item.accountId) ?? []) ? (
-                    <RequestAction
-                      disabled={requests === null || !requests.fresh}
-                      done={requestsRead.readAgain}
-                      kind="lift"
-                      submit={Effect.suspend(() => writes.liftBudget(item.accountId))}
-                      variant="secondary"
-                    />
-                  ) : null
-                }
-                viewer={viewer}
-                writes={view.stale ? null : writes}
-              />
-            ))}
+          {owner && pool !== null ? (
+            <LeaseAction
+              done={reread}
+              now={poolNow}
+              overview={pool.overview}
+              signIn={signIn}
+              writes={pool.stale ? null : writes}
+            />
+          ) : null}
+        </header>
+        {pool === null ? null : (
+          <AwsSignInCard
+            caller={caller}
+            session={session}
+            start={pool.stale || writes === null ? null : writes.startAwsSignIn}
+            started={started}
+          />
+        )}
+        {submitted ? (
+          <p className="sandboxes-muted" data-pool-submitted="" role="status">
+            Submitted to Fleet. The cards update when the job runs.
+          </p>
+        ) : null}
+        {!owner && pool !== null ? (
+          <p className="sandboxes-muted">
+            Only the owner can lease or reset sandboxes here. Agents lease through Fleet jobs.
+          </p>
+        ) : null}
+        {view._tag !== "Pool" ? (
+          <PoolPanel readAgain={() => readAgain(true)} view={view} />
+        ) : (
+          <div className="sandboxes-pool">
+            <div className="sandboxes-meta">
+              <div className="sandboxes-meta-line">
+                <span data-pool-summary="">{summary(view.overview.sandboxes)}</span>
+                <span data-pool-read="">{`Read ${times.clock(view.readAt)} from hostd`}</span>
+              </div>
+              {view.overview.badge.asOf === null ? (
+                <StateLabel icon="clock" label="Sweep has not run yet" size="compact" tone="caution" />
+              ) : view.overview.badge.stale ? (
+                <StateLabel
+                  icon="clock"
+                  label={sweepWords(times, view.overview.badge.asOf, true, now)}
+                  size="compact"
+                  tone="caution"
+                />
+              ) : (
+                <span>{sweepWords(times, view.overview.badge.asOf, false, now)}</span>
+              )}
+            </div>
+            {noneFree === null ? null : (
+              <Notice data-pool-notice="" tone="neutral">
+                {noneFree}
+              </Notice>
+            )}
+            {requests === null ? (
+              <RequestsFailed />
+            ) : requests.staleSince === null ? null : (
+              <LastKnown at={requests.staleSince} of="requests" />
+            )}
+            <div className="sandboxes-grid">
+              {[...view.overview.sandboxes].sort(byPool).map((item) => (
+                <PoolCard
+                  done={reread}
+                  item={item}
+                  key={item.accountId}
+                  lastKnown={view.stale ? view.readAt : null}
+                  now={view.stale ? view.readAt : now}
+                  owner={owner}
+                  requests={requests?.byAccount.get(item.accountId) ?? []}
+                  signIn={owner ? signIn : null}
+                  spendLimits={view.overview.spendLimits}
+                  lift={
+                    owner &&
+                    writes !== null &&
+                    !view.stale &&
+                    budgetStopped(item.state) &&
+                    !liftPending(requests?.byAccount.get(item.accountId) ?? []) ? (
+                      <RequestAction
+                        disabled={requests === null || !requests.fresh}
+                        done={requestsRead.readAgain}
+                        kind="lift"
+                        submit={Effect.suspend(() => writes.liftBudget(item.accountId))}
+                        variant="secondary"
+                      />
+                    ) : null
+                  }
+                  viewer={viewer}
+                  writes={view.stale ? null : writes}
+                />
+              ))}
+            </div>
+            <p className="sandboxes-muted sandboxes-policy">{policyLine}</p>
           </div>
-          <p className="sandboxes-muted sandboxes-policy">{policyLine}</p>
-        </div>
-      )}
-    </section>
+        )}
+      </section>
+    </AwsContext.Provider>
   )
 }
 
@@ -1928,7 +2279,8 @@ const AccountPage = ({
   readonly search: URLSearchParams
   readonly writes: SandboxesModuleWrites | null
 }): ReactElement => {
-  const { login: viewer, owner, signIn } = useCaller(reads.caller, mount.active)
+  const { aws, caller, session } = useAws(reads, mount.active)
+  const { login: viewer, owner, signIn } = caller
   const id = accountIdOf(search)
   const { now, readAgain, view } = usePool(reads.overview, mount.active)
   const requestsRead = useRead(reads.requests, mount.active)
@@ -1937,32 +2289,35 @@ const AccountPage = ({
   const item =
     view._tag === "Pool" ? view.overview.sandboxes.find((candidate) => candidate.accountId === id) : undefined
   return (
-    <section className="sandboxes-page">
-      <BackToPool />
-      {view._tag !== "Pool" ? (
-        <PoolPanel readAgain={() => readAgain(true)} view={view} />
-      ) : item === undefined ? (
-        <NotInPool id={search.get("id") ?? ""} />
-      ) : (
-        <AccountDetail
-          action={accountAction(
-            item,
-            requests,
-            owner && !view.stale ? writes : null,
-            requestsRead.readAgain,
-            accountConsole(item, owner ? signIn : null)
-          )}
-          openConsole={accountConsole(item, owner ? signIn : null)}
-          item={item}
-          now={view.stale ? view.readAt : now}
-          requests={requests === null ? null : (requests.byAccount.get(item.accountId) ?? [])}
-          requestsSince={requests?.staleSince ?? null}
-          runs={runs}
-          spendLimits={view.overview.spendLimits}
-          viewer={viewer}
-        />
-      )}
-    </section>
+    <AwsContext.Provider value={aws}>
+      <section className="sandboxes-page">
+        <BackToPool />
+        {view._tag === "Pool" ? <AwsLines caller={caller} session={session} /> : null}
+        {view._tag !== "Pool" ? (
+          <PoolPanel readAgain={() => readAgain(true)} view={view} />
+        ) : item === undefined ? (
+          <NotInPool id={search.get("id") ?? ""} />
+        ) : (
+          <AccountDetail
+            action={accountAction(
+              item,
+              requests,
+              owner && !view.stale ? writes : null,
+              requestsRead.readAgain,
+              accountConsole(item, owner ? signIn : null)
+            )}
+            openConsole={accountConsole(item, owner ? signIn : null)}
+            item={item}
+            now={view.stale ? view.readAt : now}
+            requests={requests === null ? null : (requests.byAccount.get(item.accountId) ?? [])}
+            requestsSince={requests?.staleSince ?? null}
+            runs={runs}
+            spendLimits={view.overview.spendLimits}
+            viewer={viewer}
+          />
+        )}
+      </section>
+    </AwsContext.Provider>
   )
 }
 
@@ -2174,8 +2529,8 @@ const RunsPage = ({
 }
 
 /**
- * Overview for the shell. `reads.caller` says whether the reader is the hub's own node (the owner) and gives
- * their login, matched against a lease holder. `writes` is null where the hub cannot submit sandbox jobs.
+ * Overview for the shell. `reads.caller` says whether the reader is the owner (the hub's own node, or an
+ * allowed login on the owner's own device) and gives their login, matched against a lease holder. `writes` is null where the hub cannot submit sandbox jobs.
  */
 export const makeSandboxesModuleViews = ({
   reads,
