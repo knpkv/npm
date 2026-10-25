@@ -798,6 +798,106 @@
     background: var(--rly-color-success-ink);
   }
 
+  /* Page 22: the session control opens a popover with who, how and until when. */
+  .hub-session-anchor {
+    position: relative;
+    margin-block-start: auto;
+  }
+
+  button.hub-session {
+    inline-size: 100%;
+    border: 0;
+    border-radius: var(--rly-radius-field);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+
+  button.hub-session[aria-expanded="true"] {
+    background: var(--rly-color-surface-2);
+  }
+
+  .hub-session .superapp-session-avatar:empty {
+    color: transparent;
+  }
+
+  /* Fixed, so the sidebar's overflow doesn't clip it: it opens over the page, as the design draws it. */
+  .hub-session-pop {
+    position: fixed;
+    z-index: 12;
+    inset: auto auto 84px 12px;
+    inline-size: 330px;
+    box-sizing: border-box;
+    display: grid;
+    gap: 1rem;
+    padding: 1.1rem 1.15rem;
+    background: var(--rly-color-surface-1);
+    color: var(--rly-color-text-1);
+    border: 1px solid var(--rly-color-border-2);
+    border-radius: var(--rly-radius-overlay);
+  }
+
+  .hub-session-pop > div {
+    display: grid;
+    gap: 0.2rem;
+    min-inline-size: 0;
+  }
+
+  .hub-session-pop > div + div {
+    padding-block-start: 0.9rem;
+    border-block-start: 1px solid var(--rly-color-border-1);
+  }
+
+  .hub-session-pop b {
+    font-weight: 620;
+    overflow-wrap: break-word;
+  }
+
+  .hub-session-pop-meta {
+    font-size: 0.875rem;
+    color: var(--rly-color-text-2);
+  }
+
+  /* Page 22: the log-in card above the approvals. */
+  .hub-login-card {
+    display: grid;
+    justify-items: start;
+    gap: 0.75rem;
+    margin-block-end: 1rem;
+    padding: 1.5rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    background: var(--rly-color-surface-1);
+    max-inline-size: 40rem;
+  }
+
+  .hub-login-card h2 {
+    margin: 0;
+    font-size: 1.4rem;
+    font-weight: 620;
+    letter-spacing: -0.02em;
+    line-height: 1.3;
+    overflow-wrap: break-word;
+  }
+
+  .hub-login-card > p {
+    margin: 0;
+    font-size: 0.9375rem;
+    color: var(--rly-color-text-2);
+  }
+
+  @media (max-width: 40rem) {
+    .hub-login-card h2 {
+      font-size: 1.25rem;
+    }
+
+    .hub-login-card > button {
+      inline-size: 100%;
+    }
+  }
+
   .superapp-dialog:has(.superapp-more) {
     inset-block: 0;
     inset-inline: 0;
