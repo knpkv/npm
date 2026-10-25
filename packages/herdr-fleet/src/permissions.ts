@@ -82,7 +82,9 @@ const personGrants = (config: Grants, login: string): ReadonlyArray<Permission> 
     ? []
     : config.users === undefined
     ? permissions
-    : grantsOf(config.users[login] ?? [])
+    : Object.hasOwn(config.users, login)
+    ? grantsOf(config.users[login] ?? [])
+    : []
 
 const grantedTo = (config: Grants, principal: Principal): ReadonlyArray<Permission> => {
   switch (principal._tag) {

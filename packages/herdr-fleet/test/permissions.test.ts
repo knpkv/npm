@@ -42,6 +42,13 @@ describe("permissions", () => {
     expect(all(person("other@example.test"), config)).toEqual([])
   })
 
+  // users is a plain record, so a login named like an Object member must not read the prototype.
+  it("gives an allowed login with no users entry nothing, even one named like an Object member", () => {
+    const config = configOf({ allowedUsers: ["constructor", "toString"], users: {} })
+    expect(all(person("constructor"), config)).toEqual([])
+    expect(all(person("toString"), config)).toEqual([])
+  })
+
   // Until a passkey proves the person is present, approving stays tied to the approval nodes, as today.
   it("lets a person approve only from an approval node, or with a passkey from any node", () => {
     const config = configOf({ allowedUsers: ["owner@example.test"] })
