@@ -684,6 +684,22 @@ describe("hub apps", () => {
         expect(submitted.map((entry) => entry.caller)).toEqual([viewer])
       }).pipe(Effect.scoped))
 
+    // Before the hub has read an app's manifest it can't know what the app declared: that is "not yet", not
+    // "undeclared". An app starting up gets told the hub isn't ready, and nothing names a service it did declare.
+    it.effect("app services answer 503 unavailable before the hub has the app's manifest", () =>
+      Effect.gen(function*() {
+        const directory = yield* tempDirectory
+        const { hub, port } = yield* serveHub(directory)
+        yield* hub.writeConfig([{ id: "fresh", reach: atEndpoint(endpointIn(directory, "not-listening")) }])
+        yield* hub.registry.reload()
+        const token = Redacted.value(yield* hub.tokens.issue(appId("fresh"), "spawn-1"))
+        const answer = yield* get(port, "/v1/app-services/host", {
+          authorization: `Bearer ${token}`,
+          [hubHeaders.app]: "fresh"
+        })
+        expect([answer.status, JSON.parse(answer.body)]).toEqual([503, { code: "unavailable" }])
+      }).pipe(Effect.scoped))
+
     it.effect("app services are not served on any listener but loopback", () =>
       Effect.gen(function*() {
         const directory = yield* tempDirectory

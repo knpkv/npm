@@ -310,7 +310,13 @@ export const handleAppServicesRoute = async <R>(
   const manifest = registered._tag === "Success"
     ? registered.value.find((entry) => entry.id === app.value)?.state.manifest ?? null
     : null
-  if (manifest === null || !manifest.services.includes(service)) {
+  // Until the hub has read the app's manifest it can't tell what the app declared: "not yet" (the app is starting, and
+  // should call no service before it listens), not "undeclared".
+  if (manifest === null) {
+    send(response, 503, { code: "unavailable" })
+    return true
+  }
+  if (!manifest.services.includes(service)) {
     send(response, 403, { code: "undeclared" })
     return true
   }

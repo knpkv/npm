@@ -24,7 +24,7 @@ import {
 } from "@knpkv/hub-app"
 import { ShellServices } from "@knpkv/hub-app/hub-client"
 import type { AppServer } from "@knpkv/hub-app/node"
-import { Duration, Effect, Layer, Schema } from "effect"
+import { Duration, Effect, Layer, Option, Schema, Scope, SynchronizedRef } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { readHostLimits, readHostUsage, staleWhileRevalidate, usageCache } from "./host.js"
 
@@ -70,20 +70,39 @@ export const usageHandlers = (options: UsageAppOptions) =>
     ModuleHandlers,
     Effect.gen(function*() {
       const shell = yield* ShellServices
-      // Attached, a hub that can't name this host fails startup; the unit restarts and asks again.
-      const { host } = yield* shell.host
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-      const localLimits = yield* staleWhileRevalidate(
-        readHostLimits(host, options.limitsCommand).pipe(
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
-        ),
-        Duration.seconds(30)
-      )
-      const localUsage = yield* usageCache((query) =>
-        readHostUsage(host, options.limitsCommand, query).pipe(
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+      const scope = yield* Effect.scope
+      // No hub service is called here: attached, this runs before the app listens, and the hub answers an app's
+      // services only once it has read that app's manifest from it. This machine's own readings serve standalone
+      // runs only, so their caches (and the host they read for) are built on the first standalone read.
+      const buildReadings = Effect.gen(function*() {
+        const { host } = yield* shell.host
+        const limits = yield* staleWhileRevalidate(
+          readHostLimits(host, options.limitsCommand).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+          ),
+          Duration.seconds(30)
         )
+        const usage = yield* usageCache((query) =>
+          readHostUsage(host, options.limitsCommand, query).pipe(
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+          )
+        )
+        return { limits, usage }
+      }).pipe(Effect.provideService(Scope.Scope, scope))
+      // Kept once built; a failed host lookup keeps nothing, so the next read asks again.
+      type Readings = Effect.Success<typeof buildReadings>
+      const built = yield* SynchronizedRef.make(Option.none<Readings>())
+      const localReadings = SynchronizedRef.modifyEffect(
+        built,
+        (current): Effect.Effect<readonly [Readings, Option.Option<Readings>], ShellServiceUnavailable> =>
+          Option.match(current, {
+            onSome: (readings) => Effect.succeed([readings, current]),
+            onNone: () => Effect.map(buildReadings, (readings) => [readings, Option.some(readings)])
+          })
       )
+      const localLimits = { read: Effect.flatMap(localReadings, (readings) => readings.limits.read) }
+      const localUsage = (query: UsageQuery) => Effect.flatMap(localReadings, (readings) => readings.usage(query))
 
       const limits = shell.fleetRead("limits", {}).pipe(
         Effect.flatMap((json) => Schema.decodeUnknownEffect(FleetLimits)(json)),

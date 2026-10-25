@@ -72,6 +72,7 @@ import { request as httpsRequest } from "node:https"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
+import { fileURLToPath } from "node:url"
 import WebSocketClient, { WebSocketServer } from "ws"
 import { terminalConnectionAfterClose } from "../../herdr-connect/src/internal/terminal-connection.js"
 import { SanitizedJobRecord } from "../src/approval-request.js"
@@ -8360,6 +8361,46 @@ esac
       expect(yield* upgradeOutcome(session("SER8"), { origin })).toBe("attached")
       expect(opened).toEqual(["SER8"])
     }).pipe(Effect.scoped, provideNodeServices))
+
+  // The Usage app as nix and `herdr-hub apps add` install it: its built package, attached to a real hub. It must reach
+  // Ready on the first start; an app that asks the hub for a service before it listens never does (the hub answers
+  // services only once it has read the app's manifest from it).
+  it.live("starts the Usage app attached to the hub and lists it Ready", () =>
+    Effect.gen(function*() {
+      const short = mkdtempSync(join(tmpdir(), "hub-usage-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(short, { force: true, recursive: true })))
+      const configPath = join(short, "apps.json")
+      writeFileSync(
+        configPath,
+        JSON.stringify({
+          v: 2,
+          managedBy: "cli",
+          trust: { scopes: ["@knpkv"] },
+          apps: [{
+            id: "usage",
+            package: "@knpkv/herdr-usage",
+            version: "0.0.0",
+            dir: fileURLToPath(new URL("../../herdr-usage/", import.meta.url)),
+            bin: "dist/bin.js",
+            enabled: true,
+            memoryMb: 256,
+            allowScripts: false
+          }]
+        })
+      )
+      const server = yield* started("herdr-hub-usage-attached-", (root) => ({ ...config(root), host: "SER8" }), () => ({
+        configPath,
+        node: process.execPath,
+        stateDirectory: join(short, "state"),
+        runtimeDirectory: join(short, "run")
+      }))
+      const states = yield* plainSnapshot(server.url).pipe(
+        Effect.map((snapshot) => snapshot.apps.states.map((state) => state._tag === "Ready" ? "ready" : state.reason)),
+        Effect.filterOrFail((reasons) => reasons.length === 1 && reasons[0] !== "starting"),
+        Effect.retry({ schedule: Schedule.spaced("100 millis"), times: 150 })
+      )
+      expect(states).toEqual(["ready"])
+    }).pipe(Effect.scoped, provideNodeServices), 30_000)
 
   // The shell decides between mounting an app and showing a panel from the dashboard snapshot, so the gate must hold
   // there: a third-party app (by the package apps.json names; the fixture claims a @knpkv name) is local_only on the

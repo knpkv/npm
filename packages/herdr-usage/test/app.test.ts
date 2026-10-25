@@ -47,6 +47,29 @@ describe("usage app", () => {
         expect(asked).toEqual(["limits {}", "usage {\"range\":\"7d\",\"timeZone\":\"Europe/Amsterdam\"}"])
       }).pipe(Effect.scoped))
 
+    // The hub answers an app's service calls only once it has read the app's manifest, and it reads that by asking the
+    // listening app. Building the handlers happens before the app listens, so it may call no service at all.
+    it.effect("attached: builds its routes without calling the hub, which can't answer before it has the manifest", () =>
+      Effect.gen(function*() {
+        const asked: Array<string> = []
+        const hostCalls: Array<string> = []
+        const notYet = Layer.succeed(ShellServices, {
+          ...standaloneShellServices({ host: "hub", isHub: true, hosts: ["hub"] }),
+          host: Effect.sync(() => hostCalls.push("host")).pipe(
+            Effect.andThen(Effect.fail(new ShellServiceUnavailable({ service: "host", reason: "undeclared" })))
+          ),
+          fleetRead: (read, query) =>
+            Effect.sync(() => {
+              asked.push(`${read} ${JSON.stringify(query)}`)
+              return read === "limits" ? fleetLimits : Schema.encodeSync(FleetUsage)(fleetUsage)
+            })
+        })
+        const handlers = yield* Layer.build(usageHandlers({ limitsCommand: undefined }).pipe(Layer.provide(notYet)))
+        expect(hostCalls).toEqual([])
+        expect((yield* serve(handlers, "GET", "/limits", "")).body).toEqual(fleetLimits)
+        expect(hostCalls).toEqual([])
+      }).pipe(Effect.scoped))
+
     it.effect("standalone: this machine alone, in the same shape", () =>
       Effect.gen(function*() {
         const handlers = yield* Layer.build(
@@ -62,6 +85,29 @@ describe("usage app", () => {
           peersListed: true,
           hosts: [{ host: "laptop", reading: { _tag: "Unavailable", reason: "not_configured" } }]
         })
+      }).pipe(Effect.scoped))
+
+    // The host lookup that feeds this machine's own readings is kept only once it succeeds: one failed lookup must not
+    // fail every later read until the app restarts.
+    it.effect("standalone: a failed host lookup is asked again on the next read", () =>
+      Effect.gen(function*() {
+        let lookups = 0
+        const flaky = Layer.succeed(ShellServices, {
+          ...standaloneShellServices({ host: "laptop", isHub: false, hosts: ["laptop"] }),
+          host: Effect.suspend(() => {
+            lookups += 1
+            return lookups === 1
+              ? Effect.fail(new ShellServiceUnavailable({ service: "host", reason: "hub_down" }))
+              : Effect.succeed({ host: "laptop", isHub: false, hosts: ["laptop"] })
+          })
+        })
+        const handlers = yield* Layer.build(usageHandlers({ limitsCommand: undefined }).pipe(Layer.provide(flaky)))
+        const first = yield* Effect.exit(serve(handlers, "GET", "/limits", ""))
+        expect(first._tag).toBe("Failure")
+        const second = yield* serve(handlers, "GET", "/limits", "")
+        expect(second.body).toMatchObject({ hosts: [{ host: "laptop" }] })
+        yield* serve(handlers, "GET", "/limits", "")
+        expect(lookups).toBe(2)
       }).pipe(Effect.scoped))
 
     it.effect("a hub that can't answer, or answers another shape, is a failed read", () =>

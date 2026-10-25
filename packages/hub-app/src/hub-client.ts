@@ -42,6 +42,10 @@ export interface ShellServiceCalls {
   ) => Effect.Effect<void, ShellServiceUnavailable | ShellServiceRefused | GrantInvalid>
 }
 
+/**
+ * What an app may ask of its hub. Attached, the hub answers only once it has read the app's manifest from the
+ * listening app, so call these from route handlers (or lazily on first use), never while building the handler layer.
+ */
 export class ShellServices extends Context.Service<ShellServices, ShellServiceCalls>()(
   "@knpkv/hub-app/ShellServices"
 ) {}

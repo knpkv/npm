@@ -442,8 +442,22 @@ export const makeSupervisor = Effect.fn("AppSupervisor.make")(function*(options:
     }
   })
 
+  /** The enabled apps last reported as unstartable for want of a Node path, so the journal hears each set once. */
+  const unstartable = yield* Ref.make("")
+
   /** Start, replace or stop fibers so they match `apps`; an unchanged entry keeps its running child. */
   const sync = Effect.fn("AppSupervisor.sync")(function*(apps: ReadonlyArray<InstalledApp>) {
+    if (options.node === null) {
+      // Each app's log says it too, but the cause is the hub's, not the app's: say it once where operators look.
+      const ids = apps.filter((entry) => entry.enabled).map((entry) => entry.id).join(", ")
+      const previous = yield* Ref.getAndSet(unstartable, ids)
+      if (ids !== "" && ids !== previous) {
+        yield* Effect.logWarning(
+          `Hub apps are listed but this hub was started without its Node path, so none of them run: ${ids}. ` +
+            "Pass node (the Node binary's path) to makeHostdProgram, or apps.node to startHttpServer."
+        )
+      }
+    }
     const known = yield* Ref.get(entries)
     for (const [id] of known) {
       if (!apps.some((entry) => entry.id === id)) {
