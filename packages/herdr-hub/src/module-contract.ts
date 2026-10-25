@@ -52,7 +52,10 @@ export const todayModule = defineModule({
   requires: ["read"]
 })
 
-/** Usage details reads the existing Fleet reports; it grants no action capability. */
+/**
+ * Where the Usage app (`@knpkv/herdr-usage`) lives, for links from core modules. Usage is no longer one of the hub's
+ * own modules: an installed app with this id provides it, and the registry no longer reserves the id.
+ */
 export const usageModule = defineModule({
   id: "usage",
   label: "Usage",
@@ -123,7 +126,6 @@ export const builtInModuleIds: ReadonlyArray<string> = [
   fleetModule,
   connectModule,
   todayModule,
-  usageModule,
   codeModule,
   stacksModule,
   sandboxesModule,

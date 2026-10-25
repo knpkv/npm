@@ -158,6 +158,16 @@ export const start: StartProduct = Effect.fn("SuperappDesign.start")(function*(f
     yield* fs.copy(path.join(dist, name), path.join(temporary, name))
     files[`/assets/${name}`] = name
   }
+  // The Usage app's client, where the hub serves an attached app's assets. A base predating apps has none to read.
+  const usageClient = path.join(repository, "packages/herdr-usage/dist/client")
+  if (yield* fs.exists(usageClient)) {
+    yield* fs.makeDirectory(path.join(temporary, "usage-app"))
+    for (const name of yield* fs.readDirectory(usageClient)) {
+      if (!/\.(css|js)$/u.test(name)) continue
+      yield* fs.copy(path.join(usageClient, name), path.join(temporary, "usage-app", name))
+      files[`/apps/usage/app/assets/${name}`] = `usage-app/${name}`
+    }
+  }
   const origin = yield* serveUsageDesignFiles(temporary, files)
   return LiveProduct.of({
     origin,
@@ -185,6 +195,8 @@ export const start: StartProduct = Effect.fn("SuperappDesign.start")(function*(f
         ["/v1/connect/archive", { agents: [], nextCursor: null }],
         ["/v1/connect/limits", readings.limits],
         ["/v1/connect/usage", readings.usage],
+        ["/apps/usage/v1/modules/usage/limits", readings.limits],
+        ["/apps/usage/v1/modules/usage/usage", readings.usage],
         ["/v1/relay/session", { tools: [], backend: "codex-cli", cancel: false }],
         ["/v1/relay/backends", [{ _tag: "Ready", backend: "codex-cli", label: "Fixture backend", version: "1" }]],
         ["/manifest.webmanifest", { name: "Relay", start_url: "/", display: "standalone" }]
@@ -196,7 +208,7 @@ export const start: StartProduct = Effect.fn("SuperappDesign.start")(function*(f
             await route.fulfill({ contentType: "text/html", body: html })
             return
           }
-          if (url.pathname.startsWith("/assets/")) {
+          if (url.pathname.startsWith("/assets/") || url.pathname.startsWith("/apps/usage/app/assets/")) {
             if (files[url.pathname] !== undefined) await route.continue()
             else await route.abort("failed")
             return
@@ -205,7 +217,11 @@ export const start: StartProduct = Effect.fn("SuperappDesign.start")(function*(f
             await route.continue()
             return
           }
-          if (url.pathname === "/v1/connect/limits" || url.pathname === "/v1/connect/usage") {
+          if (
+            url.pathname === "/v1/connect/limits" || url.pathname === "/v1/connect/usage" ||
+            url.pathname === "/apps/usage/v1/modules/usage/limits" ||
+            url.pathname === "/apps/usage/v1/modules/usage/usage"
+          ) {
             if (state.kind === "loading") return
             if (state.kind === "error") {
               await route.fulfill({ status: 503, json: { error: "unavailable" } })

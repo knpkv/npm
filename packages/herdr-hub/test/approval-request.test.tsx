@@ -61,6 +61,7 @@ const dashboardFor = (record: JobRecord): DashboardSnapshot => ({
     sandboxesEnabled: false
   },
   approvalsEnabled: true,
+  apps: { viewer: "viewer@example.test", states: [] },
   directory: null,
   historyNextCursor: null,
   host: "SER8",

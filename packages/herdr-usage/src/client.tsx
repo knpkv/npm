@@ -1,19 +1,28 @@
 /**
- * The Usage app's client: the same {@link UsagePage} the hub renders, in the app's own React root, given a
- * {@link UsageShell} made from the {@link ShellContext} its shell passes. Bundled to `dist/client/client.js`.
+ * The Usage app's client: {@link UsagePage} in the app's own React root, given a {@link UsageShell} made from the
+ * {@link ShellContext} its shell passes (the hub's superapp or hub-app's standalone shell). Bundled to
+ * `dist/client/client.js`.
  *
  * Reads go to the app's own routes (`ctx.api("/limits")`, `ctx.api("/usage")`), with the shell's request headers.
  *
  * @module
  */
-import { FleetLimits, FleetReadLoadError, FleetUsage, type Received, type UsageQuery } from "@knpkv/herdr-connect/usage"
+import {
+  FleetLimits,
+  FleetReadLoadError,
+  FleetUsage,
+  onLoopback,
+  type Received,
+  type UsageQuery
+} from "@knpkv/herdr-connect/usage"
 import { defineAppClient, type ShellContext } from "@knpkv/hub-app"
 import { Icon } from "@knpkv/rly/foundations"
 import { Clock, Effect, Exit, ManagedRuntime, Option, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import { type ReactElement, useMemo } from "react"
 import { createRoot } from "react-dom/client"
-import { type UsageChrome, type UsageModuleReads, UsagePage, UsagePageId, type UsageShell } from "./views.js"
+import { usageChrome, usageHref } from "./shell.js"
+import { type UsageModuleReads, UsagePage, UsagePageId, type UsageShell } from "./views.js"
 
 const runtime = ManagedRuntime.make(FetchHttpClient.layer)
 
@@ -51,19 +60,6 @@ const onRuntime = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>): Ef
     })
   })
 
-/** The header chrome the shell lends, when it lends an outlet and the means to group around it. */
-const chromeOf = (context: ShellContext): UsageChrome | null => {
-  const { headerOutlet, setHeaderMode } = context
-  return headerOutlet === undefined || headerOutlet === null || setHeaderMode === undefined
-    ? null
-    : {
-        host: context.caller.login,
-        headerOutlet,
-        setEmpty: context.setEmpty,
-        setGrouped: (grouped) => setHeaderMode(grouped ? "grouped" : "shell")
-      }
-}
-
 const UsageApp = ({ context }: { readonly context: ShellContext }): ReactElement => {
   const reads = useMemo(
     (): UsageModuleReads => ({
@@ -83,13 +79,9 @@ const UsageApp = ({ context }: { readonly context: ShellContext }): ReactElement
     (): UsageShell => ({
       active: context.active,
       navigate: (href) => context.navigate(href, "replace", null),
-      href: (page, search) => {
-        const query = new URLSearchParams(search)
-        query.delete("tab")
-        return `?${query.toString()}#usage/${page}`
-      },
-      // The shell's header outlet, when it lends one; standalone it has no grouped header, so no chrome.
-      chrome: chromeOf(context),
+      href: usageHref(context),
+      // The shell's grouped header, when it has one; standalone it has none, so no chrome.
+      chrome: usageChrome(context),
       nextIcon: <Icon name="chevron-right" decorative />
     }),
     [context]
@@ -98,11 +90,12 @@ const UsageApp = ({ context }: { readonly context: ShellContext }): ReactElement
   return (
     <UsagePage
       content={{
-        host: context.caller.login,
+        host: context.host ?? context.caller.login,
         reads,
         viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         now: Date.now(),
-        onHubMachine: false
+        // On this machine's loopback the page links to the local agent-usage dashboard, as the hub's own Usage did.
+        onHubMachine: onLoopback()
       }}
       shell={shell}
       page={page}

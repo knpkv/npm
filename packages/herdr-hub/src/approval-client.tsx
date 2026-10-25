@@ -4,12 +4,13 @@ import { BrowserCrypto, BrowserHttpClient } from "@effect/platform-browser"
 import { makeRelayClient, makeRelayConversations } from "@knpkv/relay-product/client"
 import { makeConnectAtoms } from "@knpkv/herdr-connect/surface"
 import { makeConnectModuleViews } from "./connect-module-view.js"
-import { loadLimits, loadUsage, makeUsageAtoms, onLoopback, UsageSurface } from "@knpkv/herdr-connect/usage"
+import { makeUsageAtoms, onLoopback, UsageSurface } from "@knpkv/herdr-connect/usage"
 import { Cause, Effect, Exit, Layer, ManagedRuntime, Option, Result, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Atom from "effect/reactivity/Atom"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import type { AppState, ShellBadge } from "@knpkv/hub-app"
 import { useCallback, useEffect, useRef, useState, type TouchEvent } from "react"
 import { createRoot, hydrateRoot } from "react-dom/client"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
@@ -52,12 +53,14 @@ import { useHubNow } from "./hub-clock.js"
 import { answerOutcome, decidableExpiry, workRequestDecisionsFor } from "./work-decisions.js"
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
 import { SuperappShell } from "./superapp-view.js"
-import { superappLayout } from "./internal/superapp-layout.js"
+import { appPlacements, superappLayout } from "./internal/superapp-layout.js"
 import { makeFleetHubModuleViews } from "./fleet-module-view.js"
 import { TodayReadFailed } from "./today-module-view.js"
 import { makeResourcesModuleViews } from "./resources-module-view.js"
 import { loadHostResources } from "./resources-client.js"
-import { makeUsageModuleViews, type UsageModuleReads } from "./usage-module-view.js"
+import { makeAppModuleViews } from "./app-module-view.js"
+import { ShellIcon } from "./internal/shell-icon.js"
+import { UsageMovedPanel } from "./internal/usage-moved.js"
 import { makeCodeModuleViews } from "./code-module-view.js"
 import { loadStack, loadStackPlan, loadStacksOverview, type StacksModuleReads } from "./stacks-client.js"
 import { makeStacksModuleViews } from "./stacks-module-view.js"
@@ -436,15 +439,18 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
 
 type DashboardAtoms = ReturnType<typeof makeDashboardAtoms>
 
+/** The shell's own glyph for apps it knows (see AppModuleOptions.icons). */
+const appIcons = { usage: <ShellIcon name="usage" /> }
+
+const appStateId = (state: AppState): string => (state._tag === "Ready" ? state.manifest.id : state.id)
+
 const DashboardApp = ({
   atoms,
   codeReads,
-  readToday,
-  usageReads
+  readToday
 }: {
   readonly atoms: DashboardAtoms
   readonly readToday: Effect.Effect<typeof NeedsYouResult.Type, TodayReadFailed>
-  readonly usageReads: UsageModuleReads
   readonly codeReads: CodeModuleReads
 }) => {
   const result = useAtomValue(atoms.dashboard)
@@ -476,6 +482,13 @@ const DashboardApp = ({
   const [historyState, setHistoryState] = useState(dashboardHistoryState(0, [], initial.historyNextCursor))
   const [pendingBusy, setPendingBusy] = useState(false)
   const [routeSearch, setRouteSearch] = useState(window.location.search)
+  const [appBadges, setAppBadges] = useState<Readonly<Record<string, ShellBadge>>>({})
+  const setAppBadge = useCallback((id: string, badge: ShellBadge | null) => {
+    setAppBadges((current) => {
+      const { [id]: _previous, ...rest } = current
+      return badge === null ? rest : { ...rest, [id]: badge }
+    })
+  }, [])
   const { state: pendingState, update: setPendingState } = useDashboardPending(snapshot)
   const loadTarget = useCallback(
     async (link: ApprovalNotificationCandidate): Promise<PendingApprovalTargetRevalidation> => {
@@ -722,13 +735,13 @@ const DashboardApp = ({
     fleet: snapshot.approvalApp.fleet,
     push: snapshot.approvalApp.pushEnabled
   })
-  const usage = makeUsageModuleViews({
+  // Installed apps come with the dashboard snapshot, so they refresh with it.
+  const apps = makeAppModuleViews(current.apps.states, {
     host: current.host,
-    reads: usageReads,
-    viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    // Received report timestamps use the browser clock, unlike Work's hub-anchored countdown.
-    now: Date.now(),
-    onHubMachine: onLoopback()
+    viewer: current.apps.viewer,
+    badges: appBadges,
+    setBadge: setAppBadge,
+    icons: appIcons
   })
   const resources = makeResourcesModuleViews({ host: current.host, read: resourcesRead })
   const code = makeCodeModuleViews({ reads: codeReads })
@@ -747,17 +760,18 @@ const DashboardApp = ({
   const fleetNavigationBadge = dashboardPendingNavigationBadge(pendingState, workNow, refreshFailed)
   const fleetWithBadge =
     fleetNavigationBadge === undefined ? fleet : { ...fleet, navigationBadge: fleetNavigationBadge }
-  const installed = [connect, fleetWithBadge, code, usage, resources, ...sandboxes, stacks]
-  const layout = superappLayout(
-    installed.map((view) => view.descriptor.id),
-    current.approvalApp.fleet
+  const installed = [connect, fleetWithBadge, code, resources, ...sandboxes, stacks, ...apps]
+  const layout = superappLayout<string>(
+    [connect, fleetWithBadge, code, resources, ...sandboxes, stacks].map((view) => view.descriptor.id),
+    current.approvalApp.fleet,
+    appPlacements(current.apps.states)
   )
   return (
     <>
       <DashboardWorkPollOwner atom={atoms.work} poll={atoms.workPoll} />
       {superapp ? (
         <SuperappShell
-          modules={installed.filter((view) => layout.modules.includes(view.descriptor.id))}
+          modules={layout.modules.flatMap((id) => installed.filter((view) => view.descriptor.id === id))}
           mobileModules={layout.mobileModules}
           primaryModules={layout.primaryModules}
           landing={{ module: "connect", page: "overview" }}
@@ -771,6 +785,11 @@ const DashboardApp = ({
           }
           terminalOwnsKeys={connectConnection._tag === "connected"}
           relay={relay}
+          notFound={(path) =>
+            path.startsWith("#usage") && !current.apps.states.some((state) => appStateId(state) === "usage") ? (
+              <UsageMovedPanel />
+            ) : null
+          }
           onLocationChange={setRouteSearch}
           notifications={
             <>
@@ -825,21 +844,6 @@ const readToday = Effect.callback<typeof NeedsYouResult.Type, TodayReadFailed>((
     onExit: (exit) => resume(Exit.isSuccess(exit) ? Effect.succeed(exit.value) : Effect.failCause(exit.cause))
   })
 })
-const usageReads: UsageModuleReads = {
-  usage: (query) =>
-    Effect.callback((resume, signal) => {
-      applicationRuntime.runCallback(loadUsage(query), {
-        signal,
-        onExit: (exit) => resume(Exit.isSuccess(exit) ? Effect.succeed(exit.value) : Effect.failCause(exit.cause))
-      })
-    }),
-  limits: Effect.callback((resume, signal) => {
-    applicationRuntime.runCallback(loadLimits, {
-      signal,
-      onExit: (exit) => resume(Exit.isSuccess(exit) ? Effect.succeed(exit.value) : Effect.failCause(exit.cause))
-    })
-  })
-}
 /** The existing page runtime owns all Code fetches; module interruption aborts their request signals. */
 const runCodeRead = <A, E>(effect: Effect.Effect<A, E, HttpClient.HttpClient>): Effect.Effect<A, E> =>
   Effect.callback((resume, signal) => {
@@ -892,7 +896,7 @@ const relay: HubRelayConversation = {
 watchRelayPage(window, relay)
 const application = (
   <RegistryProvider>
-    <DashboardApp atoms={atoms} readToday={readToday} usageReads={usageReads} codeReads={codeReads} />
+    <DashboardApp atoms={atoms} readToday={readToday} codeReads={codeReads} />
   </RegistryProvider>
 )
 if (initial.approvalApp.superapp) createRoot(root).render(application)

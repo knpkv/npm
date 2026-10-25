@@ -1,7 +1,7 @@
 /**
  * `@knpkv/herdr-usage/views` — the Usage pages' React views. React and rly are peers: whoever renders these views
- * supplies one copy of each. The hub's built-in module and the app's own client both render {@link UsagePage}, each
- * with its own {@link UsageShell}.
+ * supplies one copy of each. The app's own client renders {@link UsagePage}; another host may too, with its own
+ * {@link UsageShell}.
  *
  * @module
  */

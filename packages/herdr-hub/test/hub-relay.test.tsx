@@ -10,19 +10,41 @@ import {
   type RelayConversations,
   type RelayConversationState
 } from "@knpkv/relay-product/client"
-import { Effect, Exit } from "effect"
-import { makeUsageModuleViews } from "../src/usage-module-view.js"
-import { limitsFixture, usageFixture } from "./superapp-browser/usage-fixture.js"
-import { act } from "react"
+import { Exit } from "effect"
+import { act, useContext, useEffect } from "react"
+import { ShellHeaderContext } from "../src/internal/app-header.js"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { HubRelay, watchRelayPage } from "../src/hub-relay.js"
 import { FleetShell, keyboardHeight } from "../src/shell-view.js"
-import { connectModule } from "../src/modules.js"
+import { connectModule, type ModulePageMount, type ModuleViews, usageModule } from "../src/modules.js"
 import { SuperappShell } from "../src/superapp-view.js"
 import { makeFleetModuleViews } from "../src/fleet-module-view.js"
 
 const fleet: ObjectRef = { product: "herdr", kind: "fleet", id: "hub.tail" }
+
+/** A module whose Limits page asks for the grouped, empty header, as the Usage app does with nothing recorded. */
+const GroupingPage = ({ mount, page }: { readonly mount: ModulePageMount; readonly page: string }) => {
+  const header = useContext(ShellHeaderContext)
+  const grouped = mount.active && page === "limits"
+  useEffect(() => {
+    header?.setMode("usage", { grouped, empty: grouped })
+    return () => header?.setMode("usage", { grouped: false, empty: false })
+  }, [grouped, header])
+  return (
+    <a data-region="action" href="?range=7d&timeZone=UTC#usage/tokens">
+      Tokens
+    </a>
+  )
+}
+const groupingUsage: ModuleViews<typeof usageModule> = {
+  descriptor: usageModule,
+  pages: {
+    limits: (_search, mount) => <GroupingPage mount={mount} page="limits" />,
+    tokens: (_search, mount) => <GroupingPage mount={mount} page="tokens" />,
+    "by-tool": (_search, mount) => <GroupingPage mount={mount} page="by-tool" />
+  }
+}
 
 /** A conversation the test drives event by event; nothing reaches a server. */
 const fakeConversations = (initial: RelayConversationState = initialRelayConversation) => {
@@ -125,20 +147,7 @@ describe("Relay in the hub's masthead", () => {
     document.body.append(host)
     root = createRoot(host)
     window.history.replaceState(null, "", "/?range=7d&timeZone=UTC#usage/limits")
-    const usage = makeUsageModuleViews({
-      host: "hub",
-      reads: {
-        usage: () =>
-          Effect.succeed({
-            fleet: usageFixture({ range: "7d", timeZone: "UTC" }, 1_000, "empty-readings"),
-            receivedAt: 1_000
-          }),
-        limits: Effect.succeed({ fleet: limitsFixture(1_000, "empty-readings"), receivedAt: 1_000 })
-      },
-      viewerTimeZone: "UTC",
-      now: 1_000,
-      onHubMachine: false
-    })
+    const usage = groupingUsage
     await act(async () =>
       root?.render(
         <SuperappShell
@@ -152,7 +161,7 @@ describe("Relay in the hub's masthead", () => {
         />
       )
     )
-    expect(document.querySelector('.superapp-shell[data-usage-empty="true"]')).not.toBeNull()
+    expect(document.querySelector('.superapp-shell[data-module-empty="true"]')).not.toBeNull()
     const launcher = document.querySelector("[data-rly-relay-launcher]")
     const live = document.querySelector(".fleet-shell-relay-live")
     expect(live).not.toBeNull()
@@ -163,7 +172,7 @@ describe("Relay in the hub's masthead", () => {
     expect(document.querySelector("[data-rly-relay-launcher]")).toBe(launcher)
     expect(document.querySelector(".fleet-shell-relay-live")).toBe(live)
     expect(subscribe.mock.calls).toHaveLength(subscriptions)
-    expect(document.querySelector(".usage-empty-header-region")).toBeNull()
+    expect(document.querySelector(".superapp-grouped-header-region")).toBeNull()
   })
   /** Moving the announcement out of the visual mast preserves live updates and panel announcement ownership. */
   it("keeps status announcements in the supplied shell outlet", async () => {

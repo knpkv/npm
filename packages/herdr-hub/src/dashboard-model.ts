@@ -1,5 +1,6 @@
 import { HostStatus, JobPayload, PendingApprovalCursor } from "@knpkv/herdr-fleet/model"
 import { WorkSnapshots } from "@knpkv/herdr-work/model"
+import { AppState } from "@knpkv/hub-app"
 import { Schema } from "effect"
 import { SanitizedJobRecord } from "./approval-request.js"
 
@@ -94,6 +95,9 @@ export const DashboardSnapshot = Schema.Struct({
     // Whether this listener serves the Sandboxes pool, so the shell mounts its nav row. The one place the shell reads it.
     sandboxesEnabled: Schema.Boolean
   }),
+  // The installed apps this listener's super-app shows (empty where it shows none), as `/v1/apps` lists them for
+  // this listener, with the login the hub authenticated for the page. Refreshed with the snapshot.
+  apps: Schema.Struct({ viewer: Schema.String, states: Schema.Array(AppState) }),
   work: Schema.NullOr(WorkSnapshots),
   status: HostStatus,
   records: Schema.Array(SanitizedJobRecord),

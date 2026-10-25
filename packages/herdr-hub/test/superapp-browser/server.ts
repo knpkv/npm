@@ -13,7 +13,9 @@ import {
 } from "@knpkv/codecommit-web/host"
 import { FleetLimits, FleetUsage } from "@knpkv/herdr-connect"
 import { FleetConnectAgentPage } from "@knpkv/herdr-connect/model"
+import { usageManifest } from "@knpkv/herdr-usage"
 import { type WorkGoal, WorkSnapshots } from "@knpkv/herdr-work/model"
+import { AppState } from "@knpkv/hub-app"
 import { BackendStatus, RelayEvent, SessionInfo } from "@knpkv/relay/wire"
 import { SandboxesOverview } from "@knpkv/sandbox-pool/host"
 import { Clock, Config, Effect, FileSystem, Schema } from "effect"
@@ -81,6 +83,17 @@ const program = Effect.gen(function*() {
   for (const name of yield* fs.readDirectory(dist)) {
     if (/\.(js|css|woff2|png)$/.test(name)) assets.set(`/assets/${name}`, yield* fs.readFile(`${dist}${name}`))
   }
+  // The Usage app, attached as the hub attaches it: its built client served under /apps/usage/app/assets/.
+  const usageClient = new URL("../../../herdr-usage/dist/client/", import.meta.url).pathname
+  for (const name of yield* fs.readDirectory(usageClient)) {
+    if (/\.(js|css)$/.test(name)) {
+      assets.set(`/apps/usage/app/assets/${name}`, yield* fs.readFile(`${usageClient}${name}`))
+    }
+  }
+  const usageApp = Schema.decodeUnknownSync(AppState)({
+    _tag: "Ready",
+    manifest: { ...usageManifest("0.0.0-fixture"), client: { entry: "client.js", css: ["client.css"] } }
+  })
   const fontPreload = fontPreloadLink(
     new Map([...assets].map(([pathname, bytes]) => [pathname.slice("/assets/".length), bytes]))
   )
@@ -135,6 +148,7 @@ const program = Effect.gen(function*() {
       workEnabled: true,
       sandboxesEnabled: true
     },
+    apps: { viewer: "viewer@example.test", states: [usageApp] },
     work,
     records: [{ ...record, id: "job-finished", actor: "Requester", status: "succeeded" }],
     historyNextCursor: null,
@@ -447,7 +461,13 @@ const program = Effect.gen(function*() {
       response.end(Schema.encodeSync(Schema.fromJsonString(DashboardSnapshot))({ ...snapshot, host: "maple" }))
       return
     }
-    if (url.pathname === "/v1/connect/usage" || url.pathname === "/v1/connect/limits") {
+    // Fleet's own Usage page reads /v1/connect/*; the Usage app reads its module routes, answered from the same fixtures.
+    const usageRead = url.pathname === "/v1/connect/usage" || url.pathname === "/apps/usage/v1/modules/usage/usage"
+      ? "usage"
+      : url.pathname === "/v1/connect/limits" || url.pathname === "/apps/usage/v1/modules/usage/limits"
+      ? "limits"
+      : null
+    if (usageRead !== null) {
       const state = request.headers.cookie?.match(/(?:^|;\s*)usage-fixture=([a-z]+)/u)?.[1] ?? "normal"
       if (state === "failed") {
         response.writeHead(503, { "content-type": "application/json" })
@@ -455,7 +475,7 @@ const program = Effect.gen(function*() {
         return
       }
       response.writeHead(200, { "content-type": "application/json" })
-      if (url.pathname === "/v1/connect/usage") {
+      if (usageRead === "usage") {
         const range = url.searchParams.get("range")
         const query = {
           range: range === "24h" || range === "30d" ? range : "7d",

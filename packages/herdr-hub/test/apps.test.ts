@@ -7,7 +7,7 @@
 import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { FleetLimits, UsageQuery } from "@knpkv/herdr-connect"
-import { AppId, type AppId as AppIdType, AppStates, hubHeaders, type ModuleCaller } from "@knpkv/hub-app"
+import { AppId, type AppId as AppIdType, AppManifest, AppStates, hubHeaders, type ModuleCaller } from "@knpkv/hub-app"
 import { fixtureApp, type FixtureMode } from "@knpkv/hub-app-fixture"
 import { serveAttached } from "@knpkv/hub-app/node"
 import {
@@ -37,10 +37,11 @@ import { tmpdir } from "node:os"
 import process from "node:process"
 import { answerFleetRead } from "../src/apps/fleet-read.js"
 import { type AppTokens, makeAppTokens, makeGrants } from "../src/apps/grants.js"
-import { type AppReach, logReloadFailure, makeAppRegistry } from "../src/apps/registry.js"
+import { type AppReach, logReloadFailure, makeAppRegistry, type RegisteredApp, stateOn } from "../src/apps/registry.js"
 import { AppServiceRefused, handleAppServicesRoute, handleAppsRoute } from "../src/apps/routes.js"
 import { appLocation, getJson, proxyToSocket } from "../src/apps/socket.js"
 import type { AppRun, AppSupervisor } from "../src/apps/supervisor.js"
+import type { ListenerMode } from "../src/internal/listener.js"
 
 const appId = Schema.decodeSync(AppId)
 const ListeningPort = Schema.Struct({ port: Schema.Number })
@@ -132,8 +133,10 @@ const makeHub = (directory: string) =>
     const cacheDirectory = path.join(directory, "cache")
     const tokens = yield* makeAppTokens
     const runs = new Map<AppIdType, AppRun>()
+    /** What each reload handed the supervisor to run, in order. */
+    const synced: Array<ReadonlyArray<string>> = []
     const supervisor: AppSupervisor = {
-      sync: () => Effect.void,
+      sync: (entries) => Effect.sync(() => synced.push(entries.map((entry) => entry.id))),
       restart: () => Effect.succeed(false),
       run: (id) => Effect.sync(() => runs.get(id)),
       changes: Stream.never,
@@ -147,7 +150,10 @@ const makeHub = (directory: string) =>
       supportedContracts: [1],
       probeTimeoutMillis: 300
     })
-    const writeConfig = (apps: ReadonlyArray<{ readonly id: string; readonly reach: AppReach }>) =>
+    /** `package` is what the installer verified; it defaults to a first-party name. */
+    const writeConfig = (
+      apps: ReadonlyArray<{ readonly id: string; readonly reach: AppReach; readonly package?: string }>
+    ) =>
       Effect.gen(function*() {
         for (const app of apps) {
           runs.set(appId(app.id), { _tag: "Running", endpoint: app.reach.endpoint, secret: app.reach.secret })
@@ -160,7 +166,7 @@ const makeHub = (directory: string) =>
             trust: { scopes: ["@knpkv"] },
             apps: apps.map((app) => ({
               id: app.id,
-              package: "@knpkv/hub-app-fixture",
+              package: app.package ?? "@knpkv/hub-app-fixture",
               version: "0.0.0",
               dir: directory,
               bin: "bin.mjs",
@@ -172,7 +178,7 @@ const makeHub = (directory: string) =>
         )
       })
     const states = Effect.map(registry.apps, (apps) => apps.map((app) => app.state))
-    return { registry, tokens, writeConfig, states, cacheDirectory }
+    return { registry, tokens, writeConfig, states, cacheDirectory, synced }
   })
 
 describe("hub apps", () => {
@@ -265,6 +271,27 @@ describe("hub apps", () => {
         yield* hub.registry.reload()
         const reasons = (yield* hub.states).map((state) => state._tag === "Ready" ? "ready" : state.reason)
         expect(reasons).toEqual(["ready", "incompatible", "id_mismatch", "timeout", "duplicate", "duplicate"])
+      }).pipe(Effect.scoped))
+
+    // While a core module holds an id (the built-in Usage until an app replaces it), an installed app with that id
+    // is listed as a duplicate and never started, so no second process runs against the same state.
+    it.effect("never starts an app whose id a core module or an earlier entry holds", () =>
+      Effect.gen(function*() {
+        const directory = yield* tempDirectory
+        const ok = yield* startFixture(directory, "ok", "good")
+        const hub = yield* makeHub(directory)
+        yield* hub.writeConfig([
+          { id: "connect", reach: ok },
+          { id: "good", reach: ok },
+          { id: "good", reach: ok }
+        ])
+        yield* hub.registry.reload()
+        expect(hub.synced).toEqual([["good"]])
+        expect((yield* hub.states).map((state) => state._tag === "Ready" ? "ready" : state.reason)).toEqual([
+          "duplicate",
+          "ready",
+          "duplicate"
+        ])
       }).pipe(Effect.scoped))
 
     it.effect("a burst of failed requests runs one re-probe, not a queue", () =>
@@ -475,6 +502,46 @@ describe("hub apps", () => {
         const asset = yield* get(port, "/apps/fixture/app/assets/client.js")
         expect(asset.status).toBe(200)
         expect(asset.body).toContain("contract: 1")
+      }).pipe(Effect.scoped))
+
+    // Until apps get their own origin, an app's page runs with the hub page's authority. On a listener that can
+    // approve jobs only a first-party app's page opens, judged by the package the installer verified, never by
+    // what the app says about itself (the fixture always claims @knpkv/hub-app-fixture).
+    it.effect("opens a third-party app's page only on loopback, and a @knpkv app's everywhere", () =>
+      Effect.gen(function*() {
+        const directory = yield* tempDirectory
+        const first = yield* startFixture(directory, "ok", "first")
+        const third = yield* startFixture(directory, "ok", "third")
+        const local = yield* serveHub(directory, "local")
+        const served = yield* serveHub(directory, "serve")
+        // One apps.json; each hub's stub supervisor learns where the apps run from its own write.
+        for (const { hub } of [local, served]) {
+          yield* hub.writeConfig([
+            { id: "first", reach: first },
+            { id: "third", reach: third, package: "elsewhere-app" }
+          ])
+          yield* hub.registry.reload()
+        }
+        const states = (port: number) =>
+          get(port, "/v1/apps").pipe(
+            Effect.map((list) =>
+              Schema.decodeUnknownSync(Schema.fromJsonString(AppStates))(list.body).apps.map((state) =>
+                state._tag === "Ready" ? "ready" : `${state.reason}: ${state.detail}`
+              )
+            )
+          )
+        expect(yield* states(local.port)).toEqual(["ready", "ready"])
+        expect(yield* states(served.port)).toEqual(["ready", "local_only: Fixture opens only on this machine for now."])
+        const asset = (port: number, id: string) =>
+          get(port, `/apps/${id}/app/assets/client.js`).pipe(Effect.map((answer) => [answer.status, answer.body]))
+        expect((yield* asset(local.port, "third"))[0]).toBe(200)
+        expect((yield* asset(served.port, "first"))[0]).toBe(200)
+        const refused = yield* asset(served.port, "third")
+        expect([refused[0], JSON.parse(String(refused[1]))]).toEqual([
+          503,
+          { error: "app_unavailable", reason: "local_only" }
+        ])
+        expect((yield* get(served.port, "/apps/third/v1/modules/third/echo")).status).toBe(503)
       }).pipe(Effect.scoped))
 
     it.effect("answers 404 for unknown apps and paths, and 503 for an app that is down", () =>
@@ -731,5 +798,49 @@ describe("hub apps", () => {
     expect(appLocation("../connect", "/apps/raw/")).toBeNull()
     expect(appLocation("//elsewhere.test/", "/apps/raw/")).toBeNull()
     expect(appLocation("https://elsewhere.test/apps/raw/", "/apps/raw/")).toBeNull()
+  })
+})
+
+// Closed by default: a listener added later opens no third-party page until it is listed here as loopback.
+describe("stateOn", () => {
+  const manifest = Schema.decodeUnknownSync(AppManifest)({
+    contract: 1,
+    id: "fixture",
+    package: "@knpkv/hub-app-fixture",
+    version: "0.0.0",
+    module: {
+      id: "fixture",
+      label: "Fixture",
+      defaultPage: "overview",
+      pages: [{ id: "overview", label: "Overview" }],
+      listeners: ["serve", "local"],
+      requires: ["read"]
+    },
+    client: { entry: "client.js", css: [] },
+    services: [],
+    nav: { order: 100, primary: false, mobile: false },
+    standalone: { defaultPort: 3199 }
+  })
+  const ready = (pkg: string): RegisteredApp => ({
+    id: appId("fixture"),
+    package: pkg,
+    state: { _tag: "Ready", manifest },
+    reach: null
+  })
+  const listeners: ReadonlyArray<ListenerMode> = ["local", "tailnet", "approval", "serve", "work", "lan"]
+  const tags = (app: RegisteredApp) =>
+    listeners.map((listener) => {
+      const state = stateOn(listener)(app)
+      return state._tag === "Ready" ? "ready" : state.reason
+    })
+
+  it("keeps a third-party page on loopback only, a @knpkv page everywhere, and other states as they are", () => {
+    expect(tags(ready("elsewhere-app"))).toEqual(["ready", ...Array(5).fill("local_only")])
+    expect(tags(ready("@knpkv/hub-app-fixture"))).toEqual(Array(6).fill("ready"))
+    const down: RegisteredApp = {
+      ...ready("elsewhere-app"),
+      state: { _tag: "Unavailable", id: appId("fixture"), manifest, reason: "crashloop", detail: "" }
+    }
+    expect(tags(down)).toEqual(Array(6).fill("crashloop"))
   })
 })

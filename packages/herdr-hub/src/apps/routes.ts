@@ -33,7 +33,7 @@ import type { IncomingMessage, ServerResponse } from "node:http"
 import type { ListenerMode } from "../internal/listener.js"
 import { cliTokenHeader, presentsCliToken } from "./cli-token.js"
 import type { AppTokens, Grants } from "./grants.js"
-import type { AppRegistry } from "./registry.js"
+import { type AppRegistry, stateOn } from "./registry.js"
 import { proxyToSocket } from "./socket.js"
 
 /** App requests may take this long by default; long enough for a slow read, short enough to free the socket. */
@@ -120,7 +120,7 @@ export const handleAppsRoute = async <E, R>(
       send(response, 500, { error: "internal" })
       return true
     }
-    send(response, 200, encodeStates({ contract: 1, apps: apps.value.map((app) => app.state) }))
+    send(response, 200, encodeStates({ contract: 1, apps: apps.value.map(stateOn(context.listener)) }))
     return true
   }
   const restart = restartPath.exec(url.pathname)
@@ -168,14 +168,15 @@ export const handleAppsRoute = async <E, R>(
     send(response, 404, { error: "not_found" })
     return true
   }
-  if (app.state._tag !== "Ready" || app.reach === null) {
+  const state = stateOn(context.listener)(app)
+  if (state._tag !== "Ready" || app.reach === null) {
     send(response, 503, {
       error: "app_unavailable",
-      reason: app.state._tag === "Unavailable" ? app.state.reason : "not_running"
+      reason: state._tag === "Unavailable" ? state.reason : "not_running"
     })
     return true
   }
-  if (moduleRoute && !app.state.manifest.module.listeners.some((listener) => listener === context.listener)) {
+  if (moduleRoute && !state.manifest.module.listeners.some((listener) => listener === context.listener)) {
     send(response, 404, { error: "not_found" })
     return true
   }

@@ -130,6 +130,7 @@ const base: DashboardSnapshot = {
     sandboxesEnabled: false
   },
   approvalsEnabled: state !== "approvals-off",
+  apps: { viewer: "viewer@example.test", states: [] },
   directory: null,
   historyNextCursor: paged ? { createdAt: start - 2 * 60 * 60_000, id: "decided-admission" } : null,
   host: "atlas",

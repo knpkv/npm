@@ -58,6 +58,7 @@ import {
   Queue,
   Ref,
   Result,
+  Schedule,
   Schema,
   Stream
 } from "effect"
@@ -1983,6 +1984,7 @@ esac
           sandboxesEnabled: false
         },
         approvalsEnabled: true,
+        apps: { viewer: "viewer@example.test", states: [] },
         chat: null,
         directory: null,
         historyNextCursor: null,
@@ -2062,6 +2064,7 @@ esac
           sandboxesEnabled: false
         },
         approvalsEnabled: true,
+        apps: { viewer: "viewer@example.test", states: [] },
         chat: null,
         directory: null,
         historyNextCursor: null,
@@ -2119,6 +2122,7 @@ esac
           sandboxesEnabled: false
         },
         approvalsEnabled: true,
+        apps: { viewer: "viewer@example.test", states: [] },
         chat: null,
         directory: null,
         historyNextCursor: null,
@@ -8203,7 +8207,11 @@ esac
   }
 
   const started = Effect.fn("LocalSuperappTest.started")(
-    function*(prefix: string, hostConfig: (root: string) => HostConfiguration) {
+    function*(
+      prefix: string,
+      hostConfig: (root: string) => HostConfiguration,
+      apps?: (root: string) => NonNullable<NonNullable<Parameters<typeof startHttpServer>[3]>["apps"]>
+    ) {
       const root = mkdtempSync(join(tmpdir(), prefix))
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
       const resolved = hostConfig(root)
@@ -8213,7 +8221,16 @@ esac
       )
       const fleet = yield* makeFleetService({ approvalEnabled: true, host: resolved.host, operations, store })
       return yield* Effect.acquireRelease(
-        Effect.promise(() => startHttpServer(resolved, fleet, assets, { terminalConnector: unusedTerminal })),
+        Effect.promise(() =>
+          startHttpServer(
+            resolved,
+            fleet,
+            assets,
+            apps === undefined
+              ? { terminalConnector: unusedTerminal }
+              : { terminalConnector: unusedTerminal, apps: apps(root) }
+          )
+        ),
         (running) => Effect.promise(running.close)
       )
     }
@@ -8343,6 +8360,84 @@ esac
       expect(yield* upgradeOutcome(session("SER8"), { origin })).toBe("attached")
       expect(opened).toEqual(["SER8"])
     }).pipe(Effect.scoped, provideNodeServices))
+
+  // The shell decides between mounting an app and showing a panel from the dashboard snapshot, so the gate must hold
+  // there: a third-party app (by the package apps.json names; the fixture claims a @knpkv name) is local_only on the
+  // hub's tailnet listener and Ready on its loopback, while a first-party one is Ready on both.
+  // Live clock: the apps start as real child processes, and the poll waits on them.
+  it.live(
+    "lists a third-party app as local_only in the hub listener's dashboard and Ready on its loopback",
+    () =>
+      Effect.gen(function*() {
+        const short = mkdtempSync(join(tmpdir(), "hub-apps-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(short, { force: true, recursive: true })))
+        const resolve = (specifier: string) => JSON.stringify(import.meta.resolve(specifier))
+        const entry = (id: string, pkg: string) => {
+          const dir = join(short, id)
+          mkdirSync(dir)
+          writeFileSync(
+            join(dir, "bin.mjs"),
+            `import { runApp } from ${resolve("@knpkv/hub-app/node")}
+import { fixtureApp } from ${resolve("@knpkv/hub-app-fixture")}
+import { Layer } from ${resolve("effect")}
+runApp(fixtureApp("ok", ${JSON.stringify(id)}), Layer.empty)
+`
+          )
+          return {
+            id,
+            package: pkg,
+            version: "0.0.0",
+            dir,
+            bin: "bin.mjs",
+            enabled: true,
+            memoryMb: 128,
+            allowScripts: false
+          }
+        }
+        const configPath = join(short, "apps.json")
+        writeFileSync(
+          configPath,
+          JSON.stringify({
+            v: 2,
+            managedBy: "cli",
+            trust: { scopes: ["@knpkv", "elsewhere-app"] },
+            apps: [entry("first", "@knpkv/hub-app-fixture"), entry("third", "elsewhere-app")]
+          })
+        )
+        const server = yield* started("herdr-hub-apps-gate-", (root) => ({
+          ...config(root),
+          host: "SER8",
+          crossHost: true,
+          approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:0/" },
+          approvalPort: 0,
+          approvalTls: directTls,
+          tailscaleCommand: tailscaleFixture(root, "SER8", "node-ser8")
+        }), () => ({
+          configPath,
+          node: process.execPath,
+          stateDirectory: join(short, "state"),
+          runtimeDirectory: join(short, "run")
+        }))
+        if (server.serveUrl === null) return yield* Effect.die("canonical listener missing")
+        const reasons = (snapshot: DashboardSnapshot) =>
+          snapshot.apps.states.map((state) => state._tag === "Ready" ? "ready" : state.reason)
+        const local = yield* plainSnapshot(server.url).pipe(
+          Effect.filterOrFail((snapshot) =>
+            reasons(snapshot).length === 2 && reasons(snapshot).every((reason) => reason === "ready")
+          ),
+          Effect.retry({ schedule: Schedule.spaced("100 millis"), times: 100 })
+        )
+        expect(reasons(local)).toEqual(["ready", "ready"])
+        const canonical = yield* Effect.promise(() =>
+          secureRequestBody(`${server.serveUrl}/v1/dashboard`, { host: "ser8.example.test:0" })
+        )
+        expect(reasons(Schema.decodeUnknownSync(Schema.fromJsonString(DashboardSnapshot))(canonical.body))).toEqual([
+          "ready",
+          "local_only"
+        ])
+      }).pipe(Effect.scoped, provideNodeServices),
+    30_000
+  )
 
   it.effect("keeps the hub's canonical listener and push where they were, and serves the super-app on its loopback too", () =>
     Effect.gen(function*() {

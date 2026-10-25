@@ -1,7 +1,7 @@
 /** `apps.json` as the hub reads it, the spawn handshake, and an app's `hubApp` package field. */
 import { describe, expect, it } from "@effect/vitest"
 import { Redacted, Result, Schema } from "effect"
-import { AppsConfig, HubAppPackageField, HubHandshake } from "../src/manifest.js"
+import { AppClientAssets, AppsConfig, HubAppPackageField, HubHandshake } from "../src/manifest.js"
 
 const decodeConfig = Schema.decodeUnknownResult(AppsConfig, { onExcessProperty: "error" })
 
@@ -66,5 +66,17 @@ describe("HubAppPackageField", () => {
     const field = { bin: "dist/bin.js", contract: 1, services: ["fleet.read", "host"] }
     expect(Schema.decodeUnknownSync(HubAppPackageField)(field)).toEqual(field)
     expect(Result.isFailure(Schema.decodeUnknownResult(HubAppPackageField)({ ...field, contract: 2 }))).toBe(true)
+  })
+})
+
+// A shell loads `/apps/<id>/app/assets/<path>`; a dot segment would resolve outside that prefix in the browser.
+describe("AppClientAssets", () => {
+  const decodeAssets = Schema.decodeUnknownResult(AppClientAssets)
+  it("takes nested file paths and refuses dot segments", () => {
+    expect(Result.isSuccess(decodeAssets({ entry: "client.js", css: ["styles/client.v2.css"] }))).toBe(true)
+    for (const path of ["../client.js", "a/../../client.js", "./client.js", "a/./b.js", ".", "..", "a/.."]) {
+      expect(Result.isFailure(decodeAssets({ entry: path, css: [] })), path).toBe(true)
+      expect(Result.isFailure(decodeAssets({ entry: "client.js", css: [path] })), path).toBe(true)
+    }
   })
 })

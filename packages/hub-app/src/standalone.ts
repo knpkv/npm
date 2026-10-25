@@ -6,9 +6,9 @@
  *
  * @module
  */
-import { Effect, ManagedRuntime, Option, Predicate, Schema } from "effect"
+import { Effect, ManagedRuntime, Option, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
-import type { AppClient, MountedApp, ShellContext } from "./client.js"
+import { AppClientModule, type MountedApp, type ShellContext } from "./client.js"
 import { AppManifest } from "./manifest.js"
 
 /** The page's own markup is missing a part this shell fills. */
@@ -19,14 +19,6 @@ export class StandaloneShellError extends Schema.TaggedError<StandaloneShellErro
 const runtime = ManagedRuntime.make(FetchHttpClient.layer)
 const csrfKey = "hub-app-csrf"
 const BootstrapReply = Schema.Struct({ csrfToken: Schema.optionalKey(Schema.String) })
-
-/** An app's client module, checked before it is mounted: a default export with a contract and a mount. */
-const ClientModule = Schema.Struct({
-  default: Schema.Struct({
-    contract: Schema.Number,
-    mount: Schema.declare((input): input is AppClient["mount"] => Predicate.isFunction(input))
-  })
-})
 
 const element = (selector: string): HTMLElement => {
   const found = document.querySelector<HTMLElement>(selector)
@@ -129,7 +121,7 @@ const start = async (): Promise<void> => {
       portalRoot
     }
   }
-  const loaded = Schema.decodeUnknownOption(ClientModule)(await import(`/app/assets/${manifest.client.entry}`))
+  const loaded = Schema.decodeUnknownOption(AppClientModule)(await import(`/app/assets/${manifest.client.entry}`))
   if (Option.isNone(loaded) || loaded.value.default.contract !== 1) {
     root.textContent = `${manifest.module.label} can't be shown by this version of its shell.`
     return

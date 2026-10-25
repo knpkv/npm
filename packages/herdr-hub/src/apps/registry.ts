@@ -5,6 +5,8 @@
  *
  * - `apps.json` (the `herdr-hub apps` CLI or nix) says which apps are installed and how to run them. The
  *   {@link AppSupervisor} runs each eligible one: not a core module's id, not an id an earlier entry took.
+ * - Each entry's `package` is the name the installer verified; it, not the manifest, decides whether the app's page
+ *   opens on listeners other than loopback ({@link stateOn}).
  * - Each running app's manifest is read live from its endpoint, with the spawn's secret, and checked: id,
  *   contract, descriptor. Every outcome is an `AppState`; none fails the hub. A supervisor change (started,
  *   stopped, restarting) probes that app again at once.
@@ -43,8 +45,13 @@ import {
   Stream,
   SynchronizedRef
 } from "effect"
+import type { ListenerMode } from "../internal/listener.js"
 import { getJson } from "./socket.js"
 import type { AppSupervisor } from "./supervisor.js"
+import { opensEverywhere } from "./trust.js"
+import { unavailableDetail } from "./unavailable-detail.js"
+
+export { unavailableDetail }
 
 export interface AppRegistryOptions {
   /** `~/.config/herdr/apps.json`. */
@@ -67,10 +74,15 @@ export interface AppReach {
 
 export interface RegisteredApp {
   readonly id: AppId
+  /** The package `apps.json` names: the one the installer resolved and verified. */
+  readonly package: string
   readonly state: AppState
   /** Set while the app runs. */
   readonly reach: AppReach | null
 }
+
+/** What a probe needs of an `apps.json` entry. */
+type AppEntry = Pick<InstalledApp, "id" | "package">
 
 /** A GET to a running app, with its spawn's secret. */
 export const getFromApp = (reach: AppReach, path: string, timeoutMillis: number) =>
@@ -81,35 +93,20 @@ const decodeConfig = Schema.decodeUnknownEffect(Schema.fromJsonString(AppsConfig
 const decodeCached = Schema.decodeUnknownOption(Schema.fromJsonString(AppManifest))
 const encodeManifest = Schema.encodeSync(Schema.fromJsonString(AppManifest))
 
-/** Public copy for each reason; never a path or a provider error. */
-export const unavailableDetail = (label: string, reason: AppUnavailableReason): string => {
-  switch (reason) {
-    case "starting":
-      return `${label} is starting.`
-    case "not_running":
-      return `${label} isn't running.`
-    case "crashloop":
-      return `${label} kept stopping, so it was left off. Restart it once it's fixed.`
-    case "disabled":
-      return `${label} is turned off.`
-    case "install_missing":
-      return `${label}'s files are missing. Update it to install them again.`
-    case "health":
-      return `${label} stopped answering and is being restarted.`
-    case "timeout":
-      return `${label} didn't answer in time.`
-    case "invalid_manifest":
-      return `${label} described itself in a way this hub can't read.`
-    case "id_mismatch":
-      return `${label} answered as a different app.`
-    case "incompatible":
-      return `${label} needs a different version of the hub.`
-    case "duplicate":
-      return `${label} uses a name another module already has.`
-    case "client_failed":
-      return `${label} couldn't be shown.`
-  }
-}
+/**
+ * `app`'s state as `listener` serves it. A Ready app whose page may not open there (a third-party package on any
+ * listener but loopback) reads as `local_only`, so the shell shows its label and why, and its routes answer 503.
+ */
+export const stateOn = (listener: ListenerMode) => (app: RegisteredApp): AppState =>
+  app.state._tag === "Ready" && listener !== "local" && !opensEverywhere(app.package)
+    ? {
+      _tag: "Unavailable",
+      id: app.id,
+      manifest: app.state.manifest,
+      reason: "local_only",
+      detail: unavailableDetail(app.state.manifest.module.label, "local_only")
+    }
+    : app.state
 
 /** A failed reload (an error or a defect) is logged and its loop goes on; only an interruption ends it. */
 export const logReloadFailure = <E>(reload: Effect.Effect<void, E>): Effect.Effect<void, E> =>
@@ -159,10 +156,12 @@ export const makeAppRegistry = Effect.fn("AppRegistry.make")(function*(options: 
    * contract this hub doesn't speak keeps the manifest it just sent, so the newer app's own label shows.
    * The cache is rewritten only when the manifest changed.
    */
-  const probe = Effect.fn("AppRegistry.probe")(function*(id: AppId, taken: ReadonlySet<string>) {
+  const probe = Effect.fn("AppRegistry.probe")(function*(entry: AppEntry, taken: ReadonlySet<string>) {
+    const { id } = entry
     const cached = yield* readCache(id)
     const down = (reason: AppUnavailableReason, manifest: AppManifest | null = cached): RegisteredApp => ({
       id,
+      package: entry.package,
       state: unavailable(id, reason, manifest),
       reach: null
     })
@@ -180,12 +179,16 @@ export const makeAppRegistry = Effect.fn("AppRegistry.make")(function*(options: 
     if (!options.supportedContracts.includes(decoded.contract)) return down("incompatible", decoded)
     if (Result.isFailure(validateModuleRegistry([decoded.module]))) return down("invalid_manifest")
     if (cached === null || encodeManifest(cached) !== encodeManifest(decoded)) yield* writeCache(decoded)
-    return { id, state: { _tag: "Ready", manifest: decoded }, reach } satisfies RegisteredApp
+    return { id, package: entry.package, state: { _tag: "Ready", manifest: decoded }, reach } satisfies RegisteredApp
   })
 
-  /** Ids in `apps.json` order; a repeated id keeps its first entry, later ones are duplicates. */
-  const probeAll = (ids: ReadonlyArray<AppId>) =>
-    Effect.forEach(ids, (id, index) => probe(id, new Set(ids.slice(0, index))), { concurrency: "unbounded" })
+  /** Entries in `apps.json` order; a repeated id keeps its first entry, later ones are duplicates. */
+  const probeAll = (entries: ReadonlyArray<AppEntry>) =>
+    Effect.forEach(
+      entries,
+      (entry, index) => probe(entry, new Set(entries.slice(0, index).map((earlier) => earlier.id))),
+      { concurrency: "unbounded" }
+    )
 
   /** Entries the supervisor may run: not a core module's id, and the first entry for its id. */
   const eligible = (apps: ReadonlyArray<InstalledApp>) =>
@@ -219,13 +222,13 @@ export const makeAppRegistry = Effect.fn("AppRegistry.make")(function*(options: 
         for (const gone of previous.filter((app) => !next.some((entry) => entry.id === app.id))) {
           yield* fileSystem.remove(cacheFile(gone.id), { force: true }).pipe(Effect.ignore({ log: true }))
         }
-        return yield* probeAll(next.map((entry) => entry.id))
+        return yield* probeAll(next)
       }))
   })
 
   /** Probe the registered apps again without re-reading `apps.json`. */
   const refresh = Effect.fn("AppRegistry.refresh")(function*() {
-    yield* SynchronizedRef.updateEffect(apps, (current) => probeAll(current.map((app) => app.id)))
+    yield* SynchronizedRef.updateEffect(apps, (current) => probeAll(current))
   })
 
   /** Ids with a probe running from {@link probeOne}; a burst of failed requests runs one probe, not a queue. */
@@ -241,9 +244,10 @@ export const makeAppRegistry = Effect.fn("AppRegistry.make")(function*(options: 
     if (!started) return
     yield* SynchronizedRef.updateEffect(apps, (current) => {
       const index = current.findIndex((app) => app.id === id)
-      if (index === -1) return Effect.succeed(current)
+      const registered = current[index]
+      if (registered === undefined) return Effect.succeed(current)
       const earlier = new Set(current.slice(0, index).map((other) => other.id))
-      return probe(id, earlier).pipe(
+      return probe(registered, earlier).pipe(
         Effect.map((probed) => current.map((entry, position) => position === index ? probed : entry))
       )
     }).pipe(

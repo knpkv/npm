@@ -17,8 +17,8 @@ import { dashboardRefreshTime } from "./internal/dashboard-refresh.js"
 import { ShellIcon } from "./internal/shell-icon.js"
 import { RelayChefMark } from "./internal/relay-chef-mark.js"
 import { RelayChefMastMark } from "./internal/relay-chef-mast-mark.js"
-import { UsageEmptyChef } from "./internal/usage-empty-chef.js"
-import { UsageEmptyChromeContext } from "./internal/usage-empty-chrome.js"
+import { GroupedHeaderChef } from "./internal/grouped-header-chef.js"
+import { type ModuleHeaderMode, ShellHeaderContext } from "./internal/app-header.js"
 import { ShortcutsDialog, focusWhenShown, focusModulePage, isEditableTarget } from "./internal/shell-keys.js"
 import {
   canonicalModuleUrl,
@@ -40,6 +40,9 @@ interface ShellLocation {
   readonly error: string | null
   readonly focus: "deferred" | "history" | "page" | "search" | null
 }
+
+/** `value` for a double-quoted attribute selector: a quote or backslash in it can't end the string. */
+const quotedAttribute = (value: string): string => value.replace(/["\\]/g, "\\$&")
 
 const ShellHistoryEntry = Schema.Struct({ openedFrom: Schema.String, document: Schema.String })
 
@@ -133,6 +136,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   landing,
   mobileModules,
   modules,
+  notFound,
   notifications,
   onLocationChange,
   primaryModules,
@@ -157,6 +161,11 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   readonly session: SuperappSession
   readonly notifications: ReactNode
   readonly relay?: HubRelayConversation
+  /**
+   * What to show for a route nothing is registered at, given its `#…` path; null keeps the shell's own not-found
+   * panel. A module that moved out of the hub names where it went here.
+   */
+  readonly notFound?: (path: string) => ReactNode | null
   /** Keep existing product selection owners synchronized before the route paints. */
   readonly onLocationChange?: (search: string) => void
 }): ReactElement => {
@@ -216,13 +225,72 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     [location.destination.module, location.destination.page]
   )
   const prefix = useRef<FleetShortcutPrefix>(null)
-  const [usageEmpty, setUsageEmpty] = useState(false)
-  const [usageGrouped, setUsageGrouped] = useState(false)
+  const [headerModes, setHeaderModes] = useState<Readonly<Record<string, ModuleHeaderMode>>>({})
   const [announcementOutlet, setAnnouncementOutlet] = useState<HTMLElement | null>(null)
-  const [usageHeaderOutlet, setUsageHeaderOutlet] = useState<HTMLElement | null>(null)
-  const usageEmptyChrome = useMemo(
-    () => ({ host, headerOutlet: usageHeaderOutlet, setEmpty: setUsageEmpty, setGrouped: setUsageGrouped }),
-    [host, usageHeaderOutlet]
+  const [groupedHeaderOutlet, setGroupedHeaderOutlet] = useState<HTMLElement | null>(null)
+  // The last page arrival's focus request, for a module whose page arrives later (see settleArrivalFocus).
+  const pendingArrival = useRef<{
+    readonly module: string
+    readonly page: string
+    readonly ring: boolean
+    readonly at: number
+  } | null>(null)
+  const cancelLocationFocus = useRef<(() => void) | null>(null)
+  const shellHeader = useMemo(
+    () => ({
+      host,
+      outlet: groupedHeaderOutlet,
+      settleArrivalFocus: (module: string, after: "mount" | "update") => {
+        const arrival = pendingArrival.current
+        if (arrival === null || arrival.module !== module) return
+        if (after === "update" && window.performance.now() - arrival.at > 2_000) return
+        pendingArrival.current = null
+        // The shell's own attempt (a frame after the route painted) goes first and is never cancelled here: it
+        // focuses the page when the page is already there. This one runs after it and acts only if focus fell to the
+        // shell's fallback (<main> or the body), waiting up to a second for the page's link the client renders on its
+        // own schedule. Focus anywhere else means the shell, or the reader, already placed it.
+        let frame = 0
+        let checks = 0
+        const deadline = window.performance.now() + 1_000
+        let cancelFocus: (() => void) | undefined
+        const attempt = (): void => {
+          checks += 1
+          const active = document.activeElement
+          const onFallback = active === null || active === document.body || active.id === "main"
+          if (onFallback) {
+            const module = quotedAttribute(arrival.module)
+            const page = quotedAttribute(arrival.page)
+            const link = document.querySelector(
+              `[data-module="${module}"] [data-module-page="${page}"], [data-module-owner="${module}"] [data-module-page="${page}"]`
+            )
+            if (link !== null) {
+              cancelFocus = focusModulePage(arrival.module, arrival.page, false, active, arrival.ring)
+              return
+            }
+          } else if (checks > 2) {
+            // The shell's attempt has had its frame and focus rests on something real: nothing to settle.
+            return
+          }
+          if (window.performance.now() < deadline) frame = window.requestAnimationFrame(attempt)
+        }
+        frame = window.requestAnimationFrame(attempt)
+        const previous = cancelLocationFocus.current
+        cancelLocationFocus.current = () => {
+          previous?.()
+          window.cancelAnimationFrame(frame)
+          cancelFocus?.()
+        }
+      },
+      setMode: (module: string, mode: Partial<ModuleHeaderMode>) =>
+        setHeaderModes((current) => {
+          const previous = current[module] ?? { grouped: false, empty: false }
+          const next = { ...previous, ...mode }
+          return next.grouped === previous.grouped && next.empty === previous.empty
+            ? current
+            : { ...current, [module]: next }
+        })
+    }),
+    [host, groupedHeaderOutlet]
   )
   const header = useRef<HTMLElement>(null)
   const bottomBar = useRef<HTMLElement>(null)
@@ -305,7 +373,6 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     }
     navigate(parentHref, "replace", null)
   }
-  const cancelLocationFocus = useRef<(() => void) | null>(null)
   const previousFocusDestination = useRef(location.destination)
   // The page's own load is no keyboard navigation: its arrival focus paints no ring.
   const coldLoad = useRef(true)
@@ -323,6 +390,10 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     if (location.focus === "search") {
       cancelLocationFocus.current = focusWhenShown("connect-agent-search")
     }
+    pendingArrival.current =
+      location.focus === "page" || location.focus === "history"
+        ? { module: location.destination.module, page: location.destination.page, ring, at: window.performance.now() }
+        : null
     if (location.focus === "page" || location.focus === "history")
       cancelLocationFocus.current = focusModulePage(
         location.destination.module,
@@ -506,18 +577,17 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   const offBarModule =
     currentModule !== undefined && !mobileDescriptors.some((module) => module.id === currentModule.id)
   const terminalActive = terminalOwnsKeys && location.error === null && location.destination.module === "connect"
-  const limitsActive =
-    location.error === null && location.destination.module === "usage" && location.destination.page === "limits"
-  const emptyActive = usageEmpty && limitsActive
-  // The design's Limits header wraps the shell mast, page title and tabs, so Limits groups them in every state.
-  const headerGrouped = (usageGrouped || usageEmpty) && limitsActive
+  const activeHeader = location.error === null ? headerModes[location.destination.module] : undefined
+  const emptyActive = activeHeader?.empty === true
+  // A grouped header (Usage's Limits, as the design draws it) wraps the shell mast with the module's title and tabs.
+  const headerGrouped = activeHeader !== undefined && (activeHeader.grouped || activeHeader.empty)
   // Readings can turn empty (or stop being empty) after arrival focus ran. The layout switch, and the empty
   // mast moving into the header outlet once it mounts, unmount the focused page tab, so focus would fall to
   // <body>; hand it to the same page's tab in the new layout.
   // Only focus the switch itself removed is handed over: a poll that flips the layout while the reader rests on
   // <body> must not pull focus to the tabs.
   const emptyLayout = `${emptyActive ? "empty" : "ordinary"}:${
-    headerGrouped ? (usageHeaderOutlet === null ? "inline" : "outlet") : "shell"
+    headerGrouped ? (groupedHeaderOutlet === null ? "inline" : "outlet") : "shell"
   }`
   const previousEmptyLayout = useRef(emptyLayout)
   const lastFocused = useRef<Element | null>(null)
@@ -601,7 +671,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
       data-region={headerGrouped ? undefined : "header"}
     >
       <a className="superapp-brand" href={moduleHref(landingModule, landing.page)} aria-label="Relay home" title="Home">
-        {headerGrouped ? <UsageEmptyChef /> : <RelayChefMastMark />}
+        {headerGrouped ? <GroupedHeaderChef /> : <RelayChefMastMark />}
       </a>
       {/* Phone shows the product name here; the breadcrumb line below names the module and page (design rule 45). */}
       <strong className="superapp-phone-title" aria-hidden="true">
@@ -697,19 +767,19 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     </nav>
   )
   return (
-    <UsageEmptyChromeContext.Provider value={usageEmptyChrome}>
+    <ShellHeaderContext.Provider value={shellHeader}>
       <PortalProvider>
         <div
           className="superapp-shell"
-          data-usage-empty={emptyActive ? "true" : undefined}
-          data-usage-header={headerGrouped ? "grouped" : undefined}
+          data-module-empty={emptyActive ? "true" : undefined}
+          data-module-header={headerGrouped ? "grouped" : undefined}
         >
           {/* One outlet for both layouts, so a layout change never reinserts Relay's populated status region. */}
           <div className="superapp-announcements" ref={setAnnouncementOutlet} />
           {headerGrouped ? sidebarElement : null}
           <div
             key="header"
-            className={headerGrouped ? "usage-empty-header-region" : "superapp-header-region"}
+            className={headerGrouped ? "superapp-grouped-header-region" : "superapp-header-region"}
             data-region={headerGrouped ? "header" : undefined}
             hidden={terminalActive}
             inert={terminalActive}
@@ -718,28 +788,30 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
             {breadcrumbElement}
             {headerGrouped ? (
               <div
-                className="usage-empty-header-outlet"
-                data-module-owner="usage"
-                data-app="usage"
-                ref={setUsageHeaderOutlet}
+                className="superapp-grouped-header-outlet"
+                data-module-owner={location.destination.module}
+                data-app={location.destination.module}
+                ref={setGroupedHeaderOutlet}
               />
             ) : null}
           </div>
           {headerGrouped ? null : sidebarElement}
           <main className="superapp-main" id="main" tabIndex={-1}>
-            {location.error === null ? null : (
-              <StatePanel
-                announce="assertive"
-                className="superapp-not-found"
-                title="This page doesn't exist in Relay."
-                description={
-                  <>
-                    Nothing is registered at <code>{location.error}</code>.
-                  </>
-                }
-                action={<a href={moduleHref(landingModule, landing.page)}>Back to {landingModule.label}</a>}
-              />
-            )}
+            {location.error === null
+              ? null
+              : (notFound?.(location.error) ?? (
+                  <StatePanel
+                    announce="assertive"
+                    className="superapp-not-found"
+                    title="This page doesn't exist in Relay."
+                    description={
+                      <>
+                        Nothing is registered at <code>{location.error}</code>.
+                      </>
+                    }
+                    action={<a href={moduleHref(landingModule, landing.page)}>Back to {landingModule.label}</a>}
+                  />
+                ))}
             {modules.map((view) => (
               <ModuleSlot
                 key={view.descriptor.id}
@@ -842,6 +914,6 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
           <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} restoreFocus={restoreShortcutsFocus} />
         </div>
       </PortalProvider>
-    </UsageEmptyChromeContext.Provider>
+    </ShellHeaderContext.Provider>
   )
 }
