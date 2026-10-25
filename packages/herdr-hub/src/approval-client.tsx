@@ -97,6 +97,14 @@ import { useDashboardPending } from "./internal/use-dashboard-pending.js"
 import { useDashboardPendingTarget } from "./internal/use-dashboard-pending-target.js"
 import type { PendingApprovalTargetRevalidation } from "./internal/dashboard-pending-state.js"
 import type { ApprovalNotificationCandidate } from "./model.js"
+import { loadHubSession, logInWithTailscale, logOutOfHub, spendLoginCode } from "./hub-session-client.js"
+import {
+  browserTokenStore,
+  type HubSessionActions,
+  SessionControl,
+  TailscaleLoginCard,
+  useHubSession
+} from "./hub-session-view.js"
 
 class BrowserNetworkError extends Schema.TaggedError<BrowserNetworkError>()("BrowserNetworkError", {
   detail: Schema.String
@@ -455,6 +463,7 @@ const DashboardApp = ({
 }) => {
   const result = useAtomValue(atoms.dashboard)
   const { refreshFailed, snapshot } = dashboardRefreshView(result, atoms.bootstrap)
+  const hubSession = useHubSession(hubSessionActions)
   const workResult = useAtomValue(atoms.work)
   const notificationResult = useAtomValue(atoms.notification)
   const refresh = useAtomRefresh(atoms.dashboard)
@@ -709,7 +718,16 @@ const DashboardApp = ({
   const hostCount = current.directory === null ? 1 : current.directory.links.length + 1
   const gesture = { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: resetPull }
   const fleet = makeFleetHubModuleViews({
-    approvals: dashboardView,
+    // One stable tree whether or not the session is known yet: switching shape would remount the dashboard and
+    // drop the focus an approval link put on its request.
+    approvals: (
+      <>
+        {hubSession.view === null ? null : (
+          <TailscaleLoginCard view={hubSession.view} busy={hubSession.busy} onLogIn={hubSession.logIn} />
+        )}
+        {dashboardView}
+      </>
+    ),
     connect: null,
     hostCount,
     notice: refreshNotice,
@@ -782,6 +800,19 @@ const DashboardApp = ({
             refreshFailed
               ? { access: onLoopback() ? "loopback" : "tailscale", connection: "stale", observedAt: current.observedAt }
               : { access: onLoopback() ? "loopback" : "tailscale", connection: "connected" }
+          }
+          sessionControl={
+            // A local page without a session draws no control, so the shell keeps its own session line.
+            hubSession.view === null || (!hubSession.view.signedIn && hubSession.view.kind === "local") ? null : (
+              <SessionControl
+                view={hubSession.view}
+                open={hubSession.open}
+                onToggle={hubSession.toggle}
+                onClose={hubSession.close}
+                onLogOut={hubSession.logOut}
+                overlayRoot={document.body}
+              />
+            )
           }
           terminalOwnsKeys={connectConnection._tag === "connected"}
           relay={relay}
@@ -884,6 +915,14 @@ const sandboxesWrites: SandboxesModuleWrites = {
   liftBudget: (accountId) => runCodeRead(submitSandboxJob({ _tag: "BudgetLift", accountId })).pipe(Effect.asVoid),
   startAwsSignIn: runCodeRead(startSandboxAwsSignIn),
   signOutAws: runCodeRead(signOutSandboxAws)
+}
+/** Logging in and out; on loopback the page keeps its session token in this tab's session storage. */
+const hubSessionStore = browserTokenStore()
+const hubSessionActions: HubSessionActions = {
+  load: runCodeRead(loadHubSession(hubSessionStore)),
+  logIn: runCodeRead(logInWithTailscale),
+  logOut: (csrf) => runCodeRead(logOutOfHub(csrf, hubSessionStore)),
+  spendLoginCode: (code) => runCodeRead(spendLoginCode(code, hubSessionStore))
 }
 const relayConversations = makeRelayConversations(
   makeRelayClient({ base: "/v1/relay", origin: window.location.href }),

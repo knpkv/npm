@@ -9,7 +9,7 @@ import { serveFiles } from "../../../design-conformance/src/server.js"
 import type { fontPreloadLink } from "../../src/font-preload.js"
 import type { dashboardPage } from "../../src/internal/dashboard-page.js"
 import type { loadUiAssets } from "../../src/internal/ui-assets.js"
-import { CODE_REFERENCE, designCommitResult, makeCodeReadings } from "./fixtures.js"
+import { CODE_REFERENCE, designCommitResult, makeCodeReadings, signedOutLocalSession } from "./fixtures.js"
 import { isConversationState, readReviewCapability, reviewInventory, ReviewState } from "./inventory.js"
 
 const PageModule = Schema.Struct({
@@ -136,6 +136,8 @@ export const resolveFixtureRead = (readings: ReturnType<typeof makeCodeReadings>
       return readings.session
     case "/v1/relay/backends":
       return readings.backends
+    case "/v1/session":
+      return signedOutLocalSession
     case "/v1/modules/code/queue": {
       const query = Schema.decodeUnknownResult(CodeQueueQuery)(url.searchParams)
       return Result.isSuccess(query) && query.success.filter === "open" && query.success.search === "" &&

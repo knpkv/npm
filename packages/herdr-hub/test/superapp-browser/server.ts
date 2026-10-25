@@ -261,6 +261,8 @@ const program = Effect.gen(function*() {
       Schema.encodeSync(Schema.fromJsonString(FleetUsage))({ hosts: [], failures: [], peersListed: true })
     ],
     ["/v1/connect/archive", JSON.stringify({ agents: [], nextCursor: null })],
+    // Who is logged in: a local page without a session, so the shell keeps its own session line.
+    ["/v1/session", JSON.stringify({ signedIn: false, kind: "local" })],
     [
       "/v1/relay/session",
       Schema.encodeSync(Schema.fromJsonString(SessionInfo))({ tools: [], backend: "codex-cli", cancel: false })
