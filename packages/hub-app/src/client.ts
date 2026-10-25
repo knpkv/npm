@@ -13,6 +13,7 @@
  *
  * @module
  */
+import { Predicate, Schema } from "effect"
 
 export interface ShellCrumb {
   readonly label: string
@@ -62,6 +63,13 @@ export interface ShellContext {
   readonly portalRoot: HTMLElement
   /** Hub only. */
   readonly openHostAccess?: () => void
+  /**
+   * The link to one of the app's pages with these query parameters, in the route shape this shell reads. Added after
+   * contract 1 shipped, so a shell may leave it out: an app then builds `?<search>#<id>/<page>` itself.
+   */
+  readonly href?: (page: string, search?: URLSearchParams) => string
+  /** The machine the hub runs on, for copy such as "Usage on <host>". Hub only; added after contract 1 shipped. */
+  readonly host?: string
 }
 
 export interface MountedApp {
@@ -78,3 +86,11 @@ export interface AppClient {
 
 /** Typed identity for an app's default export. */
 export const defineAppClient = (client: AppClient): AppClient => client
+
+/** An app's client module as a shell loads it, checked before it is mounted: a default export with a contract and a mount. */
+export const AppClientModule = Schema.Struct({
+  default: Schema.Struct({
+    contract: Schema.Number,
+    mount: Schema.declare((input): input is AppClient["mount"] => Predicate.isFunction(input))
+  })
+})

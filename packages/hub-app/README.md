@@ -41,6 +41,11 @@ The client directory holds `client.js` (an ES module whose default export is an 
 React (or none); `ShellContext` gives it routing, the path and headers for its module routes, the crumb, a header slot and a
 portal root.
 
+Fields added after contract 1 shipped are optional, so an app feature-detects them: `headerOutlet` with
+`setHeaderMode` (the hub's grouped header), `href(page, search)` (a link to one of the app's pages in the shell's
+route shape; without it, build `?<search>#<id>/<page>`) and `host` (the machine the hub runs on). A shell checks a
+loaded client module with `AppClientModule` before it mounts it.
+
 ## Shell services
 
 `ShellServices` (from `@knpkv/hub-app/hub-client`) is available to every handler:

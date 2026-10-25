@@ -13,6 +13,7 @@ import type { Fixture } from "../../../design-conformance/src/schema.js"
 import { FleetLimits } from "../../../herdr-connect/src/limits.js"
 import { FleetConnectAgentPage } from "../../../herdr-connect/src/model.js"
 import { FleetUsage } from "../../../herdr-connect/src/usage.js"
+import { usageManifest } from "../../../herdr-usage/src/app.js"
 import { BlockedPushSettings } from "../../src/blocked-push-model.js"
 import { DashboardSnapshot } from "../../src/dashboard-model.js"
 import { NeedsYouResult } from "../../src/module-needs-you.js"
@@ -528,6 +529,17 @@ export const makeShellReadings = (options: {
     host: shell.hubHost,
     observedAt,
     approvalsEnabled: true,
+    // Code's retained-read state leaves for Usage and comes back, so Usage needs its nav item; it never renders here.
+    apps: {
+      viewer: "viewer@example.test",
+      states: [{
+        _tag: "Unavailable",
+        id: "usage",
+        manifest: { ...usageManifest("0.0.0-design"), client: { entry: "client.js", css: [] } },
+        reason: "not_running",
+        detail: "Usage isn't running."
+      }]
+    },
     approvalApp: {
       canonical: true,
       canonicalUrl: "/",

@@ -1,7 +1,7 @@
 import { useId, type ReactElement } from "react"
 
 /** The empty page uses export63’s pixel-sized 28px Chef; other shell marks retain their drawings. */
-export const UsageEmptyChef = (): ReactElement => {
+export const GroupedHeaderChef = (): ReactElement => {
   const seed = useId()
   return (
     <svg viewBox="0 0 32 32" width="28" height="28" fill="none" aria-hidden="true" focusable="false">

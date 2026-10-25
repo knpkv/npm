@@ -4,7 +4,10 @@ import { limitsFixture, LONG_USAGE_HOST, usageFixture } from "./usage-fixture.js
 
 /** By tool cannot retry a Limits read it does not own. */
 test("a retained Limits error has Retry only on the Limits page", async ({ page }) => {
-  await page.route(/\/v1\/connect\/limits(\?|$)/, (route) => route.fulfill({ status: 503, body: "unavailable" }))
+  await page.route(
+    /\/apps\/usage\/v1\/modules\/usage\/limits(\?|$)/,
+    (route) => route.fulfill({ status: 503, body: "unavailable" })
+  )
   await page.goto("/?range=7d&timeZone=UTC#usage/limits")
   const module = page.locator("[data-module=\"usage\"]")
   // On Limits the page tabs sit in the header outlet Usage owns; elsewhere they stay in its slot.
@@ -81,7 +84,7 @@ test("a delayed unknown-host repair keeps focus on a range control", async ({ pa
   const gate = new Promise<void>((resolve) => {
     release = resolve
   })
-  await page.route(/\/v1\/connect\/(usage|limits)(\?|$)/, async (route) => {
+  await page.route(/\/apps\/usage\/v1\/modules\/usage\/(usage|limits)(\?|$)/, async (route) => {
     await gate
     await route.continue()
   })
@@ -107,11 +110,11 @@ test("empty readings that arrive after navigation move focus to the empty Limits
   })
   // The client rejects negative instants, so the fixture reads at the browser server's own clock.
   const now = Date.now()
-  await page.route(/\/v1\/connect\/usage(\?|$)/, async (route) => {
+  await page.route(/\/apps\/usage\/v1\/modules\/usage\/usage(\?|$)/, async (route) => {
     await gate
     await route.fulfill({ json: usageFixture({ range: "7d", timeZone: "UTC" }, now, "empty-readings") })
   })
-  await page.route(/\/v1\/connect\/limits(\?|$)/, async (route) => {
+  await page.route(/\/apps\/usage\/v1\/modules\/usage\/limits(\?|$)/, async (route) => {
     await gate
     await route.fulfill({ json: limitsFixture(now, "empty-readings") })
   })
@@ -131,7 +134,7 @@ test("Usage selectors drive range, zone and local host filtering with replaced h
   const queries: Array<URLSearchParams> = []
   page.on("request", (request) => {
     const url = new URL(request.url())
-    if (url.pathname === "/v1/connect/usage") queries.push(url.searchParams)
+    if (url.pathname === "/apps/usage/v1/modules/usage/usage") queries.push(url.searchParams)
   })
   await page.goto("/?range=30d&timeZone=UTC&host=bad%2Fhost#usage/tokens")
   const module = page.locator("[data-module=\"usage\"]")
@@ -243,8 +246,8 @@ test("poll counts follow the page, inactive and hidden state", async ({ page }) 
   let limits = 0
   page.on("request", (request) => {
     const path = new URL(request.url()).pathname
-    if (path === "/v1/connect/usage") usage += 1
-    if (path === "/v1/connect/limits") limits += 1
+    if (path === "/apps/usage/v1/modules/usage/usage") usage += 1
+    if (path === "/apps/usage/v1/modules/usage/limits") limits += 1
   })
   await page.goto("/?range=7d&timeZone=UTC#usage/tokens")
   await expect(page.locator("[aria-label=\"By host\"] li")).toHaveCount(3)
@@ -391,11 +394,11 @@ for (const layout of limitsLayouts) {
     if (layout === "empty") {
       const now = Date.now()
       await page.route(
-        /\/v1\/connect\/usage(\?|$)/,
+        /\/apps\/usage\/v1\/modules\/usage\/usage(\?|$)/,
         (route) => route.fulfill({ json: usageFixture({ range: "7d", timeZone: "UTC" }, now, "empty-readings") })
       )
       await page.route(
-        /\/v1\/connect\/limits(\?|$)/,
+        /\/apps\/usage\/v1\/modules\/usage\/limits(\?|$)/,
         (route) => route.fulfill({ json: limitsFixture(now, "empty-readings") })
       )
     }
@@ -414,11 +417,11 @@ test("phone Limits title sits on the design's position in both layouts", async (
     if (layout === "empty") {
       const now = Date.now()
       await page.route(
-        /\/v1\/connect\/usage(\?|$)/,
+        /\/apps\/usage\/v1\/modules\/usage\/usage(\?|$)/,
         (route) => route.fulfill({ json: usageFixture({ range: "7d", timeZone: "UTC" }, now, "empty-readings") })
       )
       await page.route(
-        /\/v1\/connect\/limits(\?|$)/,
+        /\/apps\/usage\/v1\/modules\/usage\/limits(\?|$)/,
         (route) => route.fulfill({ json: limitsFixture(now, "empty-readings") })
       )
       // Same URL as the readings pass, so only a reload reads again.
@@ -479,7 +482,7 @@ test("By tool frames a retained range while updating, failing and retrying", asy
     release = resolve
   })
   let fail = true
-  await page.route("**/v1/connect/usage?*", async (route) => {
+  await page.route("**/apps/usage/v1/modules/usage/usage?*", async (route) => {
     if (new URL(route.request().url()).searchParams.get("range") !== "30d") return route.continue()
     await pending
     if (fail) return route.fulfill({ status: 503, body: "private fixture transport detail" })
@@ -549,17 +552,17 @@ for (const width of [600, 640, 641]) {
     // The client rejects negative instants, so the fixture reads at the browser server's own clock.
     const now = Date.now()
     await page.route(
-      /\/v1\/connect\/usage(\?|$)/,
+      /\/apps\/usage\/v1\/modules\/usage\/usage(\?|$)/,
       (route) => route.fulfill({ json: usageFixture({ range: "7d", timeZone: "UTC" }, now, "empty-readings") })
     )
     await page.route(
-      /\/v1\/connect\/limits(\?|$)/,
+      /\/apps\/usage\/v1\/modules\/usage\/limits(\?|$)/,
       (route) => route.fulfill({ json: limitsFixture(now, "empty-readings") })
     )
     await page.goto("/?range=7d&timeZone=UTC#usage/limits")
     await expect(page.locator(".usage-limits-empty")).toBeVisible()
     await page.evaluate(() => document.fonts.ready)
-    const header = page.locator(".usage-empty-header-region")
+    const header = page.locator(".superapp-grouped-header-region")
     await expect(header).toHaveCSS("grid-column-start", width <= 640 ? "1" : "2")
     const geometry = await header.evaluate((element) => ({
       header: element.getBoundingClientRect().toJSON(),
@@ -578,8 +581,8 @@ for (const width of [600, 640, 641]) {
     } else {
       await expect(page.locator(".superapp-bottom")).toBeHidden()
     }
-    await page.unroute(/\/v1\/connect\/usage(\?|$)/)
-    await page.unroute(/\/v1\/connect\/limits(\?|$)/)
+    await page.unroute(/\/apps\/usage\/v1\/modules\/usage\/usage(\?|$)/)
+    await page.unroute(/\/apps\/usage\/v1\/modules\/usage\/limits(\?|$)/)
     // The hash is unchanged, so only a reload issues fresh reads.
     await page.reload()
     await expect(page.locator(".usage-limits-empty")).toHaveCount(0)

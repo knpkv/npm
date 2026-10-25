@@ -4,12 +4,12 @@
     display: contents;
   }
 
-  .superapp-shell[data-usage-empty="true"] {
+  .superapp-shell[data-module-empty="true"] {
     font: 430 1rem / 1.5 var(--rly-font-ui);
     color: var(--rly-color-text-1);
   }
 
-  .superapp-shell[data-usage-header="grouped"] .superapp-header [data-rly-relay-launcher] {
+  .superapp-shell[data-module-header="grouped"] .superapp-header [data-rly-relay-launcher] {
     min-block-size: 44px;
     block-size: 44px;
     padding-inline: 0.5rem;
@@ -17,7 +17,7 @@
     letter-spacing: normal;
   }
 
-  .superapp-shell[data-usage-header="grouped"] .superapp-header kbd {
+  .superapp-shell[data-module-header="grouped"] .superapp-header kbd {
     min-inline-size: 0;
     padding-block: 0.2rem;
     padding-inline: 0.35rem;
@@ -27,31 +27,31 @@
     background: var(--rly-color-surface-2);
   }
 
-  .superapp-shell[data-usage-empty="true"] .superapp-session small {
+  .superapp-shell[data-module-empty="true"] .superapp-session small {
     font-size: 0.65rem;
     line-height: inherit;
     margin-block: 0;
   }
 
-  .superapp-shell[data-usage-empty="true"] .superapp-settings .superapp-icon,
-  .superapp-shell[data-usage-empty="true"] .superapp-session-avatar .superapp-icon {
+  .superapp-shell[data-module-empty="true"] .superapp-settings .superapp-icon,
+  .superapp-shell[data-module-empty="true"] .superapp-session-avatar .superapp-icon {
     inline-size: 17px;
     block-size: 17px;
   }
 
   /* The design's header region carries the 430 16px/24px body type, empty or not. */
-  .usage-empty-header-region {
+  .superapp-grouped-header-region {
     grid-column: 2;
     grid-row: 1;
     min-inline-size: 0;
     font: 430 1rem / 1.5 var(--rly-font-ui);
   }
 
-  .usage-empty-header-outlet {
+  .superapp-grouped-header-outlet {
     display: contents;
   }
 
-  .superapp-shell[data-usage-header="grouped"] .superapp-header {
+  .superapp-shell[data-module-header="grouped"] .superapp-header {
     display: flex;
     position: relative;
     min-block-size: 4rem;
@@ -62,12 +62,12 @@
     background: var(--rly-color-surface-1);
   }
 
-  .superapp-shell[data-usage-header="grouped"] .superapp-header > .fleet-shell-relay {
+  .superapp-shell[data-module-header="grouped"] .superapp-header > .fleet-shell-relay {
     order: 3;
     margin-inline-start: 0;
   }
 
-  .superapp-shell[data-usage-header="grouped"] .superapp-host {
+  .superapp-shell[data-module-header="grouped"] .superapp-host {
     margin-inline-start: auto;
     min-inline-size: 44px;
     min-block-size: 44px;
@@ -77,32 +77,32 @@
     padding-block: 0;
   }
 
-  .superapp-shell[data-usage-header="grouped"] .superapp-notifications {
+  .superapp-shell[data-module-header="grouped"] .superapp-notifications {
     min-inline-size: 44px;
     min-block-size: 44px;
     padding: 0;
     color: var(--rly-color-text-1);
   }
 
-  .superapp-shell[data-usage-header="grouped"] .superapp-header .superapp-icon {
+  .superapp-shell[data-module-header="grouped"] .superapp-header .superapp-icon {
     inline-size: 19px;
     block-size: 19px;
   }
 
-  .superapp-shell[data-usage-header="grouped"] .fleet-shell-relay-status {
+  .superapp-shell[data-module-header="grouped"] .fleet-shell-relay-status {
     display: none;
   }
 
-  .superapp-shell[data-usage-empty="true"] .superapp-main {
+  .superapp-shell[data-module-empty="true"] .superapp-main {
     padding-block: 0;
   }
 
-  .superapp-shell[data-usage-empty="true"] .superapp-main {
+  .superapp-shell[data-module-empty="true"] .superapp-main {
     padding-inline: 0;
   }
 
   @media (max-width: 40rem) {
-    .superapp-shell[data-usage-header="grouped"] .superapp-header [data-rly-relay-launcher] {
+    .superapp-shell[data-module-header="grouped"] .superapp-header [data-rly-relay-launcher] {
       min-block-size: 44px;
       block-size: 44px;
       padding-inline: 0.5rem;
@@ -110,7 +110,7 @@
       letter-spacing: normal;
     }
 
-    .superapp-shell[data-usage-header="grouped"] .superapp-header kbd {
+    .superapp-shell[data-module-header="grouped"] .superapp-header kbd {
       min-inline-size: 0;
       padding-block: 0.2rem;
       padding-inline: 0.35rem;
@@ -120,50 +120,50 @@
       background: var(--rly-color-surface-2);
     }
 
-    .superapp-shell[data-usage-empty="true"] .superapp-session small {
+    .superapp-shell[data-module-empty="true"] .superapp-session small {
       font-size: 0.65rem;
       line-height: inherit;
       margin-block: 0;
     }
 
-    .superapp-shell[data-usage-empty="true"] .superapp-settings .superapp-icon,
-    .superapp-shell[data-usage-empty="true"] .superapp-session-avatar .superapp-icon {
+    .superapp-shell[data-module-empty="true"] .superapp-settings .superapp-icon,
+    .superapp-shell[data-module-empty="true"] .superapp-session-avatar .superapp-icon {
       inline-size: 17px;
       block-size: 17px;
     }
 
-    .usage-empty-header-region {
+    .superapp-grouped-header-region {
       grid-column: 1;
     }
 
-    .superapp-shell[data-usage-header="grouped"] .superapp-header {
+    .superapp-shell[data-module-header="grouped"] .superapp-header {
       gap: 0.5rem;
       padding-inline: 16px;
     }
 
-    .superapp-shell[data-usage-header="grouped"] .superapp-header > .superapp-brand {
+    .superapp-shell[data-module-header="grouped"] .superapp-header > .superapp-brand {
       display: grid;
       place-items: center;
       /* The product name sits beside the mark, as the rule 45 refs draw it: the end margin cancels the header gap. */
       margin-inline: -8px -0.5rem;
     }
 
-    .usage-empty-chef {
+    .superapp-grouped-chef {
       inline-size: 28px;
       block-size: 28px;
       display: block;
     }
 
-    .superapp-shell[data-usage-header="grouped"] .superapp-phone-title {
+    .superapp-shell[data-module-header="grouped"] .superapp-phone-title {
       display: flex;
       gap: 0.45rem;
     }
 
-    .superapp-shell[data-usage-header="grouped"] .superapp-host {
+    .superapp-shell[data-module-header="grouped"] .superapp-host {
       display: none;
     }
 
-    .superapp-shell[data-usage-header="grouped"] .superapp-notifications {
+    .superapp-shell[data-module-header="grouped"] .superapp-notifications {
       margin-inline-start: auto;
       margin-inline-end: -8px;
     }

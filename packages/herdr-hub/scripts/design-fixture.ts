@@ -1,4 +1,6 @@
 import type { FleetLimits, FleetUsage } from "@knpkv/herdr-connect/usage"
+import { usageManifest } from "@knpkv/herdr-usage"
+import { AppState } from "@knpkv/hub-app"
 import { DateTime, Schema } from "effect"
 import type { DashboardSnapshot } from "../src/dashboard-model.js"
 
@@ -128,6 +130,12 @@ export const designReadings = (fixture: typeof UsageDesignFixture.Type, state: t
 }
 
 /** Bootstrap the real client without a host, provider, persisted account or agent process. */
+/** The Usage app as the registry lists it once it answers: its manifest with the client its build ships. */
+export const designUsageApp: AppState = Schema.decodeUnknownSync(AppState)({
+  _tag: "Ready",
+  manifest: { ...usageManifest("0.0.0-design"), client: { entry: "client.js", css: ["client.css"] } }
+})
+
 export const designDashboard = (
   fixture: typeof UsageDesignFixture.Type,
   state: typeof State.Type
@@ -162,6 +170,8 @@ export const designDashboard = (
       workEnabled: false,
       sandboxesEnabled: true
     },
+    // Usage is an app: attached as the hub attaches it, its client served from herdr-usage's build.
+    apps: { viewer: "viewer@example.test", states: [designUsageApp] },
     work: null,
     status: {
       host,

@@ -24,6 +24,7 @@ const pendingRecord: DashboardSnapshot["records"][number] = {
 const snapshot = (approvalsEnabled: boolean): DashboardSnapshot => {
   const pending = pendingRecord
   return {
+    apps: { viewer: "viewer@example.test", states: [] },
     approvalApp: {
       canonical: false,
       canonicalUrl: "https://ser8.example.test/",

@@ -43,6 +43,7 @@ const snapshot = (overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot
     sandboxesEnabled: false
   },
   approvalsEnabled: true,
+  apps: { viewer: "viewer@example.test", states: [] },
   directory: null,
   historyNextCursor: null,
   host: "ALPHA",

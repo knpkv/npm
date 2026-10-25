@@ -771,6 +771,7 @@ it("selects and focuses an exact approval after a handoff from another module", 
     host: "hub",
     observedAt: 1_000,
     approvalsEnabled: true,
+    apps: { viewer: "viewer@example.test", states: [] },
     approvalApp: {
       canonical: true,
       canonicalUrl: "https://example.invalid/",

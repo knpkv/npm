@@ -138,7 +138,7 @@ import { writeCliToken } from "./apps/cli-token.js"
 import { answerFleetRead } from "./apps/fleet-read.js"
 import { makeAppTokens, makeGrants } from "./apps/grants.js"
 import { appNeedsYouProviders } from "./apps/needs-you.js"
-import { makeAppRegistry } from "./apps/registry.js"
+import { makeAppRegistry, stateOn } from "./apps/registry.js"
 import { AppServiceRefused, handleAppServicesRoute, handleAppsRoute } from "./apps/routes.js"
 import { defaultTiming, makeSupervisor, type SupervisorTiming } from "./apps/supervisor.js"
 import { authorize, authorizeLoopback, authorizeLoopbackPeer } from "./auth.js"
@@ -209,7 +209,7 @@ import {
   PushSubscriptionRecord,
   PushSubscriptionRemoval
 } from "./model.js"
-import { connectModule, fleetHubModule, resourcesModule, usageModule } from "./module-contract.js"
+import { connectModule, fleetHubModule, resourcesModule } from "./module-contract.js"
 import type { NeedsYouCandidate, NeedsYouIssue, NeedsYouProviderResult } from "./module-needs-you.js"
 import * as ModuleServer from "./module-server.js"
 import { ModuleRouteFailure, type ServerModule } from "./module-server.js"
@@ -1907,7 +1907,6 @@ export const startHttpServer = async (
       ServerModule<unknown, HttpClient.HttpClient | Tailscale | Crypto.Crypto | FileSystem.FileSystem | Path.Path>
     > = [
       { descriptor: connectModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
-      { descriptor: usageModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
       { descriptor: resourcesModule, handlers: Layer.succeed(ModuleServer.ModuleHandlers, { routes: [] }) },
       makeSandboxesModule({
         host: config.host,
@@ -3354,8 +3353,12 @@ export const startHttpServer = async (
           }
 
           const approvalSurface = mode === "approval" || mode === "serve"
-          const dashboard = Effect.fn("HostHttp.dashboard")(function*(request: IncomingMessage) {
+          const dashboard = Effect.fn("HostHttp.dashboard")(function*(request: IncomingMessage, viewer: string) {
             const observedAt = now()
+            // Only listeners that serve the super-app show apps, each as this listener may open it.
+            const apps = listenerServesSuperapp(mode)
+              ? (yield* appRegistry.apps).map(stateOn(mode))
+              : []
             const resolvedLocalPage = approvalSurface
               ? yield* service.pendingApprovalPage(null)
               : { records: [], nextCursor: null }
@@ -3452,6 +3455,7 @@ export const startHttpServer = async (
                     pool: options.sandboxPool ?? null
                   })
                 },
+                apps: { viewer, states: apps },
                 work: null,
                 status: state.status,
                 records: state.history.records,
@@ -3464,7 +3468,7 @@ export const startHttpServer = async (
 
           if (request.method === "GET" && url.pathname === "/v1/dashboard") {
             const result = await runRequest(
-              Effect.result(Effect.andThen(authorized, dashboard(request)))
+              Effect.result(Effect.flatMap(authorized, (viewer) => dashboard(request, viewer)))
             )
             if (Result.isFailure(result)) {
               discardApprovalProofMutation(request)
@@ -4321,7 +4325,7 @@ export const startHttpServer = async (
           }
           if (request.method === "GET" && url.pathname === "/") {
             const result = await runRequest(
-              Effect.result(Effect.andThen(authorized, dashboard(request)))
+              Effect.result(Effect.flatMap(authorized, (viewer) => dashboard(request, viewer)))
             )
             if (Result.isFailure(result)) {
               discardApprovalProofMutation(request)

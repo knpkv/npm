@@ -46,6 +46,7 @@ const record = (id: string, overrides: Partial<JobRecord> = {}): JobRecord => ({
 })
 
 const snapshot = (local: ReadonlyArray<JobRecord>, approvalsEnabled = true): DashboardSnapshot => ({
+  apps: { viewer: "viewer@example.test", states: [] },
   approvalApp: {
     canonical: true,
     canonicalUrl: "https://hub.example.test/",
