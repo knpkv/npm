@@ -1,5 +1,18 @@
 # @knpkv/herdr-usage
 
+## 0.2.0
+
+### Minor Changes
+
+- [#1127](https://github.com/knpkv/npm/pull/1127) [`1367495`](https://github.com/knpkv/npm/commit/136749537d39d4b8cdfdc18ae78f816760c375b0) Thanks [@konopkov](https://github.com/konopkov)! - The Usage app groups its Limits header in the hub as the hub's own Usage did: it asks for the grouped header before the hub has lent an outlet, draws its title and tabs inline until then, names the hub's machine rather than the viewer, links its pages through the shell's `href` when the shell provides one, and, opened on the hub's own machine, links to the local agent-usage dashboard as the hub's Usage did.
+
+### Patch Changes
+
+- Updated dependencies [[`9bad0f1`](https://github.com/knpkv/npm/commit/9bad0f1312266acc6f166d91a8b756199f7610ad), [`1367495`](https://github.com/knpkv/npm/commit/136749537d39d4b8cdfdc18ae78f816760c375b0), [`1367495`](https://github.com/knpkv/npm/commit/136749537d39d4b8cdfdc18ae78f816760c375b0)]:
+  - @knpkv/herdr-fleet@0.22.0
+  - @knpkv/hub-app@0.5.0
+  - @knpkv/herdr-connect@0.31.4
+
 ## 0.1.3
 
 ### Patch Changes

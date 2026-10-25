@@ -1,5 +1,11 @@
 # @knpkv/herdr-tailscale
 
+## 0.4.0
+
+### Minor Changes
+
+- [#1132](https://github.com/knpkv/npm/pull/1132) [`9bad0f1`](https://github.com/knpkv/npm/commit/9bad0f1312266acc6f166d91a8b756199f7610ad) Thanks [@konopkov](https://github.com/konopkov)! - `TailWhois` reads the node's optional `ComputedName`, the device name tailscale shows, for display only.
+
 ## 0.3.2
 
 ### Patch Changes

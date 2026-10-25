@@ -1,5 +1,11 @@
 # @knpkv/herdr-fleet
 
+## 0.22.0
+
+### Minor Changes
+
+- [#1132](https://github.com/knpkv/npm/pull/1132) [`9bad0f1`](https://github.com/knpkv/npm/commit/9bad0f1312266acc6f166d91a8b756199f7610ad) Thanks [@konopkov](https://github.com/konopkov)! - `Person` principals carry `session`. Without a browser session a person only views. A person logged in on a fleet machine never holds `sandboxes.owner`. A new `Cli` principal, a command holding the hub's CLI token, holds only `apps.restart`.
+
 ## 0.21.1
 
 ### Patch Changes

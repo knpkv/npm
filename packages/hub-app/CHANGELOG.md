@@ -1,5 +1,13 @@
 # @knpkv/hub-app
 
+## 0.5.0
+
+### Minor Changes
+
+- [#1127](https://github.com/knpkv/npm/pull/1127) [`1367495`](https://github.com/knpkv/npm/commit/136749537d39d4b8cdfdc18ae78f816760c375b0) Thanks [@konopkov](https://github.com/konopkov)! - An installed app outside the `@knpkv` scope opens its page only on the hub's loopback listener for now. On every other listener `/v1/apps` lists it as Unavailable with the new reason `local_only` ("<label> opens only on this machine for now."), and its routes answer 503. An app's page runs with the hub page's authority, which on the hub's tailnet listener includes approving jobs, so until apps get their own origin only first-party pages open on every device. First-party is the package name the installer verified, never what the app reports. `herdr-hub apps add` says which applies before it installs.
+
+- [#1127](https://github.com/knpkv/npm/pull/1127) [`1367495`](https://github.com/knpkv/npm/commit/136749537d39d4b8cdfdc18ae78f816760c375b0) Thanks [@konopkov](https://github.com/konopkov)! - The hub's shell mounts installed apps, and Usage moves out of the hub into the `@knpkv/herdr-usage` app. Install it with `herdr-hub apps add @knpkv/herdr-usage`; it appears where the hub's own Usage was, and its routes and bookmarks are unchanged. A hub without it says so on any Usage link. The dashboard snapshot gains `apps` (the registry's states for that listener and the authenticated login), `usageModule` is no longer one of `builtInModuleIds`, and `makeUsageModuleViews` is removed. `ShellContext` gains the optional `href` and `host`, and `AppClientModule` checks a loaded client module before a shell mounts it.
+
 ## 0.4.1
 
 ### Patch Changes
