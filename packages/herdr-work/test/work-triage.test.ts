@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest"
 import type { WorkGoal, WorkRequest } from "../src/model.js"
-import { workTriage, workTriageDoneWindowMs, workTriageGroupTitle, workTriageSentence } from "../src/work-triage.js"
+import {
+  workTriage,
+  workTriageDoneWindowMs,
+  workTriageGroupTitle,
+  workTriageSentence,
+  workTriageSentenceParts,
+  workTriageStuckAfterMs,
+  type WorkTriageSummary
+} from "../src/work-triage.js"
 
 const AS_OF = 10 * 86_400_000
 
@@ -91,6 +99,73 @@ describe("workTriage", () => {
   })
 })
 
+/**
+ * A goal waiting in review or blocked with no update for three days is stuck: nobody is moving it,
+ * so it leads the tab instead of hiding among moving work. 36 review goals sat 8 to 10 days in the
+ * fleet's own data while the tab said nothing needed attention.
+ */
+describe("workTriage stuck", () => {
+  const STUCK = workTriageStuckAfterMs
+
+  it("counts review and blocked goals as stuck from exactly three days without an update", () => {
+    const rows = groupsOf([
+      goal("review-edge", { state: "review", updatedAt: AS_OF - STUCK }),
+      goal("review-fresh", { state: "review", updatedAt: AS_OF - STUCK + 1 }),
+      blocked("blocked-edge", AS_OF - STUCK),
+      blocked("blocked-fresh", AS_OF - STUCK + 1),
+      goal("working-old", { state: "working", updatedAt: AS_OF - STUCK - 1 }),
+      goal("planned-old", { state: "planned", updatedAt: AS_OF - STUCK - 1 })
+    ])
+    expect(rows).toEqual([
+      ["review-edge", "stuck"],
+      ["blocked-edge", "stuck"],
+      ["blocked-fresh", "blocked"],
+      ["review-fresh", "moving"],
+      ["working-old", "moving"],
+      ["planned-old", "planned"]
+    ])
+  })
+
+  it("lists stuck goals after the ones that need the viewer, oldest update first", () => {
+    const rows = groupsOf([
+      goal("newer", { state: "review", updatedAt: AS_OF - STUCK - 1_000 }),
+      goal("asks", { requests: [request("r1", AS_OF - 60_000)], state: "review", updatedAt: AS_OF - 9 * STUCK }),
+      goal("oldest", { state: "review", updatedAt: AS_OF - 3 * STUCK })
+    ])
+    expect(rows).toEqual([["asks", "needs-you"], ["oldest", "stuck"], ["newer", "stuck"]])
+  })
+
+  it("follows the displayed state, so a merged pull request is never stuck", () => {
+    const old = goal("merged", { state: "review", updatedAt: AS_OF - 2 * STUCK })
+    const triage = workTriage({
+      asOf: AS_OF,
+      goals: [old],
+      observed: [{
+        agent: null,
+        displayState: "completed",
+        goalId: "merged",
+        pullRequest: null,
+        stale: false,
+        unknown: null
+      }]
+    })
+    expect(triage.rows.map((row) => row.group)).toEqual(["earlier"])
+  })
+
+  it("names stuck goals in the summary sentence", () => {
+    const triage = workTriage({
+      asOf: AS_OF,
+      goals: [goal("a", { state: "review", updatedAt: AS_OF - STUCK }), goal("b", { state: "review", updatedAt: 0 })]
+    })
+    expect(triage.summary).toMatchObject({ _tag: "Attention", blocked: 0, needsYou: 0, stuck: 2 })
+    expect(workTriageSentence(triage.summary)).toBe("Nothing needs you, 2 stuck")
+    expect(workTriageSentence({ _tag: "Attention", blocked: 1, needsYou: 2, oldestRequest: null, stuck: 1 })).toBe(
+      "2 goals need you, 1 blocked, 1 stuck"
+    )
+    expect(workTriageGroupTitle.stuck).toBe("Stuck")
+  })
+})
+
 describe("workTriage summary", () => {
   it("states needs-you and blocked counts and names the request waiting longest", () => {
     const early = goal("early", { requests: [request("r1", AS_OF - 600_000), request("r0", AS_OF - 900_000)] })
@@ -99,7 +174,8 @@ describe("workTriage summary", () => {
       _tag: "Attention",
       blocked: 2,
       needsYou: 1,
-      oldestRequest: { goal: early, request: request("r0", AS_OF - 900_000) }
+      oldestRequest: { goal: early, request: request("r0", AS_OF - 900_000) },
+      stuck: 0
     })
     expect(workTriageSentence(triage.summary)).toBe("1 goal needs you, 2 blocked")
   })
@@ -129,19 +205,33 @@ describe("workTriage summary", () => {
   })
 
   it("speaks of a historical window in the past tense", () => {
-    expect(workTriageSentence({ _tag: "Attention", blocked: 2, needsYou: 3, oldestRequest: null }, "past")).toBe(
-      "3 goals needed you, 2 blocked"
-    )
-    expect(workTriageSentence({ _tag: "Attention", blocked: 1, needsYou: 0, oldestRequest: null }, "past")).toBe(
-      "Nothing needed you, 1 blocked"
-    )
+    expect(workTriageSentence({ _tag: "Attention", blocked: 2, needsYou: 3, oldestRequest: null, stuck: 0 }, "past"))
+      .toBe(
+        "3 goals needed you, 2 blocked"
+      )
+    expect(workTriageSentence({ _tag: "Attention", blocked: 1, needsYou: 0, oldestRequest: null, stuck: 0 }, "past"))
+      .toBe(
+        "Nothing needed you, 1 blocked"
+      )
     expect(workTriageSentence({ _tag: "Clear", latest: null, moving: 0 }, "past")).toBe("Nothing needed you")
     expect(workTriageSentence({ _tag: "Empty" }, "past")).toBe("No goals")
   })
 
   it("leaves the blocked count out when nothing is blocked", () => {
-    expect(workTriageSentence({ _tag: "Attention", blocked: 0, needsYou: 2, oldestRequest: null })).toBe(
+    expect(workTriageSentence({ _tag: "Attention", blocked: 0, needsYou: 2, oldestRequest: null, stuck: 0 })).toBe(
       "2 goals need you"
     )
+  })
+})
+
+describe("workTriageSentenceParts", () => {
+  it("gives the lead and each named count with its ink, and joins to the sentence", () => {
+    const summary: WorkTriageSummary = { _tag: "Attention", blocked: 1, needsYou: 0, oldestRequest: null, stuck: 2 }
+    expect(workTriageSentenceParts(summary)).toEqual({
+      counts: [{ tone: "blocked", word: "1 blocked" }, { tone: "held", word: "2 stuck" }],
+      lead: "Nothing needs you"
+    })
+    expect(workTriageSentence(summary)).toBe("Nothing needs you, 1 blocked, 2 stuck")
+    expect(workTriageSentenceParts({ _tag: "Empty" }, "past")).toEqual({ counts: [], lead: "No goals" })
   })
 })

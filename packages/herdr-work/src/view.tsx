@@ -8,7 +8,7 @@ import {
   type RlyDecisionBarState,
   type RlyTimelineEvent
 } from "@knpkv/rly/patterns"
-import { useEffect, useRef, useState, type ReactElement } from "react"
+import { Fragment, useEffect, useRef, useState, type ReactElement } from "react"
 import type {
   DeliveryStage,
   WorkActivity,
@@ -37,6 +37,7 @@ import {
   workTriageGroups,
   workTriageGroupTitle,
   workTriageSentence,
+  workTriageSentenceParts,
   type WorkTriageTense
 } from "./work-triage.js"
 
@@ -1042,11 +1043,17 @@ export const WorkBoard = ({
   // A historical window is the state as of its time; say so, never in the present tense.
   const tense: WorkTriageTense = window === "now" ? "present" : "past"
   const sentence = workTriageSentence(triage.summary, tense)
+  const sentenceParts = workTriageSentenceParts(triage.summary, tense)
   const heroFact =
-    triage.summary._tag === "Attention" && triage.summary.blocked > 0 ? (
+    sentenceParts.counts.length > 0 ? (
       <>
-        {sentence.slice(0, -`${triage.summary.blocked} blocked`.length)}
-        <HeroWord tone="blocked">{`${triage.summary.blocked} blocked`}</HeroWord>
+        {`${sentenceParts.lead}, `}
+        {sentenceParts.counts.map(({ tone, word }, index) => (
+          <Fragment key={word}>
+            {index > 0 ? ", " : null}
+            <HeroWord tone={tone}>{word}</HeroWord>
+          </Fragment>
+        ))}
       </>
     ) : tense === "past" && triage.summary._tag === "Attention" ? (
       <>
