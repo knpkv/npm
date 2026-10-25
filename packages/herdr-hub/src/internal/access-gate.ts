@@ -12,6 +12,9 @@
  * - **A browser document is a person's, never a host's.** Agents on a fleet host read the hub's JSON as the
  *   host; a page there (or an app's page, navigated to) shows only after someone logs in in that browser.
  * - **A session's writes carry its CSRF token.** Reads and the families that check no caller don't.
+ * - **An app's writes come from the hub's own page instead.** Apps get no CSRF token: a write under
+ *   `/apps/<id>/` needs the session and an `Origin` equal to the listener's own (scheme, host and port), so a
+ *   page on another loopback port can't use the cookie. A write without an `Origin` is refused too.
  * - **A route no family names is refused,** so a new route can't slip past the gate.
  *
  * @module
@@ -31,6 +34,8 @@ export type GateVerdict =
   | { readonly _tag: "LoginRequired"; readonly document: boolean }
   | { readonly _tag: "Forbidden" }
   | { readonly _tag: "CsrfRequired" }
+  /** An app write whose `Origin` isn't the listener's own. */
+  | { readonly _tag: "OriginRequired" }
   | { readonly _tag: "Unknown" }
 
 const open = (family: RouteFamily) => family.requirement._tag === "Public" || family.requirement._tag === "Grant"
@@ -65,6 +70,8 @@ export const gateVerdict = (
     readonly afterLogin: Principal | null
     readonly document: boolean
     readonly csrfOk: boolean
+    /** The request's `Origin` is the listener's own; false when it sent none. */
+    readonly originOk: boolean
   }
 ): GateVerdict => {
   const { afterLogin, document, family, principal } = request
@@ -75,6 +82,7 @@ export const gateVerdict = (
   if (!admits(principal)) {
     return afterLogin !== null && admits(afterLogin) ? { _tag: "LoginRequired", document } : { _tag: "Forbidden" }
   }
+  if (family.id === "apps.write") return request.originOk ? { _tag: "Pass" } : { _tag: "OriginRequired" }
   const read = request.method === "GET" || request.method === "HEAD"
   return sessioned(principal) && !read && !request.csrfOk ? { _tag: "CsrfRequired" } : { _tag: "Pass" }
 }

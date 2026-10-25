@@ -18,7 +18,7 @@ import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 
 /** The header a session's writes carry its CSRF token in. */
-const csrfHeader = "x-herdr-csrf"
+export const csrfHeader = "x-herdr-csrf"
 const Credential = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u))
 
 /** What `GET /v1/session` says about the caller. */

@@ -1,6 +1,6 @@
 import { dashboardRefreshView } from "./internal/dashboard-refresh.js"
 import { RegistryProvider, useAtom, useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
-import { BrowserCrypto, BrowserHttpClient } from "@effect/platform-browser"
+import { BrowserCrypto } from "@effect/platform-browser"
 import { makeRelayClient, makeRelayConversations } from "@knpkv/relay-product/client"
 import { makeConnectAtoms } from "@knpkv/herdr-connect/surface"
 import { makeConnectModuleViews } from "./connect-module-view.js"
@@ -99,6 +99,7 @@ import type { PendingApprovalTargetRevalidation } from "./internal/dashboard-pen
 import type { ApprovalNotificationCandidate } from "./model.js"
 import { loadHubSession, logInWithTailscale, logOutOfHub, spendLoginCode } from "./hub-session-client.js"
 import { LoginGatePage, type HubSessionActions, SessionControl, useHubSession } from "./hub-session-view.js"
+import { sessionCsrf, sessionCsrfLayer } from "./session-csrf.js"
 
 class BrowserNetworkError extends Schema.TaggedError<BrowserNetworkError>()("BrowserNetworkError", {
   detail: Schema.String
@@ -155,7 +156,7 @@ const fetchJson = Effect.fn("ApprovalClient.fetchJson")(function* <A>(
   )
 })
 
-const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
+const browserRuntime = Atom.runtime(sessionCsrfLayer)
 
 const loadDashboard = fetchJson(DashboardSnapshot, "/v1/dashboard")
 const loadToday = fetchJson(NeedsYouResult, "/v1/modules/connect/needs-you").pipe(
@@ -841,7 +842,7 @@ const DashboardApp = ({
  * Relay's one conversation, on any listener that serves the super-app (the only ones that serve `/v1/relay`): one
  * stream for the page, closed when the page goes away for good.
  */
-const applicationRuntime = ManagedRuntime.make(Layer.merge(BrowserHttpClient.layerFetch, BrowserCrypto.layer))
+const applicationRuntime = ManagedRuntime.make(Layer.merge(sessionCsrfLayer, BrowserCrypto.layer))
 const readToday = Effect.callback<typeof NeedsYouResult.Type, TodayReadFailed>((resume, signal) => {
   applicationRuntime.runCallback(loadToday, {
     signal,
@@ -894,7 +895,8 @@ const hubSessionActions: HubSessionActions = {
   load: runCodeRead(loadHubSession),
   logIn: runCodeRead(logInWithTailscale),
   logOut: (csrf) => runCodeRead(logOutOfHub(csrf)),
-  spendLoginCode: (code) => runCodeRead(spendLoginCode(code))
+  spendLoginCode: (code) => runCodeRead(spendLoginCode(code)),
+  csrf: sessionCsrf
 }
 
 /** The dashboard: the snapshot the hub rendered into the page, hydrated or rendered by the super-app. */

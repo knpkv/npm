@@ -7926,6 +7926,73 @@ esac
     }).pipe(Effect.scoped, provideNodeServices)
   })
 
+  // Apps get no CSRF token: a session's write to an app passes the front door only with the listener's own
+  // Origin, so a page on another port can't ride the cookie, and a write that names no Origin is refused.
+  it.effect("lets a session write to an app only from the hub's own origin, on both listeners", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-app-origin-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const hub = yield* startHub(root, join(root, "relay"), scriptedBackends("Nothing waits."))
+      const local = new URL(hub.server.url)
+      const localCookie = (yield* Effect.promise(() => localSession(local.origin, join(root, "hub-apps")))).cookie ?? ""
+      const otherPort = (origin: string) => {
+        const url = new URL(origin)
+        url.port = String(Number(url.port) + 1)
+        return url.origin
+      }
+      // The session's cookie, and the Origin when the request names one.
+      const sent = (cookie: Record<string, string>, origin: string | undefined) =>
+        origin === undefined ? cookie : { ...cookie, origin }
+      const serve = (origin: string | undefined) =>
+        Effect.promise(() =>
+          hubRequest(`${hub.serveUrl}/apps/notes/save`, {
+            method: "POST",
+            headers: sent({ host: hub.headers.host, cookie: hub.headers.cookie }, origin)
+          })
+        )
+      const loopback = (origin: string | undefined) =>
+        Effect.promise(() =>
+          new Promise<{ readonly status: number; readonly body: string }>((resolve, reject) => {
+            // fetch always names an Origin it chooses; the raw request sends exactly these headers.
+            const request = httpRequest(
+              `${local.origin}/apps/notes/save`,
+              {
+                method: "POST",
+                headers: sent({ cookie: localCookie }, origin)
+              },
+              (response) => {
+                let body = ""
+                response.setEncoding("utf8")
+                response.on("data", (chunk: string) => (body += chunk))
+                response.once("end", () => resolve({ status: response.statusCode ?? 0, body }))
+              }
+            )
+            request.once("error", reject)
+            request.end()
+          })
+        )
+      const originRequired = { error: "origin_required" }
+      const listeners: ReadonlyArray<
+        readonly [
+          string,
+          (origin: string | undefined) => Effect.Effect<{ readonly status: number; readonly body: string }>,
+          string
+        ]
+      > = [["tailnet", serve, hub.origin], ["loopback", loopback, local.origin]]
+      for (const [listener, write, own] of listeners) {
+        // The hub's own origin, without a CSRF token, reaches the apps route: no app is called notes.
+        const same = yield* write(own)
+        expect(same.status, `${listener} same origin: ${same.body}`).toBe(404)
+        expect(JSON.parse(same.body)).not.toEqual(originRequired)
+        for (const origin of [otherPort(own), undefined]) {
+          const refused = yield* write(origin)
+          expect(refused.status, `${listener} ${origin ?? "no origin"}: ${refused.body}`).toBe(403)
+          expect(JSON.parse(refused.body)).toEqual(originRequired)
+        }
+      }
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
   /** The production mount uses whois authority, never a browser-supplied login header or query. */
   it.effect("keeps Code local, read-only and caller identity sourced from authenticated whois", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-code-auth-"))

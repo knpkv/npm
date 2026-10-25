@@ -2290,8 +2290,8 @@ export const startHttpServer = async (
       )
     )
     const localLogin = await httpRuntime.runPromise(makeLocalLogin)
-    // The request's facts the gate decides on, read when it arrives.
-    const gateFacts = (request: IncomingMessage, mode: ListenerMode) => ({
+    // The request's facts the gate decides on, read when it arrives. `hubOrigin` is the listener's own origin.
+    const gateFacts = (request: IncomingMessage, mode: ListenerMode, hubOrigin: string) => ({
       method: request.method ?? "GET",
       remoteAddress: request.socket.remoteAddress,
       headerLogin: header(request, "tailscale-user-login"),
@@ -2299,7 +2299,8 @@ export const startHttpServer = async (
       csrf: header(request, csrfHeader),
       cli: cliToken !== null && presentsCliToken(header(request, cliTokenHeader), cliToken),
       fetchDest: header(request, "sec-fetch-dest"),
-      accept: header(request, "accept")
+      accept: header(request, "accept"),
+      originOk: header(request, "origin") === hubOrigin
     })
     type GateFacts = ReturnType<typeof gateFacts>
     const gateSession = (facts: GateFacts) =>
@@ -2347,7 +2348,8 @@ export const startHttpServer = async (
           principal: { _tag: "Anonymous" },
           afterLogin: null,
           document,
-          csrfOk: false
+          csrfOk: false,
+          originOk: facts.originOk
         })
       }
       const input = yield* gateInput(mode, facts, family.id === "connect.service").pipe(
@@ -2367,7 +2369,8 @@ export const startHttpServer = async (
         principal,
         afterLogin: principalAfterLogin(config, input),
         document,
-        csrfOk
+        csrfOk,
+        originOk: facts.originOk
       })
       const sessioned = (principal._tag === "Person" || principal._tag === "Local") && principal.session
       if (verdict._tag === "Pass" && sessioned && token !== undefined) {
@@ -2385,9 +2388,10 @@ export const startHttpServer = async (
       request: IncomingMessage,
       response: ServerResponse,
       mode: ListenerMode,
+      hubOrigin: string,
       pathname: string
     ): Promise<boolean> => {
-      const result = await runRequest(Effect.result(gate(gateFacts(request, mode), mode, pathname)))
+      const result = await runRequest(Effect.result(gate(gateFacts(request, mode, hubOrigin), mode, pathname)))
       if (Result.isFailure(result)) {
         json(response, 503, { error: "identity_unavailable" })
         return false
@@ -2414,6 +2418,9 @@ export const startHttpServer = async (
           return false
         case "CsrfRequired":
           json(response, 403, { error: "csrf_required" })
+          return false
+        case "OriginRequired":
+          json(response, 403, { error: "origin_required" })
           return false
         case "Unknown":
           json(response, 404, { error: "not_found" })
@@ -3284,7 +3291,9 @@ export const startHttpServer = async (
             return
           }
           // The hub's own listeners are behind login; per-host listeners keep their node checks.
-          if (listenerServesSuperapp(mode) && !(await admit(request, response, mode, url.pathname))) return
+          if (listenerServesSuperapp(mode) && !(await admit(request, response, mode, expectedOrigin(), url.pathname))) {
+            return
+          }
           // Agents report to the notification hub only; any super-app listener may read the posts back.
           const postsRead = request.method === "GET" && url.pathname === "/v1/connect/posts" &&
             listenerServesSuperapp(mode)
@@ -4827,7 +4836,9 @@ export const startHttpServer = async (
         // A browser's terminal is behind the same front door as the hub's pages; a peer's terminal route
         // admits the hub's own node, as below.
         const admitted = isServeTerminal
-          ? await runRequest(Effect.result(gate(gateFacts(request, mode), mode, url.pathname))).catch(() => null)
+          ? await runRequest(Effect.result(gate(gateFacts(request, mode, expectedOrigin()), mode, url.pathname))).catch(
+            () => null
+          )
           : Result.succeed<GateVerdict>({ _tag: "Pass" })
         // Shutdown aborted the gate, or it died: nothing can answer this socket any more.
         if (admitted === null) {

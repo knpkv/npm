@@ -1,5 +1,4 @@
 import { useAtom, useAtomSet, useAtomValue } from "@effect/atom-react"
-import { BrowserHttpClient } from "@effect/platform-browser"
 import { ConnectSurface, type ConnectAtoms } from "@knpkv/herdr-connect/surface"
 import type { ConnectAgent } from "@knpkv/herdr-connect/model"
 import { Icon } from "@knpkv/rly/foundations"
@@ -17,8 +16,9 @@ import {
 import type { NotificationState } from "./approval-app-view.js"
 import { fleetModule, moduleHref } from "./modules.js"
 import { type BlockedPushMutation, type BlockedPushSettings, PushAgentKey } from "./blocked-push-model.js"
+import { sessionCsrfLayer } from "./session-csrf.js"
 
-const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
+const browserRuntime = Atom.runtime(sessionCsrfLayer)
 const makeNotificationAtoms = (state: NotificationState | undefined, push: boolean) => ({
   device: browserRuntime.atom(state === undefined ? loadBlockedDevicePushState : Effect.succeed(state)),
   // Off the notification hub there are no settings to read; null keeps every mute control closed.

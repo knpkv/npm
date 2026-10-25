@@ -13,6 +13,7 @@ import { type ReactElement, useCallback, useEffect, useId, useRef, useState } fr
 import { createPortal } from "react-dom"
 import type { HubSessionChangeFailed, HubSessionReadFailed, HubSessionView } from "./hub-session-client.js"
 import { takeLoginFragment } from "./hub-session-client.js"
+import type { CsrfStore } from "./session-csrf.js"
 
 /** What the page needs from `/v1/session`, with the HTTP client already provided. */
 export interface HubSessionActions {
@@ -20,6 +21,8 @@ export interface HubSessionActions {
   readonly logIn: Effect.Effect<void, HubSessionChangeFailed>
   readonly logOut: (csrf: string) => Effect.Effect<void, HubSessionChangeFailed>
   readonly spendLoginCode: (code: string) => Effect.Effect<void, HubSessionChangeFailed>
+  /** Where the page's other clients find the session's CSRF token for their writes. */
+  readonly csrf: CsrfStore
 }
 
 /**
@@ -43,7 +46,9 @@ const pollMillis = 60_000
 /**
  * The page's session: read on load (after spending a `#login=` code, taken out of the address first), again
  * every minute and when the page becomes visible. A failed read keeps what the page last knew. A session that
- * lapses under an open page reloads it: the hub then serves the login gate.
+ * lapses under an open page reloads it: the hub then serves the login gate. Each read that lands also sets the
+ * page's CSRF token (`actions.csrf`): a log-in fills it, a switch to another session replaces it, and a log-out
+ * clears it as soon as the hub confirms.
  */
 export const useHubSession = (actions: HubSessionActions) => {
   const [view, setView] = useState<HubSessionView | null>(null)
@@ -59,6 +64,7 @@ export const useHubSession = (actions: HubSessionActions) => {
           onFailure: () => undefined,
           onSuccess: (next) => {
             if (!isLatest()) return
+            actions.csrf.remember(next)
             setView((previous) => {
               if (previous?.signedIn === true && !next.signedIn) window.location.reload()
               return next
@@ -111,7 +117,7 @@ export const useHubSession = (actions: HubSessionActions) => {
     logIn: () => change(actions.logIn),
     logOut: () => {
       setOpen(false)
-      if (view?.signedIn === true) change(actions.logOut(view.csrf))
+      if (view?.signedIn === true) change(actions.logOut(view.csrf).pipe(Effect.tap(Effect.sync(actions.csrf.forget))))
     }
   }
 }

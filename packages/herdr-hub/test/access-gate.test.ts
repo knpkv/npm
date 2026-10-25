@@ -27,7 +27,7 @@ const verdict = (
   method: string,
   pathname: string,
   csrfOk = true,
-  options: { readonly afterLogin?: Principal | null; readonly document?: boolean } = {}
+  options: { readonly afterLogin?: Principal | null; readonly document?: boolean; readonly originOk?: boolean } = {}
 ) => {
   const family = routeFamily(method, pathname)
   return gateVerdict(config, {
@@ -36,7 +36,8 @@ const verdict = (
     principal,
     afterLogin: options.afterLogin === undefined ? loggedIn(principal) : options.afterLogin,
     document: options.document ?? isDocument(family, method, { fetchDest: undefined, accept: undefined }),
-    csrfOk
+    csrfOk,
+    originOk: options.originOk ?? true
   })._tag
 }
 
@@ -143,6 +144,20 @@ describe("access gate", () => {
     expect(verdict(person(true), "GET", "/v1/dashboard", false)).toBe("Pass")
     expect(verdict(person(true), "POST", "/v1/session/logout", false)).toBe("Pass")
     expect(verdict({ _tag: "Cli" }, "POST", "/v1/jobs", false)).toBe("Pass")
+  })
+
+  // Apps get no CSRF token: an app's write needs the session and the hub's own Origin instead, so another
+  // loopback port (or a request with no Origin) can't ride the cookie.
+  it("lets a session write to an app only from the hub's own origin, with or without a CSRF token", () => {
+    const local: Principal = { _tag: "Local", session: true }
+    for (const principal of [person(true), local]) {
+      expect(verdict(principal, "POST", "/apps/notes/save", false)).toBe("Pass")
+      expect(verdict(principal, "POST", "/apps/notes/save", true, { originOk: false })).toBe("OriginRequired")
+      expect(verdict(principal, "GET", "/apps/notes/", false, { originOk: false })).toBe("Pass")
+    }
+    expect(verdict(person(false), "POST", "/apps/notes/save", false, { originOk: false })).toBe("LoginRequired")
+    // Elsewhere the token, not the Origin, decides.
+    expect(verdict(person(true), "POST", "/v1/push/subscriptions", false, { originOk: true })).toBe("CsrfRequired")
   })
 
   // A route no family names is refused, so a new route can't slip past the gate.
