@@ -22,11 +22,11 @@ import { UsageMovedPanel } from "../src/internal/usage-moved.js"
 import { connectModule, type ModuleViews, type ModuleDescriptor } from "../src/modules.js"
 import { SuperappShell } from "../src/superapp-view.js"
 
-const manifest = (entry = "client.js", css: ReadonlyArray<string> = []): AppManifest => ({
+const manifest = (entry = "client.js", css: ReadonlyArray<string> = [], version = "1.0.0"): AppManifest => ({
   contract: 1,
   id: AppId.make("fixture"),
   package: "@knpkv/hub-app-fixture",
-  version: "1.0.0",
+  version,
   module: {
     id: "fixture",
     label: "Fixture",
@@ -44,9 +44,9 @@ const manifest = (entry = "client.js", css: ReadonlyArray<string> = []): AppMani
   standalone: { defaultPort: 3199 }
 })
 
-const ready = (entry?: string, css?: ReadonlyArray<string>): AppState => ({
+const ready = (entry?: string, css?: ReadonlyArray<string>, version?: string): AppState => ({
   _tag: "Ready",
-  manifest: manifest(entry, css)
+  manifest: manifest(entry, css, version)
 })
 
 /** What each client did, in order, and the contexts it was given. */
@@ -153,7 +153,7 @@ describe("installed apps in the shell", () => {
       loaded.push(url)
       return Promise.resolve({ default: client("one") })
     })
-    expect(loaded).toEqual(["/apps/fixture/app/assets/client-1.js"])
+    expect(loaded).toEqual(["/apps/fixture/app/assets/client-1.js?v=1.0.0"])
     expect(events[0]).toBe("one:mount:overview")
     expect(roots[0]?.dataset.app).toBe("fixture")
     expect(section()?.textContent).toContain("one page")
@@ -168,7 +168,7 @@ describe("installed apps in the shell", () => {
       [...document.head.querySelectorAll<HTMLLinkElement>('link[data-app="fixture"]')].map((link) =>
         link.getAttribute("href")
       )
-    ).toEqual(["/apps/fixture/app/assets/client-1.css"])
+    ).toEqual(["/apps/fixture/app/assets/client-1.css?v=1.0.0"])
   })
 
   // (c) The same entry keeps its instance: navigation and module switches only update it.
@@ -271,7 +271,7 @@ describe("installed apps in the shell", () => {
   it("swaps the client and its stylesheet when the app's entry changes", async () => {
     window.history.replaceState(null, "", "/#fixture/overview")
     const { client, events } = recorder()
-    const load = (url: string) => Promise.resolve({ default: client(url.endsWith("client-2.js") ? "two" : "one") })
+    const load = (url: string) => Promise.resolve({ default: client(url.includes("client-2.js") ? "two" : "one") })
     await renderShell([ready("client-1.js", ["client-1.css"])], load)
     await renderShell([ready("client-2.js", ["client-2.css"])], load)
     expect(events).toEqual(["one:mount:overview", "one:unmount", "two:mount:overview"])
@@ -279,7 +279,43 @@ describe("installed apps in the shell", () => {
       [...document.head.querySelectorAll<HTMLLinkElement>('link[data-app="fixture"]')].map((link) =>
         link.getAttribute("href")
       )
-    ).toEqual(["/apps/fixture/app/assets/client-2.css"])
+    ).toEqual(["/apps/fixture/app/assets/client-2.css?v=1.0.0"])
+  })
+
+  // An update usually keeps its file names (Usage always ships client.js); the version alone must swap the client, and
+  // the import must not come back from the browser's module cache.
+  it("swaps the client when only the app's version changes, importing the new version's URL", async () => {
+    window.history.replaceState(null, "", "/#fixture/overview")
+    const { client, events } = recorder()
+    const loaded: Array<string> = []
+    const load = (url: string) => {
+      loaded.push(url)
+      return Promise.resolve({ default: client(url.endsWith("v=1.1.0") ? "new" : "old") })
+    }
+    await renderShell([ready("client.js", [], "1.0.0")], load)
+    await renderShell([ready("client.js", [], "1.1.0")], load)
+    expect(events).toEqual(["old:mount:overview", "old:unmount", "new:mount:overview"])
+    expect(loaded).toEqual(["/apps/fixture/app/assets/client.js?v=1.0.0", "/apps/fixture/app/assets/client.js?v=1.1.0"])
+  })
+
+  it("unmounts a client whose update throws, and shows client_failed", async () => {
+    window.history.replaceState(null, "", "/#fixture/overview")
+    const events: Array<string> = []
+    const breaking = defineAppClient({
+      contract: 1,
+      mount: () => ({
+        update: () => {
+          throw new Error("update broke")
+        },
+        unmount: () => {
+          events.push("unmount")
+        }
+      })
+    })
+    await renderShell([ready()], () => Promise.resolve({ default: breaking }))
+    await go("#fixture/detail")
+    expect(events).toEqual(["unmount"])
+    expect(section()?.textContent).toContain("Fixture couldn't be shown.")
   })
 
   // (a) An app that turns Unavailable unmounts and shows why, under its own label.

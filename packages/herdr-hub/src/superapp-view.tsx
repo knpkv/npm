@@ -245,9 +245,10 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
         const attempt = (): void => {
           const active = document.activeElement
           if (active !== null && active !== document.body && active.id !== "main") return
+          const module = CSS.escape(arrival.module)
+          const page = CSS.escape(arrival.page)
           const link = document.querySelector(
-            `[data-module="${arrival.module}"] [data-module-page="${arrival.page}"], ` +
-              `[data-module-owner="${arrival.module}"] [data-module-page="${arrival.page}"]`
+            `[data-module="${module}"] [data-module-page="${page}"], [data-module-owner="${module}"] [data-module-page="${page}"]`
           )
           if (link === null) {
             frames += 1

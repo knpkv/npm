@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
-import { superappLayout } from "../src/internal/superapp-layout.js"
+import { AppId, type AppState } from "@knpkv/hub-app"
+import { appPlacements, superappLayout } from "../src/internal/superapp-layout.js"
 
 const usage = { id: "usage", nav: { order: 30, primary: true, mobile: true } }
 
@@ -38,5 +39,21 @@ describe("superappLayout", () => {
       .toMatchObject({ mobileModules: ["connect", "fleet", "code", "usage"] })
     expect(superappLayout(["connect", "fleet", "code"], false, [usage, mobile("notes", 31), mobile("later", 90)]))
       .toMatchObject({ mobileModules: ["connect", "code", "usage", "notes"] })
+  })
+
+  // An app that has never answered has no manifest, yet keeps a nav item (its id) so its routes resolve; it sorts last
+  // and stays off the phone bar. A duplicate of a core id gets none.
+  it("places every listed app but duplicates, a never-answered one last and off the phone bar", () => {
+    const states: ReadonlyArray<AppState> = [
+      {
+        _tag: "Unavailable",
+        id: AppId.make("fresh"),
+        manifest: null,
+        reason: "starting",
+        detail: "fresh is starting."
+      },
+      { _tag: "Unavailable", id: AppId.make("connect"), manifest: null, reason: "duplicate", detail: "" }
+    ]
+    expect(appPlacements(states)).toEqual([{ id: "fresh", nav: { order: 1_000, primary: false, mobile: false } }])
   })
 })

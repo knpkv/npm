@@ -79,7 +79,12 @@ export const decodeClientModule = Schema.decodeUnknownPromise(AppClientModule)
 const importClient = (url: string): Promise<AppClientModule> =>
   import(/* @vite-ignore */ url).then((loaded) => decodeClientModule(loaded))
 
-const assetUrl = (id: string, file: string) => `/apps/${id}/app/assets/${file}`
+/**
+ * One of an app's client files. The version is a cache key only (the asset route ignores the query): an update that
+ * keeps its file names must not come back from the browser's module cache.
+ */
+const assetUrl = (id: string, file: string, version: string) =>
+  `/apps/${id}/app/assets/${file}?v=${encodeURIComponent(version)}`
 
 /** A registered app that never answered has no manifest; its nav item carries its id until it does. */
 const placeholderDescriptor = (id: string): ModuleDescriptor => ({
@@ -167,13 +172,13 @@ const AppMount = ({
     const links = manifest.client.css.map((file) => {
       const link = document.createElement("link")
       link.rel = "stylesheet"
-      link.href = assetUrl(id, file)
+      link.href = assetUrl(id, file, manifest.version)
       link.dataset.app = id
       document.head.append(link)
       return link
     })
     let live = true
-    void (options.load ?? importClient)(assetUrl(id, manifest.client.entry)).then(
+    void (options.load ?? importClient)(assetUrl(id, manifest.client.entry, manifest.version)).then(
       (loaded) => {
         const target = root.current
         const lent = portalRoot.current
@@ -222,6 +227,12 @@ const AppMount = ({
     } catch (cause) {
       mounted.current = null
       fail(new AppClientFailed({ id, stage: "update", cause }))
+      // A client that failed its update is done: let it release what it holds before the panel replaces it.
+      try {
+        current.unmount()
+      } catch (unmountCause) {
+        report(new AppClientFailed({ id, stage: "unmount", cause: unmountCause }))
+      }
     }
   }, [page, searchKey, mount.active, outlet, options.viewer, options.host])
 
@@ -258,8 +269,8 @@ const AppPage = ({
   const { client } = state.manifest
   return (
     <AppMount
-      // A new entry or stylesheet set is a new client: unmount the old instance and mount this one.
-      key={[client.entry, ...client.css].join("\n")}
+      // A new version, entry or stylesheet set is a new client: unmount the old instance and mount this one.
+      key={[state.manifest.version, client.entry, ...client.css].join("\n")}
       manifest={state.manifest}
       mount={mount}
       options={options}

@@ -3,6 +3,8 @@
  *
  * @module
  */
+import type { AppState } from "@knpkv/hub-app"
+
 const mobileOrder: ReadonlyArray<string> = ["connect", "fleet", "code"]
 const primaryOrder: ReadonlyArray<string> = ["connect", "fleet"]
 /** Destinations the phone bar holds beside More, as the design draws it. */
@@ -25,6 +27,22 @@ export interface AppPlacement<Id extends string> {
   readonly id: Id
   readonly nav: { readonly order: number; readonly primary: boolean; readonly mobile: boolean }
 }
+
+/** Where an app that has never answered goes: no manifest says otherwise, so last, and not on the phone bar. */
+const unplacedNav = { order: 1_000, primary: false, mobile: false }
+
+/**
+ * Where each listed app goes: its manifest's placement, or {@link unplacedNav} before it has answered (its nav item,
+ * named by its id, keeps its routes resolvable). A core module's duplicate gets none.
+ */
+export const appPlacements = (states: ReadonlyArray<AppState>): ReadonlyArray<AppPlacement<string>> =>
+  states.flatMap((state) =>
+    state._tag === "Ready"
+      ? [{ id: state.manifest.id, nav: state.manifest.nav }]
+      : state.reason === "duplicate"
+      ? []
+      : [{ id: state.id, nav: state.manifest?.nav ?? unplacedNav }]
+  )
 
 /** Module ids for the shell's sidebar, phone bar and primary group, each in display order. */
 export interface SuperappLayout<Id extends string> {

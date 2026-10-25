@@ -53,7 +53,7 @@ import { useHubNow } from "./hub-clock.js"
 import { answerOutcome, decidableExpiry, workRequestDecisionsFor } from "./work-decisions.js"
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
 import { SuperappShell } from "./superapp-view.js"
-import { superappLayout } from "./internal/superapp-layout.js"
+import { appPlacements, superappLayout } from "./internal/superapp-layout.js"
 import { makeFleetHubModuleViews } from "./fleet-module-view.js"
 import { TodayReadFailed } from "./today-module-view.js"
 import { makeResourcesModuleViews } from "./resources-module-view.js"
@@ -764,13 +764,7 @@ const DashboardApp = ({
   const layout = superappLayout<string>(
     [connect, fleetWithBadge, code, resources, ...sandboxes, stacks].map((view) => view.descriptor.id),
     current.approvalApp.fleet,
-    current.apps.states.flatMap((state) =>
-      state._tag === "Ready"
-        ? [{ id: state.manifest.id, nav: state.manifest.nav }]
-        : state.manifest === null || state.reason === "duplicate"
-          ? []
-          : [{ id: state.id, nav: state.manifest.nav }]
-    )
+    appPlacements(current.apps.states)
   )
   return (
     <>
