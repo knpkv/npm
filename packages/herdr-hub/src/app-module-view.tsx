@@ -194,7 +194,7 @@ const AppMount = ({
           return
         }
         // The shell's arrival focus ran before this page existed; let it land on the page's link now.
-        latest.current.header?.settleArrivalFocus(id)
+        latest.current.header?.settleArrivalFocus(id, "mount")
       },
       (cause: unknown) => {
         if (live) fail(new AppClientFailed({ id, stage: "import", cause }))
@@ -236,7 +236,7 @@ const AppMount = ({
       }
     }
     // A page this update showed renders on the client's schedule; the shell's arrival focus may have run before it.
-    latest.current.header?.settleArrivalFocus(id)
+    latest.current.header?.settleArrivalFocus(id, "update")
   }, [page, searchKey, mount.active, outlet, options.viewer, options.host])
 
   return (

@@ -295,6 +295,69 @@ describe("installed apps in the shell", () => {
     expect(document.activeElement?.getAttribute("data-module-page")).toBe("detail")
   })
 
+  // A slow first import (a phone on a slow path) still gets its arrival focus: only update-triggered settles expire.
+  it("lands arrival focus on a page whose client took longer than two seconds to load", async () => {
+    window.history.replaceState(null, "", "/#fixture/detail")
+    let arrive: (module: AppClientModuleType) => void = () => {}
+    await renderShell(
+      [ready()],
+      () =>
+        new Promise((resolve) => {
+          arrive = resolve
+        })
+    )
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2_100))
+    })
+    const linking = defineAppClient({
+      contract: 1,
+      mount: (root, context) => {
+        const link = document.createElement("a")
+        link.dataset.modulePage = context.page
+        root.append(link)
+        return { update: () => {}, unmount: () => {} }
+      }
+    })
+    await act(async () => {
+      arrive({ default: linking })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    })
+    expect(document.activeElement?.getAttribute("data-module-page")).toBe("detail")
+  }, 10_000)
+
+  // A click on the nav leaves focus on that link while the shell's arrival focus is pending; the app's own settle must
+  // not cancel the shell's attempt and then give up because focus isn't on the fallback.
+  it("moves arrival focus from the clicked nav link to an already-mounted app's page", async () => {
+    window.history.replaceState(null, "", "/#connect/overview")
+    const linking = defineAppClient({
+      contract: 1,
+      mount: (root, context) => {
+        const render = (page: string) => {
+          root.replaceChildren(
+            ...["overview", "detail"].map((id) => {
+              const link = document.createElement("a")
+              link.href = context.href?.(id) ?? ""
+              link.dataset.modulePage = id
+              link.textContent = id === page ? `${id} (current)` : id
+              return link
+            })
+          )
+        }
+        render(context.page)
+        return { update: (next) => render(next.page), unmount: () => {} }
+      }
+    })
+    await renderShell([ready()], () => Promise.resolve({ default: linking }))
+    const navLink = document.querySelector<HTMLAnchorElement>('nav[aria-label="Modules"] a[href*="#fixture/"]')
+    expect(navLink).not.toBeNull()
+    await act(async () => {
+      navLink?.focus()
+      navLink?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }))
+      await new Promise((resolve) => setTimeout(resolve, 150))
+    })
+    expect(document.activeElement?.getAttribute("data-module-page")).toBe("overview")
+  })
+
   // (b) A new entry is a new client: the old one unmounts and loses its CSS before the new one mounts.
   it("swaps the client and its stylesheet when the app's entry changes", async () => {
     window.history.replaceState(null, "", "/#fixture/overview")

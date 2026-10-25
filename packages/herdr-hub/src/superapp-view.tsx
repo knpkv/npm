@@ -240,33 +240,43 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     () => ({
       host,
       outlet: groupedHeaderOutlet,
-      settleArrivalFocus: (module: string) => {
+      settleArrivalFocus: (module: string, after: "mount" | "update") => {
         const arrival = pendingArrival.current
-        // Only a recent arrival: a later update must not pull focus to the page after the reader has moved on.
-        if (arrival === null || arrival.module !== module || window.performance.now() - arrival.at > 2_000) return
+        if (arrival === null || arrival.module !== module) return
+        if (after === "update" && window.performance.now() - arrival.at > 2_000) return
         pendingArrival.current = null
-        cancelLocationFocus.current?.()
-        // The client renders on its own schedule, so wait (up to a second) for the page's link to exist; give
-        // up as soon as focus has moved off the shell's fallback.
+        // The shell's own attempt (a frame after the route painted) goes first and is never cancelled here: it
+        // focuses the page when the page is already there. This one runs after it and acts only if focus fell to the
+        // shell's fallback (<main> or the body), waiting up to a second for the page's link the client renders on its
+        // own schedule. Focus anywhere else means the shell, or the reader, already placed it.
         let frame = 0
+        let checks = 0
         const deadline = window.performance.now() + 1_000
         let cancelFocus: (() => void) | undefined
         const attempt = (): void => {
+          checks += 1
           const active = document.activeElement
-          if (active !== null && active !== document.body && active.id !== "main") return
-          const module = quotedAttribute(arrival.module)
-          const page = quotedAttribute(arrival.page)
-          const link = document.querySelector(
-            `[data-module="${module}"] [data-module-page="${page}"], [data-module-owner="${module}"] [data-module-page="${page}"]`
-          )
-          if (link === null) {
-            if (window.performance.now() < deadline) frame = window.requestAnimationFrame(attempt)
+          const onFallback = active === null || active === document.body || active.id === "main"
+          if (onFallback) {
+            const module = quotedAttribute(arrival.module)
+            const page = quotedAttribute(arrival.page)
+            const link = document.querySelector(
+              `[data-module="${module}"] [data-module-page="${page}"], [data-module-owner="${module}"] [data-module-page="${page}"]`
+            )
+            if (link !== null) {
+              cancelFocus = focusModulePage(arrival.module, arrival.page, false, active, arrival.ring)
+              return
+            }
+          } else if (checks > 2) {
+            // The shell's attempt has had its frame and focus rests on something real: nothing to settle.
             return
           }
-          cancelFocus = focusModulePage(arrival.module, arrival.page, false, active, arrival.ring)
+          if (window.performance.now() < deadline) frame = window.requestAnimationFrame(attempt)
         }
-        attempt()
+        frame = window.requestAnimationFrame(attempt)
+        const previous = cancelLocationFocus.current
         cancelLocationFocus.current = () => {
+          previous?.()
           window.cancelAnimationFrame(frame)
           cancelFocus?.()
         }

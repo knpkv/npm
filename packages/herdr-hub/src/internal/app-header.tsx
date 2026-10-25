@@ -18,9 +18,11 @@ export interface ShellHeader {
   /**
    * A module whose page arrives after the shell's arrival focus ran (an app's client loads asynchronously) calls this
    * once its page is in the document: if focus still rests on the shell's fallback (`<main>` or the body), the shell
-   * focuses that page's link or tab as it meant to.
+   * focuses that page's link or tab as it meant to. After the client's first mount it always may (a slow import is
+   * still this arrival); after an update only within two seconds of the arrival, so a later update can't pull focus
+   * back once the reader has moved on.
    */
-  readonly settleArrivalFocus: (module: string) => void
+  readonly settleArrivalFocus: (module: string, after: "mount" | "update") => void
 }
 
 export const ShellHeaderContext = createContext<ShellHeader | null>(null)
