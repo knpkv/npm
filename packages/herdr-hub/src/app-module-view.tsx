@@ -189,11 +189,12 @@ const AppMount = ({
         }
         try {
           mounted.current = loaded.default.mount(target, context(lent))
-          // The shell's arrival focus ran before this page existed; let it land on the page's link now.
-          latest.current.header?.settleArrivalFocus(id)
         } catch (cause) {
           fail(new AppClientFailed({ id, stage: "mount", cause }))
+          return
         }
+        // The shell's arrival focus ran before this page existed; let it land on the page's link now.
+        latest.current.header?.settleArrivalFocus(id)
       },
       (cause: unknown) => {
         if (live) fail(new AppClientFailed({ id, stage: "import", cause }))
@@ -234,6 +235,8 @@ const AppMount = ({
         report(new AppClientFailed({ id, stage: "unmount", cause: unmountCause }))
       }
     }
+    // A page this update showed renders on the client's schedule; the shell's arrival focus may have run before it.
+    latest.current.header?.settleArrivalFocus(id)
   }, [page, searchKey, mount.active, outlet, options.viewer, options.host])
 
   return (

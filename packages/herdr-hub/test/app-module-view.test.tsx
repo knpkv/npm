@@ -267,6 +267,34 @@ describe("installed apps in the shell", () => {
     expect(document.activeElement?.getAttribute("data-module-page")).toBe("detail")
   })
 
+  // An app already mounted while hidden renders the page it's shown on after the update, on its own schedule; the
+  // shell's arrival focus must still land on that page's link rather than stay on its fallback.
+  it("lands arrival focus on a hidden app's page once it renders after the update", async () => {
+    window.history.replaceState(null, "", "/#connect/overview")
+    const lateLinking = defineAppClient({
+      contract: 1,
+      mount: (root) => ({
+        update: (next) => {
+          setTimeout(() => {
+            if (!next.active || root.querySelector(`[data-module-page="${next.page}"]`) !== null) return
+            const link = document.createElement("a")
+            link.href = next.href?.(next.page) ?? ""
+            link.dataset.modulePage = next.page
+            link.textContent = next.page
+            root.append(link)
+          }, 40)
+        },
+        unmount: () => {}
+      })
+    })
+    await renderShell([ready()], () => Promise.resolve({ default: lateLinking }))
+    await go("#fixture/detail")
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    })
+    expect(document.activeElement?.getAttribute("data-module-page")).toBe("detail")
+  })
+
   // (b) A new entry is a new client: the old one unmounts and loses its CSS before the new one mounts.
   it("swaps the client and its stylesheet when the app's entry changes", async () => {
     window.history.replaceState(null, "", "/#fixture/overview")

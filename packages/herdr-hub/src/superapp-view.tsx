@@ -41,6 +41,9 @@ interface ShellLocation {
   readonly focus: "deferred" | "history" | "page" | "search" | null
 }
 
+/** `value` for a double-quoted attribute selector: a quote or backslash in it can't end the string. */
+const quotedAttribute = (value: string): string => value.replace(/["\\]/g, "\\$&")
+
 const ShellHistoryEntry = Schema.Struct({ openedFrom: Schema.String, document: Schema.String })
 
 /** Preserve other history owners' object keys while validating our own record separately. */
@@ -226,7 +229,12 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   const [announcementOutlet, setAnnouncementOutlet] = useState<HTMLElement | null>(null)
   const [groupedHeaderOutlet, setGroupedHeaderOutlet] = useState<HTMLElement | null>(null)
   // The last page arrival's focus request, for a module whose page arrives later (see settleArrivalFocus).
-  const pendingArrival = useRef<{ readonly module: string; readonly page: string; readonly ring: boolean } | null>(null)
+  const pendingArrival = useRef<{
+    readonly module: string
+    readonly page: string
+    readonly ring: boolean
+    readonly at: number
+  } | null>(null)
   const cancelLocationFocus = useRef<(() => void) | null>(null)
   const shellHeader = useMemo(
     () => ({
@@ -234,25 +242,25 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
       outlet: groupedHeaderOutlet,
       settleArrivalFocus: (module: string) => {
         const arrival = pendingArrival.current
-        if (arrival === null || arrival.module !== module) return
+        // Only a recent arrival: a later update must not pull focus to the page after the reader has moved on.
+        if (arrival === null || arrival.module !== module || window.performance.now() - arrival.at > 2_000) return
         pendingArrival.current = null
         cancelLocationFocus.current?.()
-        // The client renders on its own schedule, so wait (up to about a second) for the page's link to exist; give
+        // The client renders on its own schedule, so wait (up to a second) for the page's link to exist; give
         // up as soon as focus has moved off the shell's fallback.
         let frame = 0
-        let frames = 0
+        const deadline = window.performance.now() + 1_000
         let cancelFocus: (() => void) | undefined
         const attempt = (): void => {
           const active = document.activeElement
           if (active !== null && active !== document.body && active.id !== "main") return
-          const module = CSS.escape(arrival.module)
-          const page = CSS.escape(arrival.page)
+          const module = quotedAttribute(arrival.module)
+          const page = quotedAttribute(arrival.page)
           const link = document.querySelector(
             `[data-module="${module}"] [data-module-page="${page}"], [data-module-owner="${module}"] [data-module-page="${page}"]`
           )
           if (link === null) {
-            frames += 1
-            if (frames < 60) frame = window.requestAnimationFrame(attempt)
+            if (window.performance.now() < deadline) frame = window.requestAnimationFrame(attempt)
             return
           }
           cancelFocus = focusModulePage(arrival.module, arrival.page, false, active, arrival.ring)
@@ -374,7 +382,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     }
     pendingArrival.current =
       location.focus === "page" || location.focus === "history"
-        ? { module: location.destination.module, page: location.destination.page, ring }
+        ? { module: location.destination.module, page: location.destination.page, ring, at: window.performance.now() }
         : null
     if (location.focus === "page" || location.focus === "history")
       cancelLocationFocus.current = focusModulePage(
