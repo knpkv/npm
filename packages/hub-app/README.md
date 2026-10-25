@@ -57,8 +57,10 @@ loaded client module with `AppClientModule` before it mounts it.
 - `relayPost(kind, text)`: a Relay post as that caller, or as the app outside a request.
 
 Attached, the hub reads the manifest from the listening app, so a call made while the handler layer is still being
-built (before the app listens) is answered `503 unavailable` and fails with `ShellServiceRefused`. Call services from
-route handlers, or behind `Effect.cached` on first use, never while building the layer.
+built (before the app listens) is answered `503 unavailable`: `host` fails with `ShellServiceUnavailable("hub_down")`;
+`fleetRead` and `relayPost` fail with `ShellServiceRefused("unavailable")`; `submitJob` needs a request's grant, so
+outside a request it fails `GrantInvalid` regardless. Call services from route handlers, or behind a cache filled on
+first successful use, never while building the layer.
 
 Standalone, every service but `host` fails with `ShellServiceUnavailable("standalone")`; a service the manifest
 doesn't declare fails with `undeclared`.
