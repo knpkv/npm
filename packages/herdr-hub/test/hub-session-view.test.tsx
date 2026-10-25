@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { renderToStaticMarkup } from "react-dom/server"
 import type { HubSessionView } from "../src/hub-session-client.js"
-import { SessionControl, SessionDetails, TailscaleLoginCard } from "../src/hub-session-view.js"
+import { latestOnly, SessionControl, SessionDetails, TailscaleLoginCard } from "../src/hub-session-view.js"
 
 const until = Date.UTC(2026, 9, 25, 21, 5)
 const csrf = "b".repeat(64)
@@ -122,5 +122,19 @@ describe("Tailscale login card", () => {
         <TailscaleLoginCard view={{ signedIn: false, kind: "local" }} busy={false} onLogIn={() => undefined} />
       )
     ).toBe("")
+  })
+})
+
+describe("latest read wins", () => {
+  // A minute's read can overlap the read after a log-in or log-out; the older one must not land last.
+  it("applies only the result of the latest read started", () => {
+    const latest = latestOnly()
+    const first = latest.begin()
+    const second = latest.begin()
+    expect(second()).toBe(true)
+    expect(first()).toBe(false)
+    const third = latest.begin()
+    expect(second()).toBe(false)
+    expect(third()).toBe(true)
   })
 })

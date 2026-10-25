@@ -802,7 +802,8 @@ const DashboardApp = ({
               : { access: onLoopback() ? "loopback" : "tailscale", connection: "connected" }
           }
           sessionControl={
-            hubSession.view === null ? null : (
+            // A local page without a session draws no control, so the shell keeps its own session line.
+            hubSession.view === null || (!hubSession.view.signedIn && hubSession.view.kind === "local") ? null : (
               <SessionControl
                 view={hubSession.view}
                 open={hubSession.open}

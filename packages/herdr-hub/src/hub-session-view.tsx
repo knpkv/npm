@@ -27,6 +27,21 @@ export interface HubSessionActions {
   readonly spendLoginCode: (code: string) => Effect.Effect<void, HubSessionChangeFailed>
 }
 
+/**
+ * Orders overlapping reads: `begin` starts one and returns whether it is still the latest started, so an
+ * older read that finishes last doesn't replace a newer result.
+ */
+export const latestOnly = () => {
+  let started = 0
+  return {
+    begin: () => {
+      started += 1
+      const mine = started
+      return () => mine === started
+    }
+  }
+}
+
 /** How often a visible page reads its session again; each read renews a sliding session on the hub. */
 const pollMillis = 60_000
 
@@ -38,11 +53,16 @@ export const useHubSession = (actions: HubSessionActions) => {
   const [view, setView] = useState<HubSessionView | null>(null)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
+  const [reads] = useState(latestOnly)
   const refresh = useCallback(() => {
+    // Reads overlap (the minute's read, the one after a log-in): only the latest one started may land.
+    const isLatest = reads.begin()
     void Effect.runPromise(
-      actions.load.pipe(Effect.match({ onFailure: () => undefined, onSuccess: (next) => setView(next) }))
+      actions.load.pipe(
+        Effect.match({ onFailure: () => undefined, onSuccess: (next) => (isLatest() ? setView(next) : undefined) })
+      )
     )
-  }, [actions])
+  }, [actions, reads])
   useEffect(() => {
     const code = takeLoginFragment(window.location, window.history)
     void Effect.runPromise(
