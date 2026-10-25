@@ -6,7 +6,8 @@
  * projection and observed facts stay in `model.ts`/`projection.ts`.
  *
  * A goal needs the viewer when it has an open request: someone asked for an approval only a
- * person can give. Blocked and finished follow the displayed state: the observed overlay's when it
+ * person can give. A goal in review or blocked with no update for three days is stuck: nobody is
+ * moving it, so it is listed right after the ones that need the viewer. Blocked and finished follow the displayed state: the observed overlay's when it
  * has one (a merged pull request is done, a closed one abandoned), else the recorded state. Done
  * counts goals that finished within 24 hours of the snapshot (the pull request's close time when
  * that is what finished them, else the goal's last update), labelled as such, never as "since
@@ -20,11 +21,15 @@ const DAY_MS = 86_400_000
 /** How long a finished goal stays in the "Finished in the last 24 hours" group. */
 export const workTriageDoneWindowMs = DAY_MS
 
+/** How long a goal in review or blocked may go without an update before it counts as stuck. */
+export const workTriageStuckAfterMs = 3 * DAY_MS
+
 /** The groups, in reading order. */
-export type WorkTriageGroup = "needs-you" | "blocked" | "moving" | "planned" | "done" | "earlier"
+export type WorkTriageGroup = "needs-you" | "stuck" | "blocked" | "moving" | "planned" | "done" | "earlier"
 
 export const workTriageGroups: ReadonlyArray<WorkTriageGroup> = [
   "needs-you",
+  "stuck",
   "blocked",
   "moving",
   "planned",
@@ -48,6 +53,7 @@ export type WorkTriageSummary =
   | {
     readonly _tag: "Attention"
     readonly needsYou: number
+    readonly stuck: number
     readonly blocked: number
     /** The request waiting longest, when one is open. */
     readonly oldestRequest: { readonly goal: WorkGoal; readonly request: WorkRequest } | null
@@ -84,15 +90,20 @@ const openRequestsOf = (goal: WorkGoal): ReadonlyArray<WorkRequest> =>
 /**
  * One group per goal, first match wins. An open request outranks every state, so a blocked goal
  * with an open request is in "needs you" and not in the blocked count. A request without an
- * approval target still counts: a person must act, even when the hub link is missing.
+ * approval target still counts: a person must act, even when the hub link is missing. Stuck
+ * outranks blocked and moving, from exactly `workTriageStuckAfterMs` since the goal's last update.
  */
 const groupOf = (
+  goal: WorkGoal,
   finishedAt: number,
   displayState: WorkDisplayState,
   openRequests: ReadonlyArray<WorkRequest>,
   asOf: number
 ): WorkTriageGroup => {
   if (openRequests.length > 0) return "needs-you"
+  if ((displayState === "review" || displayState === "blocked") && asOf - goal.updatedAt >= workTriageStuckAfterMs) {
+    return "stuck"
+  }
   if (displayState === "blocked") return "blocked"
   if (terminalState[displayState]) return asOf - finishedAt <= workTriageDoneWindowMs ? "done" : "earlier"
   // Not started yet: listed after the work that is moving, never counted as moving.
@@ -100,13 +111,19 @@ const groupOf = (
   return "moving"
 }
 
-const groupOrder = { "needs-you": 0, blocked: 1, moving: 2, planned: 3, done: 4, earlier: 5 } satisfies Readonly<
-  Record<WorkTriageGroup, number>
->
+const groupOrder = {
+  "needs-you": 0,
+  stuck: 1,
+  blocked: 2,
+  moving: 3,
+  planned: 4,
+  done: 5,
+  earlier: 6
+} satisfies Readonly<Record<WorkTriageGroup, number>>
 
 /**
- * Within "needs you", the oldest open request first; elsewhere, the most recently updated goal
- * first. Ties keep the snapshot's own order, so the order is stable across polls.
+ * Within "needs you", the oldest open request first; within "stuck", the longest without an update
+ * first; elsewhere, the most recently updated goal first. Ties keep the snapshot's own order, so the order is stable across polls.
  */
 const compareRows = (left: WorkTriageRow, right: WorkTriageRow): number => {
   const byGroup = groupOrder[left.group] - groupOrder[right.group]
@@ -114,6 +131,9 @@ const compareRows = (left: WorkTriageRow, right: WorkTriageRow): number => {
   if (left.group === "needs-you") {
     const byRequest = (left.openRequests[0]?.requestedAt ?? 0) - (right.openRequests[0]?.requestedAt ?? 0)
     if (byRequest !== 0) return byRequest
+  } else if (left.group === "stuck") {
+    const byUpdate = left.goal.updatedAt - right.goal.updatedAt
+    if (byUpdate !== 0) return byUpdate
   } else {
     const byUpdate = right.goal.updatedAt - left.goal.updatedAt
     if (byUpdate !== 0) return byUpdate
@@ -136,15 +156,16 @@ export const workTriage = (snapshot: Pick<WorkSnapshot, "asOf" | "goals" | "obse
       return {
         displayState,
         goal,
-        group: groupOf(workGoalFinishedAt(goal, observed), displayState, openRequests, snapshot.asOf),
+        group: groupOf(goal, workGoalFinishedAt(goal, observed), displayState, openRequests, snapshot.asOf),
         index,
         openRequests
       }
     })
     .toSorted(compareRows)
   const needsYou = rows.filter((row) => row.group === "needs-you")
+  const stuck = rows.filter((row) => row.group === "stuck").length
   const blocked = rows.filter((row) => row.group === "blocked").length
-  if (needsYou.length > 0 || blocked > 0) {
+  if (needsYou.length > 0 || stuck > 0 || blocked > 0) {
     const first = needsYou[0]
     const request = first?.openRequests[0]
     return {
@@ -153,7 +174,8 @@ export const workTriage = (snapshot: Pick<WorkSnapshot, "asOf" | "goals" | "obse
         _tag: "Attention",
         blocked,
         needsYou: needsYou.length,
-        oldestRequest: first === undefined || request === undefined ? null : { goal: first.goal, request }
+        oldestRequest: first === undefined || request === undefined ? null : { goal: first.goal, request },
+        stuck
       }
     }
   }
@@ -170,30 +192,62 @@ const plural = (count: number, one: string, many: string): string => `${count} $
  */
 export type WorkTriageTense = "present" | "past"
 
+/** A count the sentence names after its lead, with the state ink it is shown in. */
+export interface WorkTriageCount {
+  readonly tone: "blocked" | "held"
+  readonly word: string
+}
+
+/** The sentence in parts: its lead, then the counts it names, joined with ", ". */
+export interface WorkTriageSentenceParts {
+  readonly lead: string
+  readonly counts: ReadonlyArray<WorkTriageCount>
+}
+
 /**
- * The summary as its one sentence: "3 goals need you, 2 blocked", "Nothing needs you", "No goals
- * yet"; in the past tense "3 goals needed you, 2 blocked", "Nothing needed you", "No goals".
+ * The summary's sentence in parts, so a view can ink each count without parsing the text. Blocked
+ * and stuck counts are named only when they are not zero.
  */
-export const workTriageSentence = (summary: WorkTriageSummary, tense: WorkTriageTense = "present"): string => {
+export const workTriageSentenceParts = (
+  summary: WorkTriageSummary,
+  tense: WorkTriageTense = "present"
+): WorkTriageSentenceParts => {
   const [one, many, nothing] = tense === "present"
     ? ["goal needs", "goals need", "Nothing needs you"]
     : ["goal needed", "goals needed", "Nothing needed you"]
   switch (summary._tag) {
-    case "Attention":
-      if (summary.needsYou === 0) return `${nothing}, ${summary.blocked} blocked`
-      return summary.blocked === 0
-        ? `${plural(summary.needsYou, one, many)} you`
-        : `${plural(summary.needsYou, one, many)} you, ${summary.blocked} blocked`
+    case "Attention": {
+      const blocked: ReadonlyArray<WorkTriageCount> = summary.blocked === 0
+        ? []
+        : [{ tone: "blocked", word: `${summary.blocked} blocked` }]
+      const stuck: ReadonlyArray<WorkTriageCount> = summary.stuck === 0
+        ? []
+        : [{ tone: "held", word: `${summary.stuck} stuck` }]
+      return {
+        counts: [...blocked, ...stuck],
+        lead: summary.needsYou === 0 ? nothing : `${plural(summary.needsYou, one, many)} you`
+      }
+    }
     case "Clear":
-      return nothing
+      return { counts: [], lead: nothing }
     case "Empty":
-      return tense === "present" ? "No goals yet" : "No goals"
+      return { counts: [], lead: tense === "present" ? "No goals yet" : "No goals" }
   }
+}
+
+/**
+ * The summary as its one sentence: "3 goals need you, 1 blocked, 2 stuck", "Nothing needs you",
+ * "No goals yet"; in the past tense "3 goals needed you, 2 blocked", "Nothing needed you", "No goals".
+ */
+export const workTriageSentence = (summary: WorkTriageSummary, tense: WorkTriageTense = "present"): string => {
+  const { counts, lead } = workTriageSentenceParts(summary, tense)
+  return [lead, ...counts.map(({ word }) => word)].join(", ")
 }
 
 /** Group titles as the tab shows them. */
 export const workTriageGroupTitle = {
   "needs-you": "Needs you",
+  stuck: "Stuck",
   blocked: "Blocked",
   moving: "Moving",
   planned: "Not started",

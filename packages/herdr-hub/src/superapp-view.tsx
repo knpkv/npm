@@ -142,6 +142,7 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   primaryModules,
   relay,
   session,
+  sessionControl = null,
   standalone = false,
   terminalOwnsKeys = false
 }: {
@@ -159,6 +160,8 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   /** Defaults false. An active connected Connect terminal reserves summon keys and hides/inerts shell chrome until it exits. Home directory itself does neither. */
   readonly terminalOwnsKeys?: boolean
   readonly session: SuperappSession
+  /** Who is logged in (page 22); replaces the session line when present. Null keeps the session line. */
+  readonly sessionControl?: ReactNode
   readonly notifications: ReactNode
   readonly relay?: HubRelayConversation
   /**
@@ -727,43 +730,45 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
       >
         <ShellIcon name="host" /> Settings
       </button>
-      <div className="superapp-session" data-state={session.connection}>
-        <span className="superapp-session-avatar" aria-hidden="true">
-          <ShellIcon name="host" />
-        </span>
-        <span aria-hidden="true">
-          Session on {host}
-          <small>
-            {session.connection === "connected" ? (
-              session.access === "loopback" ? (
-                "Local access"
+      {sessionControl ?? (
+        <div className="superapp-session" data-state={session.connection}>
+          <span className="superapp-session-avatar" aria-hidden="true">
+            <ShellIcon name="host" />
+          </span>
+          <span aria-hidden="true">
+            Session on {host}
+            <small>
+              {session.connection === "connected" ? (
+                session.access === "loopback" ? (
+                  "Local access"
+                ) : (
+                  "Tailscale access"
+                )
+              ) : session.connection === "stale" ? (
+                <>
+                  Reconnecting, last seen{" "}
+                  <time dateTime={new Date(session.observedAt).toISOString()}>
+                    {dashboardRefreshTime(session.observedAt)}
+                  </time>
+                </>
               ) : (
-                "Tailscale access"
-              )
-            ) : session.connection === "stale" ? (
-              <>
-                Reconnecting, last seen{" "}
-                <time dateTime={new Date(session.observedAt).toISOString()}>
-                  {dashboardRefreshTime(session.observedAt)}
-                </time>
-              </>
-            ) : (
-              "Hub not reachable"
-            )}
-          </small>
-        </span>
-        <span className="superapp-session-announcement">
-          Session on {host}.{" "}
-          {session.connection === "connected"
-            ? `${session.access === "loopback" ? "Local access" : "Tailscale access"}, connected.`
-            : session.connection === "stale"
-              ? `Reconnecting; last seen ${dashboardRefreshTime(session.observedAt)}.`
-              : "Hub not reachable."}
-        </span>
-        {session.connection === "connected" ? (
-          <span className="superapp-session-online" data-state="connected" aria-hidden="true" />
-        ) : null}
-      </div>
+                "Hub not reachable"
+              )}
+            </small>
+          </span>
+          <span className="superapp-session-announcement">
+            Session on {host}.{" "}
+            {session.connection === "connected"
+              ? `${session.access === "loopback" ? "Local access" : "Tailscale access"}, connected.`
+              : session.connection === "stale"
+                ? `Reconnecting; last seen ${dashboardRefreshTime(session.observedAt)}.`
+                : "Hub not reachable."}
+          </span>
+          {session.connection === "connected" ? (
+            <span className="superapp-session-online" data-state="connected" aria-hidden="true" />
+          ) : null}
+        </div>
+      )}
     </nav>
   )
   return (

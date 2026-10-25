@@ -1480,6 +1480,1257 @@
           }
         }
       }
+    },
+    "needsYou": {
+      "meta": {
+        "about": "Synthetic fixture for 23 Needs you, Fleet\u2019s landing that replaces the Approvals tab. One inbox for everything that waits on you, in four groups (Expiring, Failed after you acted, Blocked on you, Stuck goals), then Done and decided, folded. Within a group, oldest or soonest to expire first. The tab count is every row in the inbox. All data is invented. Times are en-GB, 24-hour.",
+        "locale": "en-GB",
+        "now": "13:47",
+        "defaultState": "populated",
+        "source": "23 Needs you.dc.html",
+        "reuses": [
+          "data.fleet.shell.hubHost",
+          "data.shellStandalone.states.standalone-home.shell.hosts.label",
+          "data.identity.person",
+          "data.identity.cards.loopback",
+          "data.identity.sheet"
+        ]
+      },
+      "shell": {
+        "title": "Needs you",
+        "crumb": "Fleet",
+        "tabs": [
+          {
+            "id": "needs-you",
+            "name": "Needs you"
+          },
+          {
+            "id": "connect",
+            "name": "Connect"
+          },
+          {
+            "id": "work",
+            "name": "Work"
+          },
+          {
+            "id": "usage",
+            "name": "Usage"
+          }
+        ],
+        "current": "needs-you",
+        "pills": {
+          "all": "3 hosts connected",
+          "partial": "2 of 3 hosts connected",
+          "hubDown": "Hub not answering"
+        }
+      },
+      "groups": {
+        "expiring": "Expiring",
+        "failed": "Failed after you acted",
+        "blocked": "Blocked on you",
+        "stuck": "Stuck goals"
+      },
+      "rows": {
+        "pins": {
+          "kind": "request",
+          "agent": "coord",
+          "host": "atlas",
+          "title": "Apply the new pins on atlas",
+          "meta": "nix.apply \u00b7 atlas \u00b7 coord asks",
+          "clock": "3m 12s left",
+          "at": "Expires 13:50"
+        },
+        "batch": {
+          "kind": "batch",
+          "jobKind": "work.abandon",
+          "agent": "coord",
+          "host": "atlas",
+          "title": "10 goals to abandon",
+          "meta": "Abandon Work goal \u00b7 atlas \u00b7 coord asks",
+          "clock": "14m left",
+          "at": "Expires 14:01",
+          "show": "Show 10 goals",
+          "hide": "Hide goals",
+          "approveAll": "Approve all 10",
+          "items": [
+            {
+              "title": "Split the Button docs into variants",
+              "meta": "ds-rly \u00b7 in review since 2 Oct"
+            },
+            {
+              "title": "Audit focus rings in the dark theme",
+              "meta": "ds-rly \u00b7 in review since 3 Oct"
+            },
+            {
+              "title": "Retire the old Notice tones",
+              "meta": "ds-rly \u00b7 in review since 4 Oct"
+            },
+            {
+              "title": "Port Tabs to the owned API",
+              "meta": "ds-rly \u00b7 in review since 5 Oct"
+            },
+            {
+              "title": "Weekly token export",
+              "meta": "rev-usage \u00b7 in review since 2 Oct"
+            },
+            {
+              "title": "Per-model breakdown for birch",
+              "meta": "rev-usage \u00b7 in review since 3 Oct"
+            },
+            {
+              "title": "Backfill September readings",
+              "meta": "rev-usage \u00b7 in review since 4 Oct"
+            },
+            {
+              "title": "Mirror the 2026Q2 branch",
+              "meta": "pkgsrc \u00b7 in review since 5 Oct"
+            },
+            {
+              "title": "Drop the i386 build",
+              "meta": "pkgsrc \u00b7 in review since 2 Oct"
+            },
+            {
+              "title": "Pin the bootstrap kit",
+              "meta": "pkgsrc \u00b7 in review since 3 Oct"
+            }
+          ]
+        },
+        "publish": {
+          "kind": "request",
+          "agent": "release",
+          "host": "atlas",
+          "title": "Publish herdr 0.18",
+          "meta": "packages.publish \u00b7 atlas \u00b7 release asks",
+          "clock": "21m left",
+          "at": "Expires 14:08"
+        },
+        "hostStatus": {
+          "kind": "failed",
+          "title": "Check host status across the fleet",
+          "reason": "The coordinator couldn\u2019t read host status",
+          "meta": "failed 10:20 \u00b7 asked 6 times today"
+        },
+        "registry": {
+          "kind": "failed",
+          "title": "Publish herdr 0.17.2",
+          "reason": "The package registry didn\u2019t answer in time",
+          "meta": "failed 11:05 \u00b7 you approved it at 11:02"
+        },
+        "pinsFailed": {
+          "kind": "failed",
+          "title": "Apply the new pins on atlas",
+          "reason": "sudo needed a password on atlas",
+          "meta": "failed 10:06 \u00b7 main has moved since (4c1e2a7 \u2192 9f03b6d)",
+          "alt": "Apply main instead"
+        },
+        "blocked": {
+          "kind": "blocked",
+          "agent": "rev-usage",
+          "host": "birch",
+          "title": "rev-usage \u00b7 birch",
+          "quote": "\u201cThe backup check needs a writable test directory. Can you reassign this?\u201d",
+          "meta": "waiting 18 min"
+        },
+        "stuck": {
+          "kind": "stuck",
+          "title": "36 goals in review, no update for 3+ days",
+          "meta": "ds-rly 15 \u00b7 rev-usage 12 \u00b7 pkgsrc 9",
+          "count": "36"
+        },
+        "resent": {
+          "kind": "request",
+          "agent": "coord",
+          "host": "atlas",
+          "title": "Check host status across the fleet",
+          "meta": "agent.delegate \u00b7 atlas \u00b7 you asked \u00b7 sent again 10:31",
+          "clock": "9m 40s left",
+          "at": "Expires 13:57"
+        }
+      },
+      "actions": {
+        "approve": "Approve",
+        "reject": "Reject",
+        "tryAgain": "Try again",
+        "reply": "Reply",
+        "openConnect": "Open in Connect",
+        "openWork": "Open in Work"
+      },
+      "labels": {
+        "failed": "Failed",
+        "blocked": "Blocked"
+      },
+      "done": {
+        "title": "Done and decided",
+        "rows": [
+          {
+            "title": "Check Nix configuration",
+            "meta": "approved by Mira \u00b7 12 min ago",
+            "label": "Succeeded",
+            "tone": "positive",
+            "icon": "check"
+          },
+          {
+            "title": "Admit old migration lane",
+            "meta": "2 h ago",
+            "label": "Expired, nothing applied",
+            "tone": "neutral",
+            "icon": "minus",
+            "action": "Ask again"
+          },
+          {
+            "title": "10 \u00d7 Abandon Work goal",
+            "meta": "approved \u00b7 8d ago",
+            "label": "Succeeded",
+            "tone": "positive",
+            "icon": "check"
+          }
+        ],
+        "dismissed": {
+          "title": "Check host status across the fleet",
+          "meta": "10:32",
+          "label": "Dismissed",
+          "tone": "neutral",
+          "icon": "minus",
+          "action": "Undo"
+        }
+      },
+      "empty": {
+        "title": "Nothing needs you",
+        "lead": "Last decision: ",
+        "link": "Apply the new pins on cedar",
+        "rest": ", approved 2d ago"
+      },
+      "lines": {
+        "cannotApprove": "Approve on mira-phone. Requests also notify you there.",
+        "hostOffline": "cedar offline \u00b7 last known 13:47"
+      },
+      "notices": {
+        "hubDown": {
+          "tone": "critical",
+          "role": "alert",
+          "text": "Couldn\u2019t reach the hub. Showing what was here at 13:47.",
+          "button": "Try again"
+        },
+        "hostOffline": {
+          "tone": "caution",
+          "role": "status",
+          "text": "cedar didn\u2019t answer since 13:47; its requests may be missing."
+        },
+        "notificationsOff": {
+          "tone": "caution",
+          "role": "status",
+          "text": "Notifications are off on this device. 4 requests expired this week.",
+          "button": "Turn on"
+        },
+        "sentAgain": {
+          "tone": "neutral",
+          "role": "status",
+          "text": "Sent again. It needs your approval."
+        },
+        "dismissed": {
+          "tone": "neutral",
+          "role": "status",
+          "text": "Dismissed. It stays in Done and decided."
+        }
+      },
+      "batchSheet": {
+        "title": "Approve 10 requests?",
+        "line": "Abandon Work goal \u00d7 10 \u00b7 atlas \u00b7 coord asks",
+        "listLabel": "The 10 goals",
+        "foot": "Expires in 14m",
+        "approve": "Approve all 10",
+        "cancel": "Cancel"
+      },
+      "states": {
+        "populated": {
+          "page": "23a",
+          "name": "Populated",
+          "count": "6",
+          "countAria": "6 need you",
+          "pill": "all",
+          "groups": [
+            [
+              "expiring",
+              [
+                "pins",
+                "batch"
+              ]
+            ],
+            [
+              "failed",
+              [
+                "hostStatus",
+                "registry"
+              ]
+            ],
+            [
+              "blocked",
+              [
+                "blocked"
+              ]
+            ],
+            [
+              "stuck",
+              [
+                "stuck"
+              ]
+            ]
+          ],
+          "doneCount": "3"
+        },
+        "approvals-only": {
+          "page": "23b",
+          "name": "Approvals only",
+          "count": "3",
+          "countAria": "3 need you",
+          "pill": "all",
+          "groups": [
+            [
+              "expiring",
+              [
+                "pins",
+                "batch",
+                "publish"
+              ]
+            ]
+          ],
+          "doneCount": "3",
+          "batchOpen": true
+        },
+        "empty": {
+          "page": "23c",
+          "name": "Empty",
+          "count": "",
+          "countAria": "nothing needs you",
+          "pill": "all",
+          "groups": [],
+          "doneCount": "3",
+          "empty": true
+        },
+        "loading": {
+          "page": "23d",
+          "name": "Loading",
+          "count": "6",
+          "countAria": "6 need you, last known",
+          "pill": "all",
+          "groups": [],
+          "loading": true
+        },
+        "hub-unreachable": {
+          "page": "23e",
+          "name": "Error",
+          "count": "6",
+          "countAria": "6 need you, as of 13:47",
+          "pill": "hubDown",
+          "groups": [
+            [
+              "expiring",
+              [
+                "pins",
+                "batch"
+              ]
+            ],
+            [
+              "failed",
+              [
+                "hostStatus",
+                "registry"
+              ]
+            ],
+            [
+              "blocked",
+              [
+                "blocked"
+              ]
+            ],
+            [
+              "stuck",
+              [
+                "stuck"
+              ]
+            ]
+          ],
+          "doneCount": "3",
+          "readOnly": true,
+          "notices": [
+            "hubDown"
+          ]
+        },
+        "host-offline": {
+          "page": "23f",
+          "name": "One host offline",
+          "count": "6+",
+          "countAria": "at least 6 need you",
+          "pill": "partial",
+          "hostLine": true,
+          "groups": [
+            [
+              "expiring",
+              [
+                "pins",
+                "batch"
+              ]
+            ],
+            [
+              "failed",
+              [
+                "hostStatus",
+                "registry"
+              ]
+            ],
+            [
+              "blocked",
+              [
+                "blocked"
+              ]
+            ],
+            [
+              "stuck",
+              [
+                "stuck"
+              ]
+            ]
+          ],
+          "doneCount": "3",
+          "notices": [
+            "hostOffline"
+          ]
+        },
+        "notifications-off": {
+          "page": "23g",
+          "name": "Notifications off",
+          "count": "6",
+          "countAria": "6 need you",
+          "pill": "all",
+          "groups": [
+            [
+              "expiring",
+              [
+                "pins",
+                "batch"
+              ]
+            ],
+            [
+              "failed",
+              [
+                "hostStatus",
+                "registry"
+              ]
+            ],
+            [
+              "blocked",
+              [
+                "blocked"
+              ]
+            ],
+            [
+              "stuck",
+              [
+                "stuck"
+              ]
+            ]
+          ],
+          "doneCount": "3",
+          "notices": [
+            "notificationsOff"
+          ]
+        },
+        "cannot-approve-here": {
+          "page": "23h",
+          "name": "Can\u2019t approve from this device",
+          "count": "6",
+          "countAria": "6 need you",
+          "pill": "all",
+          "groups": [
+            [
+              "expiring",
+              [
+                "pins",
+                "batch"
+              ]
+            ],
+            [
+              "failed",
+              [
+                "hostStatus",
+                "registry"
+              ]
+            ],
+            [
+              "blocked",
+              [
+                "blocked"
+              ]
+            ],
+            [
+              "stuck",
+              [
+                "stuck"
+              ]
+            ]
+          ],
+          "doneCount": "3",
+          "noDecide": true
+        },
+        "passkey-approve": {
+          "page": "23i",
+          "name": "Passkey on this device",
+          "status": "future: from PR 4",
+          "count": "6",
+          "countAria": "6 need you",
+          "pill": "all",
+          "groups": [
+            [
+              "expiring",
+              [
+                "pins",
+                "batch"
+              ]
+            ],
+            [
+              "failed",
+              [
+                "hostStatus",
+                "registry"
+              ]
+            ],
+            [
+              "blocked",
+              [
+                "blocked"
+              ]
+            ],
+            [
+              "stuck",
+              [
+                "stuck"
+              ]
+            ]
+          ],
+          "doneCount": "3",
+          "sheet": "passkey"
+        },
+        "fleet-host-view-only": {
+          "page": "23j",
+          "name": "Fleet host, view only",
+          "count": "6",
+          "countAria": "6 need you",
+          "pill": "thisComputer",
+          "groups": [
+            [
+              "expiring",
+              [
+                "pins",
+                "batch"
+              ]
+            ],
+            [
+              "failed",
+              [
+                "hostStatus",
+                "registry"
+              ]
+            ],
+            [
+              "blocked",
+              [
+                "blocked"
+              ]
+            ],
+            [
+              "stuck",
+              [
+                "stuck"
+              ]
+            ]
+          ],
+          "doneCount": "3",
+          "viewOnly": true
+        },
+        "sent-again": {
+          "page": "23k",
+          "name": "After Try again",
+          "count": "6",
+          "countAria": "6 need you",
+          "pill": "all",
+          "groups": [
+            [
+              "expiring",
+              [
+                "pins",
+                "resent",
+                "batch"
+              ]
+            ],
+            [
+              "failed",
+              [
+                "registry"
+              ]
+            ],
+            [
+              "blocked",
+              [
+                "blocked"
+              ]
+            ],
+            [
+              "stuck",
+              [
+                "stuck"
+              ]
+            ]
+          ],
+          "doneCount": "3",
+          "notices": [
+            "sentAgain"
+          ]
+        },
+        "done-and-decided-open": {
+          "page": "23l",
+          "name": "Done and decided expanded",
+          "count": "6",
+          "countAria": "6 need you",
+          "pill": "all",
+          "groups": [
+            [
+              "expiring",
+              [
+                "pins",
+                "batch"
+              ]
+            ],
+            [
+              "failed",
+              [
+                "hostStatus",
+                "registry"
+              ]
+            ],
+            [
+              "blocked",
+              [
+                "blocked"
+              ]
+            ],
+            [
+              "stuck",
+              [
+                "stuck"
+              ]
+            ]
+          ],
+          "doneCount": "3",
+          "doneOpen": true
+        },
+        "batch-approve": {
+          "page": "23m",
+          "name": "Batch approve",
+          "count": "6",
+          "countAria": "6 need you",
+          "pill": "all",
+          "groups": [
+            [
+              "expiring",
+              [
+                "pins",
+                "batch"
+              ]
+            ],
+            [
+              "failed",
+              [
+                "hostStatus",
+                "registry"
+              ]
+            ],
+            [
+              "blocked",
+              [
+                "blocked"
+              ]
+            ],
+            [
+              "stuck",
+              [
+                "stuck"
+              ]
+            ]
+          ],
+          "doneCount": "3",
+          "approveAll": true,
+          "sheet": "batch"
+        },
+        "main-moved": {
+          "page": "23n",
+          "name": "Failed nix.apply, main has moved",
+          "count": "6",
+          "countAria": "6 need you",
+          "pill": "all",
+          "groups": [
+            [
+              "expiring",
+              [
+                "batch"
+              ]
+            ],
+            [
+              "failed",
+              [
+                "pinsFailed",
+                "hostStatus",
+                "registry"
+              ]
+            ],
+            [
+              "blocked",
+              [
+                "blocked"
+              ]
+            ],
+            [
+              "stuck",
+              [
+                "stuck"
+              ]
+            ]
+          ],
+          "doneCount": "3"
+        },
+        "dismissed": {
+          "page": "23o",
+          "name": "Dismiss",
+          "count": "5",
+          "countAria": "5 need you",
+          "pill": "all",
+          "groups": [
+            [
+              "expiring",
+              [
+                "pins",
+                "batch"
+              ]
+            ],
+            [
+              "failed",
+              [
+                "registry"
+              ]
+            ],
+            [
+              "blocked",
+              [
+                "blocked"
+              ]
+            ],
+            [
+              "stuck",
+              [
+                "stuck"
+              ]
+            ]
+          ],
+          "doneCount": "4",
+          "doneOpen": true,
+          "doneDismissed": true,
+          "notices": [
+            "dismissed"
+          ]
+        }
+      }
+    },
+    "work": {
+      "meta": {
+        "about": "Synthetic fixture for 24 Work (Fleet / Work, redesigned). Work is the page for goals: long-lived, with an owner, a stage and a pull request. Stuck leads, then Moving, Planned, and Finished folded by day. Actions that wait on you live in data.needsYou; there is no activity list. All data is invented. Times are en-GB, 24-hour.",
+        "locale": "en-GB",
+        "now": "13:47",
+        "defaultState": "populated",
+        "source": "24 Work.dc.html",
+        "reuses": [
+          "data.fleet.shell.hubHost",
+          "data.identity.person",
+          "data.needsYou.shell"
+        ]
+      },
+      "shell": {
+        "title": "Work",
+        "crumb": "Fleet",
+        "current": "work",
+        "needsCount": "6",
+        "needsAria": "6 need you"
+      },
+      "windows": {
+        "label": "Window",
+        "value": "now",
+        "items": [
+          {
+            "value": "now",
+            "label": "Now"
+          },
+          {
+            "value": "24h",
+            "label": "24 hours"
+          },
+          {
+            "value": "7d",
+            "label": "7 days"
+          },
+          {
+            "value": "30d",
+            "label": "30 days"
+          }
+        ]
+      },
+      "stages": [
+        "Planned",
+        "In progress",
+        "In review",
+        "Merged"
+      ],
+      "sections": {
+        "stuck": "Stuck",
+        "moving": "Moving",
+        "planned": "Planned",
+        "finished": "Finished"
+      },
+      "goals": {
+        "s1": {
+          "agent": "ds-rly",
+          "host": "atlas",
+          "title": "Port Tabs to the owned API",
+          "stage": 2,
+          "meta": "in review 9 days \u00b7 PR #451 \u00b7 last update Oct 16",
+          "label": "Waiting",
+          "tone": "caution",
+          "icon": "clock",
+          "nudge": true
+        },
+        "s2": {
+          "agent": "rev-usage",
+          "host": "birch",
+          "title": "Per-model breakdown for birch",
+          "stage": 2,
+          "meta": "in review 8 days \u00b7 PR #455 \u00b7 last update Oct 17",
+          "label": "Waiting",
+          "tone": "caution",
+          "icon": "clock",
+          "nudge": true
+        },
+        "s3": {
+          "agent": "pkgsrc",
+          "host": "cedar",
+          "title": "Mirror the 2026Q2 branch",
+          "stage": 2,
+          "meta": "in review 4 days \u00b7 PR #462 \u00b7 last update Oct 21",
+          "label": "Waiting",
+          "tone": "caution",
+          "icon": "clock",
+          "nudge": true
+        },
+        "m1": {
+          "agent": "coord",
+          "host": "atlas",
+          "title": "Switchable package sources for atlas",
+          "stage": 1,
+          "meta": "in progress 2 days \u00b7 PR #466 \u00b7 last update 13:40",
+          "label": "Working",
+          "tone": "progress",
+          "icon": "loader"
+        },
+        "m2": {
+          "agent": "docs-sync",
+          "host": "cedar",
+          "title": "Sync the rly docs into Confluence",
+          "stage": 1,
+          "meta": "in progress 1 day \u00b7 no PR yet \u00b7 last update 12:10",
+          "label": "Working",
+          "tone": "progress",
+          "icon": "loader"
+        },
+        "p1": {
+          "title": "Retire the old Notice tones",
+          "meta": "added 12 days ago"
+        },
+        "p2": {
+          "title": "Weekly token export",
+          "meta": "added 6 days ago"
+        },
+        "p3": {
+          "title": "Drop the i386 build",
+          "meta": "added 3 days ago"
+        },
+        "p4": {
+          "title": "Audit focus rings in the dark theme",
+          "meta": "added yesterday"
+        }
+      },
+      "backlogOwner": "Backlog",
+      "stepOf": "{n} of 4",
+      "lastKnown": "Last known 13:47",
+      "nudge": {
+        "action": "Nudge owner",
+        "sent": "Nudged 10:31",
+        "metaAdd": "asked ds-rly for status at 10:31"
+      },
+      "outcomes": {
+        "Merged": [
+          "positive",
+          "check"
+        ],
+        "Deployed": [
+          "positive",
+          "check"
+        ],
+        "Abandoned": [
+          "neutral",
+          "minus"
+        ]
+      },
+      "finished": {
+        "count": "16",
+        "days": [
+          {
+            "label": "Today \u00b7 2 goals",
+            "rows": [
+              [
+                "Split the Button docs into variants",
+                "ds-rly \u00b7 atlas",
+                "Merged",
+                "11:20"
+              ],
+              [
+                "Backfill September readings",
+                "rev-usage \u00b7 birch",
+                "Deployed",
+                "09:05"
+              ]
+            ]
+          },
+          {
+            "label": "Yesterday \u00b7 14 goals",
+            "rows": [
+              [
+                "Pin nixpkgs for atlas",
+                "coord \u00b7 atlas",
+                "Deployed",
+                "18:40"
+              ],
+              [
+                "Fix socket retry",
+                "coord \u00b7 atlas",
+                "Merged",
+                "17:55"
+              ],
+              [
+                "Pass sandbox env through a file",
+                "sec-cc \u00b7 atlas",
+                "Merged",
+                "16:30"
+              ],
+              [
+                "Switchable package sources for birch",
+                "pkgsrc \u00b7 cedar",
+                "Deployed",
+                "15:10"
+              ],
+              [
+                "Token audit for rly 0.19",
+                "ds-rly \u00b7 atlas",
+                "Merged",
+                "14:45"
+              ],
+              [
+                "Rename bots to agents in Connect",
+                "ds-rly \u00b7 atlas",
+                "Merged",
+                "14:02"
+              ],
+              [
+                "Drop the legacy Approvals route",
+                "coord \u00b7 atlas",
+                "Abandoned",
+                "13:30"
+              ],
+              [
+                "Read the Clockify week once per load",
+                "rev-usage \u00b7 birch",
+                "Merged",
+                "12:15"
+              ],
+              [
+                "Stale reading label for Usage",
+                "rev-usage \u00b7 birch",
+                "Merged",
+                "11:40"
+              ],
+              [
+                "Cache the release summary on atlas",
+                "release \u00b7 atlas",
+                "Deployed",
+                "11:05"
+              ],
+              [
+                "Sandbox AWS sign-in copy",
+                "sec-cc \u00b7 atlas",
+                "Merged",
+                "10:20"
+              ],
+              [
+                "Retry hub reads with backoff",
+                "coord \u00b7 atlas",
+                "Merged",
+                "09:50"
+              ],
+              [
+                "Clean up the old migration lane",
+                "pkgsrc \u00b7 cedar",
+                "Abandoned",
+                "09:15"
+              ],
+              [
+                "Herdr install check on peers",
+                "docs-sync \u00b7 cedar",
+                "Merged",
+                "08:30"
+              ]
+            ]
+          }
+        ]
+      },
+      "empty": {
+        "title": "No goals yet",
+        "body": "Goals appear when you give an agent work.",
+        "button": "Open Connect"
+      },
+      "lines": {
+        "hostOffline": "cedar offline \u00b7 last known 13:47"
+      },
+      "notices": {
+        "readFailed": {
+          "tone": "critical",
+          "role": "alert",
+          "text": "Couldn\u2019t read goals. Showing what was here at 13:47.",
+          "button": "Try again"
+        },
+        "hostOffline": {
+          "tone": "caution",
+          "role": "status",
+          "text": "cedar didn\u2019t answer since 13:47; its goals show as last known."
+        },
+        "nudged": {
+          "tone": "neutral",
+          "role": "status",
+          "text": "Asked ds-rly for status."
+        }
+      },
+      "states": {
+        "populated": {
+          "page": "24a",
+          "name": "Populated",
+          "sections": [
+            [
+              "stuck",
+              [
+                "s1",
+                "s2",
+                "s3"
+              ]
+            ],
+            [
+              "moving",
+              [
+                "m1",
+                "m2"
+              ]
+            ],
+            [
+              "planned",
+              [
+                "p1",
+                "p2",
+                "p3",
+                "p4"
+              ]
+            ]
+          ],
+          "finished": true
+        },
+        "nothing-stuck": {
+          "page": "24b",
+          "name": "Nothing stuck",
+          "sections": [
+            [
+              "moving",
+              [
+                "m1",
+                "m2"
+              ]
+            ],
+            [
+              "planned",
+              [
+                "p1",
+                "p2",
+                "p3",
+                "p4"
+              ]
+            ]
+          ],
+          "finished": true
+        },
+        "empty": {
+          "page": "24c",
+          "name": "Empty",
+          "sections": [],
+          "empty": true
+        },
+        "loading": {
+          "page": "24d",
+          "name": "Loading",
+          "sections": [],
+          "loading": true
+        },
+        "read-failed": {
+          "page": "24e",
+          "name": "Error",
+          "sections": [
+            [
+              "stuck",
+              [
+                "s1",
+                "s2",
+                "s3"
+              ]
+            ],
+            [
+              "moving",
+              [
+                "m1",
+                "m2"
+              ]
+            ],
+            [
+              "planned",
+              [
+                "p1",
+                "p2",
+                "p3",
+                "p4"
+              ]
+            ]
+          ],
+          "finished": true,
+          "readOnly": true,
+          "notices": [
+            "readFailed"
+          ]
+        },
+        "host-offline": {
+          "page": "24f",
+          "name": "Host offline",
+          "sections": [
+            [
+              "stuck",
+              [
+                "s1",
+                "s2",
+                "s3"
+              ]
+            ],
+            [
+              "moving",
+              [
+                "m1",
+                "m2"
+              ]
+            ],
+            [
+              "planned",
+              [
+                "p1",
+                "p2",
+                "p3",
+                "p4"
+              ]
+            ]
+          ],
+          "finished": true,
+          "offlineHost": "cedar",
+          "needsCount": "6+",
+          "needsAria": "at least 6 need you",
+          "pill": "partial",
+          "notices": [
+            "hostOffline"
+          ]
+        },
+        "nudged": {
+          "page": "24g",
+          "name": "Nudge sent",
+          "sections": [
+            [
+              "stuck",
+              [
+                "s1",
+                "s2",
+                "s3"
+              ]
+            ],
+            [
+              "moving",
+              [
+                "m1",
+                "m2"
+              ]
+            ],
+            [
+              "planned",
+              [
+                "p1",
+                "p2",
+                "p3",
+                "p4"
+              ]
+            ]
+          ],
+          "finished": true,
+          "nudged": "s1",
+          "notices": [
+            "nudged"
+          ]
+        },
+        "finished-open": {
+          "page": "24h",
+          "name": "Finished expanded",
+          "sections": [
+            [
+              "stuck",
+              [
+                "s1",
+                "s2",
+                "s3"
+              ]
+            ],
+            [
+              "moving",
+              [
+                "m1",
+                "m2"
+              ]
+            ],
+            [
+              "planned",
+              [
+                "p1",
+                "p2",
+                "p3",
+                "p4"
+              ]
+            ]
+          ],
+          "finished": true,
+          "finishedOpen": true
+        }
+      }
     }
   }
 }
