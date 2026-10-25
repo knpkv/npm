@@ -455,3 +455,27 @@ describe("Work summary per snapshot window", () => {
     expect(summary(day)).not.toContain("needs you")
   })
 })
+
+/**
+ * The summary names stuck goals beside blocked ones, each count as its own state word, so a long
+ * review queue is read before the rows.
+ */
+describe("Work summary with stuck goals", () => {
+  it("names the blocked and stuck counts, each in its own word", async () => {
+    const asOf = 10 * 86_400_000
+    const stuck = (index: number): WorkGoal => ({ ...goal(index), blocker: null, state: "review", updatedAt: 0 })
+    const now: WorkSnapshot = {
+      asOf,
+      goals: [{ ...goal(1), blocker: null }, { ...goal(2), updatedAt: asOf }, stuck(3), stuck(5)],
+      observedAt: asOf,
+      window: "now"
+    }
+    const host = await mountBoard({ boardSnapshots: { ...snapshots, now, observedAt: asOf } })
+    const summary = host.querySelector("[aria-label='Work summary']")
+    expect(summary?.textContent).toContain("Nothing needs you, 1 blocked, 2 stuck")
+    expect([...(summary?.querySelectorAll("span") ?? [])].map((word) => word.textContent)).toEqual(
+      expect.arrayContaining(["1 blocked", "2 stuck"])
+    )
+    expect(host.querySelector("#work-group-stuck")?.textContent).toContain("Stuck")
+  })
+})
