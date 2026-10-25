@@ -2,6 +2,17 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.62.1
+
+### Patch Changes
+
+- Updated dependencies [[`36501ee`](https://github.com/knpkv/npm/commit/36501ee2b18aaf1cdd2d45789b649ce15881287c)]:
+  - @knpkv/herdr-fleet@0.21.0
+  - @knpkv/herdr-connect@0.31.3
+  - @knpkv/herdr-coordinator@0.4.13
+  - @knpkv/herdr-usage@0.1.3
+  - @knpkv/herdr-work@0.12.15
+
 ## 0.62.0
 
 ### Minor Changes
