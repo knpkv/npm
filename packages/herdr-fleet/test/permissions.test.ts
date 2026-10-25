@@ -8,13 +8,25 @@ const identity = Schema.Struct({
   approvalNodes: HostConfiguration.fields.approvalNodes,
   users: HostConfiguration.fields.users,
   hosts: HostConfiguration.fields.hosts,
-  local: HostConfiguration.fields.local
+  local: HostConfiguration.fields.local,
+  machines: HostConfiguration.fields.machines
 })
-const configOf = (input: Omit<typeof identity.Encoded, "approvalNodes">) =>
-  Schema.decodeSync(identity)({ approvalNodes: ["node-phone"], ...input })
+/** The approval node is the owner's phone; "node-build" is a fleet machine. */
+const configOf = (input: Omit<typeof identity.Encoded, "approvalNodes" | "machines">) =>
+  Schema.decodeSync(identity)({
+    approvalNodes: ["node-phone"],
+    machines: [{ host: "build", nodeId: "node-build" }],
+    ...input
+  })
 
-/** A person on the approval node, no passkey: every grant counts, approve included. */
-const person = (login: string): Principal => ({ _tag: "Person", login, nodeId: "node-phone", presence: "none" })
+/** A signed-in person on the approval node, no passkey: every grant counts, approve included. */
+const person = (login: string): Principal => ({
+  _tag: "Person",
+  login,
+  nodeId: "node-phone",
+  presence: "none",
+  session: true
+})
 const ownerSide: ReadonlyArray<Permission> = ["view", "jobs.submit", "push", "connect.terminal", "apps.restart"]
 const all = (principal: Principal, config: ReturnType<typeof configOf>) =>
   permissions.filter((permission) => can(config, principal, permission))
@@ -56,7 +68,8 @@ describe("permissions", () => {
       _tag: "Person",
       login: "owner@example.test",
       nodeId,
-      presence
+      presence,
+      session: true
     })
     expect(can(config, on("node-phone", "none"), "approve")).toBe(true)
     expect(can(config, on("node-laptop", "none"), "approve")).toBe(false)
@@ -82,6 +95,43 @@ describe("permissions", () => {
       .toEqual(["view", "apps.restart"])
     expect(all({ _tag: "Local", session: true }, configOf({ allowedUsers: [], local: ["approve", "sandboxes.owner"] })))
       .toEqual([])
+  })
+
+  // Logging in is the person's deliberate act in a browser: without it a login only views, on any node.
+  it("lets a person without a session only view, on any node", () => {
+    const config = configOf({ allowedUsers: ["owner@example.test"] })
+    for (const nodeId of ["node-phone", "node-laptop", "node-build"]) {
+      const unsignedIn: Principal = {
+        _tag: "Person",
+        login: "owner@example.test",
+        nodeId,
+        presence: "passkey",
+        session: false
+      }
+      expect(all(unsignedIn, config), nodeId).toEqual(["view"])
+    }
+  })
+
+  // On a fleet machine a session can't tell the person from the agents beside them, so owning Sandboxes
+  // never follows from it; approving still needs an approval node or a passkey.
+  it("never lets a person on a fleet machine own Sandboxes, session or not", () => {
+    const config = configOf({ allowedUsers: ["owner@example.test"] })
+    const onMachine: Principal = {
+      _tag: "Person",
+      login: "owner@example.test",
+      nodeId: "node-build",
+      presence: "passkey",
+      session: true
+    }
+    expect(can(config, onMachine, "sandboxes.owner")).toBe(false)
+    expect(can(config, onMachine, "approve")).toBe(true)
+    expect(can(config, { ...onMachine, presence: "none" }, "approve")).toBe(false)
+    expect(can(config, { ...onMachine, nodeId: "node-laptop" }, "sandboxes.owner")).toBe(true)
+  })
+
+  // The CLI token is any process of the user, so it restarts apps (nix activation does) and nothing else.
+  it("lets the CLI restart apps and nothing else", () => {
+    expect(all({ _tag: "Cli" }, configOf({ allowedUsers: ["owner@example.test"] }))).toEqual(["apps.restart"])
   })
 
   it("gives a service and an anonymous caller nothing", () => {

@@ -42,7 +42,11 @@ export const TailStatus = Schema.Struct({
 export interface TailStatus extends Schema.Schema.Type<typeof TailStatus> {}
 
 export const TailWhois = Schema.Struct({
-  Node: Schema.Struct({ StableID: BoundedName }),
+  Node: Schema.Struct({
+    StableID: BoundedName,
+    /** The device name tailscale shows for the node; display only, never identity. */
+    ComputedName: Schema.optionalKey(BoundedName)
+  }),
   UserProfile: Schema.Struct({ LoginName: BoundedName })
 })
 export interface TailWhois extends Schema.Schema.Type<typeof TailWhois> {}

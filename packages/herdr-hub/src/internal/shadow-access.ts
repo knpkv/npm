@@ -48,8 +48,14 @@ const requirementName = (requirement: Requirement): string =>
 /** The first two segments of a path: enough to name a route without its identifiers. */
 const leadingPath = (pathname: string): string => `/${pathname.split("/").filter(Boolean).slice(0, 2).join("/")}`
 
-const refusedKey = (listener: ListenerMode, principal: Principal["_tag"], family: RouteFamily) =>
-  `refused ${listener} ${principal} ${family.id}`
+/** A principal's kind for the log: a person and the local user say whether they came with a session. */
+const kindOf = (principal: Principal): string =>
+  principal._tag === "Person" || principal._tag === "Local"
+    ? `${principal._tag}${principal.session ? "+session" : ""}`
+    : principal._tag
+
+const refusedKey = (listener: ListenerMode, principal: Principal, family: RouteFamily) =>
+  `refused ${listener} ${kindOf(principal)} ${family.id}`
 
 /** Whether a served request needs its caller read: a known family whose requirement depends on who calls. */
 export const shadowCompares = (family: RouteFamily | null, status: number): family is RouteFamily =>
@@ -70,10 +76,10 @@ export const shadowFinding = (config: Grants, request: ShadowRequest): ShadowFin
   if (request.principal === null || meets(config, request.principal, family.requirement)) return null
   return {
     kind: "refused",
-    key: refusedKey(request.listener, request.principal._tag, family),
+    key: refusedKey(request.listener, request.principal, family),
     fields: {
       listener: request.listener,
-      principal: request.principal._tag,
+      principal: kindOf(request.principal),
       family: family.id,
       requirement: requirementName(family.requirement)
     }
@@ -81,17 +87,47 @@ export const shadowFinding = (config: Grants, request: ShadowRequest): ShadowFin
 }
 
 /**
- * One principal of each kind a listener can see, each as refusable as that kind gets: loopback is the local
- * user without a session, or no one when it names a login; a tailnet person is on no approval node, once per
- * allowed login.
+ * A served write from a principal that came with a session but without that session's CSRF token: the
+ * enforcement flip refuses these, so the log names them now.
+ */
+export const csrfFinding = (request: {
+  readonly listener: ListenerMode
+  readonly method: string
+  readonly family: RouteFamily
+  readonly principal: Principal
+  readonly csrfOk: boolean
+}): ShadowFinding | null => {
+  const sessioned = (request.principal._tag === "Person" || request.principal._tag === "Local") &&
+    request.principal.session
+  const read = request.method === "GET" || request.method === "HEAD"
+  const open = request.family.requirement._tag === "Public" || request.family.requirement._tag === "Grant"
+  if (!sessioned || read || open || request.csrfOk) return null
+  return {
+    kind: "refused",
+    key: `unprotected ${request.listener} ${kindOf(request.principal)} ${request.family.id}`,
+    fields: {
+      listener: request.listener,
+      principal: kindOf(request.principal),
+      family: request.family.id,
+      missing: "csrf"
+    }
+  }
+}
+
+/**
+ * One principal of each kind a listener can see, each as refusable as that kind gets: on loopback the local
+ * user with and without a session, the CLI, and no one when it names a login; on the tailnet a person with
+ * and without a session on no approval node, once per allowed login.
  */
 const candidates = (config: Grants, listener: ListenerMode): ReadonlyArray<Principal> =>
   listener === "local"
-    ? [{ _tag: "Local", session: false }, { _tag: "Anonymous" }]
+    ? [{ _tag: "Local", session: false }, { _tag: "Local", session: true }, { _tag: "Cli" }, { _tag: "Anonymous" }]
     : [
       { _tag: "Host", nodeId: "" },
       { _tag: "Service", nodeId: "" },
-      ...config.allowedUsers.map((login): Principal => ({ _tag: "Person", login, nodeId: "", presence: "none" }))
+      ...config.allowedUsers.flatMap((login): ReadonlyArray<Principal> =>
+        [false, true].map((session) => ({ _tag: "Person", login, nodeId: "", presence: "none", session }))
+      )
     ]
 
 /** Distinct findings kept per run, per kind; past that, new ones are not logged rather than kept. */
@@ -112,7 +148,7 @@ export const makeShadowLog = (config: Grants) => {
     settled: (listener: ListenerMode, family: RouteFamily): boolean =>
       candidates(config, listener)
         .filter((principal) => !meets(config, principal, family.requirement))
-        .every((principal) => logged.refused.has(refusedKey(listener, principal._tag, family)))
+        .every((principal) => logged.refused.has(refusedKey(listener, principal, family)))
   }
 }
 

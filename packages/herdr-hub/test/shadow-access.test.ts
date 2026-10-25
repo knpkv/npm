@@ -4,7 +4,7 @@ import { FleetHostName } from "@knpkv/herdr-fleet/model"
 import { Effect, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { routeFamily } from "../src/internal/route-families.js"
-import { makeRecentLookup, makeShadowLog, shadowFinding } from "../src/internal/shadow-access.js"
+import { csrfFinding, makeRecentLookup, makeShadowLog, shadowFinding } from "../src/internal/shadow-access.js"
 
 const host = Schema.decodeUnknownSync(FleetHostName)("atlas")
 const config = {
@@ -13,7 +13,13 @@ const config = {
   machines: [{ host, nodeId: "node-hub" }]
 }
 const fleetHost: Principal = { _tag: "Host", nodeId: "node-hub" }
-const laptop: Principal = { _tag: "Person", login: "owner@example.test", nodeId: "node-laptop", presence: "none" }
+const laptop: Principal = {
+  _tag: "Person",
+  login: "owner@example.test",
+  nodeId: "node-laptop",
+  presence: "none",
+  session: true
+}
 const finding = (principal: Principal | null, method: string, pathname: string, status = 200) =>
   shadowFinding(config, { listener: "serve", method, pathname, status, principal })
 
@@ -25,7 +31,10 @@ describe("shadow access", () => {
       key: "refused serve Host push.write",
       fields: { listener: "serve", principal: "Host", family: "push.write", requirement: "push" }
     })
-    expect(finding(laptop, "POST", "/v1/jobs/job-1/approve")?.key).toBe("refused serve Person jobs.decide")
+    expect(finding(laptop, "POST", "/v1/jobs/job-1/approve")?.key).toBe("refused serve Person+session jobs.decide")
+    expect(finding({ ...laptop, session: false }, "POST", "/v1/push/subscriptions")?.key).toBe(
+      "refused serve Person push.write"
+    )
     // An accepted WebSocket upgrade is a served request too.
     expect(finding(fleetHost, "GET", "/v1/connect/session", 101)?.key).toBe("refused serve Host connect.terminal")
   })
@@ -64,17 +73,20 @@ describe("shadow access", () => {
       if (family === null) return yield* Effect.die("expected a family")
       expect(shadow.settled("serve", family)).toBe(false)
       yield* shadow.log(refused)
-      // Host and Service can be refused push; the owner's login holds it. Service is still unlogged.
-      expect(shadow.settled("serve", family)).toBe(false)
-      const service = finding({ _tag: "Service", nodeId: "node-hub" }, "POST", "/v1/push/subscriptions")
-      if (service === null) return yield* Effect.die("expected a refused service finding")
-      yield* shadow.log(service)
+      // Host, Service and a person without a session can be refused push; a logged-in owner holds it.
+      const others: ReadonlyArray<Principal> = [{ _tag: "Service", nodeId: "node-hub" }, { ...laptop, session: false }]
+      for (const principal of others) {
+        expect(shadow.settled("serve", family)).toBe(false)
+        const next = finding(principal, "POST", "/v1/push/subscriptions")
+        if (next === null) return yield* Effect.die("expected a refused finding")
+        yield* shadow.log(next)
+      }
       expect(shadow.settled("serve", family)).toBe(true)
     }))
 
   // Loopback naming a login is no one, and that is the case worth seeing: a plain loopback finding doesn't
-  // settle the family until the no-one finding is logged too.
-  it.effect("keeps reading loopback callers until both the local user and no one are logged", () =>
+  // settle the family until the CLI and no-one findings are logged too. A local session holds jobs.submit.
+  it.effect("keeps reading loopback callers until the local user, the CLI and no one are all logged", () =>
     Effect.gen(function*() {
       const shadow = makeShadowLog(config)
       const family = routeFamily("POST", "/v1/jobs")
@@ -82,13 +94,32 @@ describe("shadow access", () => {
       const local = (principal: Principal) =>
         shadowFinding(config, { listener: "local", method: "POST", pathname: "/v1/jobs", status: 202, principal })
       const plain = local({ _tag: "Local", session: false })
+      const cli = local({ _tag: "Cli" })
       const named = local({ _tag: "Anonymous" })
-      if (plain === null || named === null) return yield* Effect.die("expected refused findings")
+      if (plain === null || cli === null || named === null) return yield* Effect.die("expected refused findings")
       yield* shadow.log(plain)
+      expect(shadow.settled("local", family)).toBe(false)
+      yield* shadow.log(cli)
       expect(shadow.settled("local", family)).toBe(false)
       yield* shadow.log(named)
       expect(named.key).toBe("refused local Anonymous jobs.submit")
       expect(shadow.settled("local", family)).toBe(true)
+    }))
+
+  // A session's writes carry its CSRF token from 3b on; a served write without it is named now.
+  it.effect("names a session's write that came without its CSRF token, and nothing else", () =>
+    Effect.gen(function*() {
+      const family = routeFamily("POST", "/v1/push/subscriptions")
+      const page = routeFamily("GET", "/")
+      if (family === null || page === null) return yield* Effect.die("expected families")
+      const write = (principal: Principal, csrfOk: boolean, method = "POST") =>
+        csrfFinding({ listener: "serve", method, family: method === "GET" ? page : family, principal, csrfOk })
+      expect(write(laptop, false)?.key).toBe("unprotected serve Person+session push.write")
+      expect(write({ _tag: "Local", session: true }, false)?.key).toBe("unprotected serve Local+session push.write")
+      expect(write(laptop, true)).toBeNull()
+      expect(write(laptop, false, "GET")).toBeNull()
+      expect(write({ ...laptop, session: false }, false)).toBeNull()
+      expect(write(fleetHost, false)).toBeNull()
     }))
 
   // An address WhoIs can't answer would otherwise spawn a lookup on every request.

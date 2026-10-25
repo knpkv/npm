@@ -134,7 +134,7 @@ import WebSocketClient, { WebSocketServer } from "ws"
 import type { SanitizedJobRecord } from "./approval-request.js"
 import { sanitizeJobPayload, sanitizeJobRecord } from "./approval-request.js"
 import { resolveApprovalPage } from "./approval-url.js"
-import { writeCliToken } from "./apps/cli-token.js"
+import { cliTokenHeader, presentsCliToken, writeCliToken } from "./apps/cli-token.js"
 import { answerFleetRead } from "./apps/fleet-read.js"
 import { makeAppTokens, makeGrants } from "./apps/grants.js"
 import { appNeedsYouProviders } from "./apps/needs-you.js"
@@ -171,11 +171,20 @@ import {
   listenerServesSuperapp,
   listenerServesWork
 } from "./internal/listener.js"
+import { makeLocalLogin } from "./internal/local-login.js"
+import { csrfMatches, makePersonSessions } from "./internal/person-sessions.js"
 import { principalFor } from "./internal/principal.js"
 import { decodeRelayPostRequest } from "./internal/relay-post-validation.js"
 import { decodeRelaySelfBody } from "./internal/relay-self-validation.js"
 import { routeFamily } from "./internal/route-families.js"
-import { makeRecentLookup, makeShadowLog, shadowCompares, shadowFinding } from "./internal/shadow-access.js"
+import { csrfHeader, readCookie, sessionCookieName, sessionHeader, sessionRoute } from "./internal/session-routes.js"
+import {
+  csrfFinding,
+  makeRecentLookup,
+  makeShadowLog,
+  shadowCompares,
+  shadowFinding
+} from "./internal/shadow-access.js"
 import { requireRemoteTerminalTakeover } from "./internal/terminal-capabilities.js"
 import { releaseTerminalScope } from "./internal/terminal-controller.js"
 import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
@@ -679,7 +688,7 @@ const tailnetIdentity = Effect.fn("ApprovalHttp.tailnetIdentity")(function*(
       (error: TailscaleAuthorizationError) => new FleetAuthorizationError({ actor: error.actor })
     )
   )
-  return { login, nodeId: identity.Node.StableID }
+  return { login, nodeId: identity.Node.StableID, device: identity.Node.ComputedName }
 })
 
 const tailnetActor = Effect.fn("ApprovalHttp.tailnetActor")(function*(
@@ -1842,71 +1851,6 @@ export const startHttpServer = async (
       () => activeRequestControllers.delete(controller)
     )
   }
-  const shadowLog = makeShadowLog(config)
-  // Shadow WhoIs: one `tailscale whois` per address per 30 seconds, on top of whatever today's checks ran.
-  const shadowWhois = makeRecentLookup(
-    (address: string) =>
-      Effect.gen(function*() {
-        const tailscale = yield* Tailscale
-        return yield* tailscale.whois(address)
-      }),
-    { ttlMillis: 30_000, limit: 256 }
-  )
-  // Who identity says a served request's caller is; null when it could not be read. On loopback this is
-  // read whatever today's loopback check decided, which is fine: only requests today served are compared.
-  const shadowPrincipal = (
-    mode: ListenerMode,
-    facts: { readonly remoteAddress: string | undefined; readonly headerLogin: string | undefined },
-    serviceRoute: boolean
-  ) =>
-    mode === "local"
-      ? Effect.succeed(principalFor(config, {
-        _tag: "Loopback",
-        remoteAddress: facts.remoteAddress ?? "",
-        headerLogin: facts.headerLogin
-      }))
-      : Effect.gen(function*() {
-        if (facts.remoteAddress === undefined) return null
-        const identity = yield* shadowWhois(facts.remoteAddress)
-        return principalFor(config, {
-          _tag: "Tailnet",
-          login: identity.UserProfile.LoginName,
-          nodeId: identity.Node.StableID,
-          serviceRoute
-        })
-      }).pipe(
-        Effect.catch((error) => Effect.logDebug("identity shadow: caller not read", error).pipe(Effect.as(null)))
-      )
-  // Shadow mode: once today's checks have answered `status`, log where identity would have answered
-  // differently. It reads only server facts and refuses nothing.
-  // The request's facts are read when it arrives: by the time the response finishes, its socket may be gone.
-  const shadowFacts = (request: IncomingMessage) => ({
-    method: request.method ?? "GET",
-    remoteAddress: request.socket.remoteAddress,
-    headerLogin: header(request, "tailscale-user-login")
-  })
-  const shadowServed = (
-    facts: ReturnType<typeof shadowFacts>,
-    mode: ListenerMode,
-    pathname: string,
-    status: number
-  ) => {
-    const method = facts.method
-    const family = routeFamily(method, pathname)
-    const principal = shadowCompares(family, status) && !shadowLog.settled(mode, family)
-      ? shadowPrincipal(mode, facts, family.id === "connect.service")
-      : Effect.succeed(null)
-    httpRuntime.runFork(
-      principal.pipe(
-        Effect.map((caller) => shadowFinding(config, { listener: mode, method, pathname, status, principal: caller })),
-        Effect.flatMap((finding) => finding === null ? Effect.void : shadowLog.log(finding))
-      )
-    )
-  }
-  const observeShadow = (request: IncomingMessage, response: ServerResponse, mode: ListenerMode, pathname: string) => {
-    const facts = shadowFacts(request)
-    response.once("finish", () => shadowServed(facts, mode, pathname, response.statusCode))
-  }
   // A read older than 30 seconds is refreshed in the background, so a peer answers the hub's
   // 1.5-second fetch from its last read even while agent-usage is slow.
   const spawner = await httpRuntime.runPromise(Effect.service(ChildProcessSpawner.ChildProcessSpawner))
@@ -2143,6 +2087,99 @@ export const startHttpServer = async (
       AgentActivityStore.open(statePath)
     )
     finalizers.unshift(() => Promise.resolve().then(() => activityStore.close()))
+    // Browser sessions (`/v1/session`) and the one-time code `herdr-hub login` trades for a local session.
+    const sessionScope = await httpRuntime.runPromise(Scope.make())
+    finalizers.unshift(() => httpRuntime.runPromise(Scope.close(sessionScope, Exit.void)))
+    const personSessions = await httpRuntime.runPromise(
+      makePersonSessions(`${config.stateDirectory}/person-sessions.sqlite`).pipe(
+        Effect.provideService(Scope.Scope, sessionScope)
+      )
+    )
+    const localLogin = await httpRuntime.runPromise(makeLocalLogin)
+    const shadowLog = makeShadowLog(config)
+    // Shadow WhoIs: one `tailscale whois` per address per 30 seconds, on top of whatever today's checks ran.
+    const shadowWhois = makeRecentLookup(
+      (address: string) =>
+        Effect.gen(function*() {
+          const tailscale = yield* Tailscale
+          return yield* tailscale.whois(address)
+        }),
+      { ttlMillis: 30_000, limit: 256 }
+    )
+    // The request's facts are read when it arrives: by the time the response finishes, its socket may be gone.
+    const shadowFacts = (request: IncomingMessage, mode: ListenerMode) => ({
+      method: request.method ?? "GET",
+      remoteAddress: request.socket.remoteAddress,
+      headerLogin: header(request, "tailscale-user-login"),
+      sessionToken: mode === "local"
+        ? header(request, sessionHeader)
+        : readCookie(header(request, "cookie"), sessionCookieName),
+      csrf: header(request, csrfHeader),
+      cli: cliToken !== null && presentsCliToken(header(request, cliTokenHeader), cliToken)
+    })
+    type ShadowFacts = ReturnType<typeof shadowFacts>
+    const shadowSession = (facts: ShadowFacts) =>
+      facts.sessionToken === undefined
+        ? Effect.succeed(null)
+        : personSessions.read(facts.sessionToken).pipe(
+          Effect.catchTag("PersonSessionsUnavailable", (error) =>
+            Effect.logDebug("identity shadow: session not read", error).pipe(Effect.as(null)))
+        )
+    // Who identity says a served request's caller is; null when it could not be read. On loopback this is
+    // read whatever today's loopback check decided, which is fine: only requests today served are compared.
+    const shadowPrincipal = Effect.fn("HostHttp.shadowPrincipal")(
+      function*(mode: ListenerMode, facts: ShadowFacts, serviceRoute: boolean) {
+        const session = yield* shadowSession(facts)
+        if (mode === "local") {
+          return principalFor(config, {
+            _tag: "Loopback",
+            remoteAddress: facts.remoteAddress ?? "",
+            headerLogin: facts.headerLogin,
+            cli: facts.cli,
+            session
+          })
+        }
+        if (facts.remoteAddress === undefined) return null
+        const identity = yield* shadowWhois(facts.remoteAddress)
+        return principalFor(config, {
+          _tag: "Tailnet",
+          login: identity.UserProfile.LoginName,
+          nodeId: identity.Node.StableID,
+          serviceRoute,
+          session
+        })
+      },
+      Effect.catch((error) => Effect.logDebug("identity shadow: caller not read", error).pipe(Effect.as(null)))
+    )
+    // Shadow mode: once today's checks have answered `status`, log where identity would have answered
+    // differently, and a session's write that came without its CSRF token. It refuses nothing.
+    const shadowServed = (facts: ShadowFacts, mode: ListenerMode, pathname: string, status: number) => {
+      const method = facts.method
+      const family = routeFamily(method, pathname)
+      const principal = shadowCompares(family, status) && !shadowLog.settled(mode, family)
+        ? shadowPrincipal(mode, facts, family.id === "connect.service")
+        : Effect.succeed(null)
+      httpRuntime.runFork(
+        Effect.gen(function*() {
+          const caller = yield* principal
+          const finding = shadowFinding(config, { listener: mode, method, pathname, status, principal: caller })
+          if (finding !== null) yield* shadowLog.log(finding)
+          if (caller === null || family === null || facts.sessionToken === undefined) return
+          const csrfOk = yield* csrfMatches(facts.sessionToken, facts.csrf)
+          const unprotected = csrfFinding({ listener: mode, method, family, principal: caller, csrfOk })
+          if (unprotected !== null) yield* shadowLog.log(unprotected)
+        })
+      )
+    }
+    const observeShadow = (
+      request: IncomingMessage,
+      response: ServerResponse,
+      mode: ListenerMode,
+      pathname: string
+    ) => {
+      const facts = shadowFacts(request, mode)
+      response.once("finish", () => shadowServed(facts, mode, pathname, response.statusCode))
+    }
     const hueScope = await httpRuntime.runPromise(Scope.make())
     finalizers.unshift(() => httpRuntime.runPromise(Scope.close(hueScope, Exit.void)))
     const hueEnrichment = await httpRuntime.runPromise(
@@ -3356,6 +3393,32 @@ export const startHttpServer = async (
               return { login, sameNode, owner: sameNode, provenance }
             }))
 
+          // Logging in and out: `/v1/session` opens and ends browser sessions and decides nothing else.
+          if (url.pathname === "/v1/session" || url.pathname.startsWith("/v1/session/")) {
+            const answered = await runRequest(sessionRoute({ config, sessions: personSessions, localLogin }, {
+              listener: mode,
+              method: request.method ?? "GET",
+              pathname: url.pathname,
+              cookieToken: readCookie(header(request, "cookie"), sessionCookieName),
+              headerToken: header(request, sessionHeader),
+              csrf: header(request, csrfHeader),
+              cli: cliToken !== null && presentsCliToken(header(request, cliTokenHeader), cliToken),
+              origin: header(request, "origin"),
+              sameOrigin: sameOrigin(request, expectedOrigin()),
+              identity: tailnetIdentity(request, config, null),
+              body: readJson(request, Schema.Unknown)
+            }))
+            if (answered !== null) {
+              json(
+                response,
+                answered.status,
+                answered.body,
+                answered.setCookie === undefined ? {} : { "set-cookie": answered.setCookie }
+              )
+              return
+            }
+          }
+
           const moduleUrl = sandboxesModuleUrl(request.method ?? "GET", url) ?? url
           if (moduleUrl.pathname === "/v1/modules" || moduleUrl.pathname.startsWith("/v1/modules/")) {
             const result = await runRequest(
@@ -4519,7 +4582,7 @@ export const startHttpServer = async (
           rejectUpgrade(socket, 503)
           return
         }
-        shadowServed(shadowFacts(request), mode, url.pathname, 101)
+        shadowServed(shadowFacts(request, mode), mode, url.pathname, 101)
         webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
           watchSocket(webSocket)
           webSockets.add(webSocket)
