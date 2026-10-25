@@ -602,6 +602,10 @@ describe("aws-nuke scan coverage", () => {
     const bracketed =
       `time="t" level=error msg=listing [owner=eu-central-1 resource_type=QBusinessIndex error="${noHost}"]`
     expect(discoveryFailures(bracketed)).toEqual([bracketed])
+    // A bracket inside a bracket: the whole outer segment is skipped, so its fields stay out of the line's.
+    const nested =
+      "level=error msg=listing [context=[retry] owner=eu-central-1 resource_type=BedrockModelCustomizationJob error=UnknownOperationException]"
+    expect(discoveryFailures(nested)).toEqual([nested])
     // A quoted value keeps its brackets: the real fields still read, and the gap stays expected.
     const quoted = listingFailedIn("eu-central-1", "QBusinessIndex", `[retry 3] ${noHost}`)
     expect(discoveryFailures(quoted)).toEqual([])

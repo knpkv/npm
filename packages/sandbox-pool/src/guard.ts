@@ -110,15 +110,43 @@ const expectedFailures: ReadonlyArray<ExpectedFailure> = [
 /** logfmt `key=value` pairs; a quoted value is consumed whole, so text inside it never reads as another key. */
 const logfmtPair = /(?:^|\s)(\w+)=("(?:[^"\\]|\\.)*"|\S*)/g
 
-/** A quoted value, kept whole, or an unquoted bracketed segment, which holds no fields of the line. */
-const quotedOrBracketed = /("(?:[^"\\]|\\.)*")|\[[^\]]*\]/g
+/**
+ * The line with every unquoted bracketed segment blanked out, through its matching outer bracket however
+ * deeply brackets nest; quoted values are kept whole, brackets in them included. An unclosed bracket blanks
+ * the rest of the line, so text inside one never reads as a field.
+ */
+const topLevel = (line: string): string => {
+  let out = ""
+  let depth = 0
+  let quoted = false
+  for (let index = 0; index < line.length; index++) {
+    const char = line[index] ?? ""
+    if (quoted) {
+      out += depth === 0 ? char : " "
+      if (char === "\\") {
+        index++
+        out += depth === 0 ? (line[index] ?? "") : " "
+      } else if (char === "\"") quoted = false
+    } else if (char === "\"") {
+      quoted = true
+      out += depth === 0 ? char : " "
+    } else if (char === "[") {
+      depth++
+      out += " "
+    } else if (char === "]" && depth > 0) {
+      depth--
+      out += " "
+    } else out += depth === 0 ? char : " "
+  }
+  return out
+}
 
 /**
  * The line's top-level logfmt fields, quoted values unquoted, each key with every value it was given. Text in
  * unquoted brackets is not read. Resource listings without these have none.
  */
 const logfmtFields = (line: string): ReadonlyMap<string, ReadonlyArray<string>> => {
-  const top = line.replace(quotedOrBracketed, (match, quoted: string | undefined) => quoted ?? " ")
+  const top = topLevel(line)
   const fields = new Map<string, Array<string>>()
   for (const [, key = "", value = ""] of top.matchAll(logfmtPair)) {
     fields.set(key, [...(fields.get(key) ?? []), value.startsWith("\"") ? value.slice(1, -1) : value])
