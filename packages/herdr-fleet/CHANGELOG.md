@@ -1,5 +1,11 @@
 # @knpkv/herdr-fleet
 
+## 0.23.0
+
+### Minor Changes
+
+- [#1142](https://github.com/knpkv/npm/pull/1142) [`38c3bc2`](https://github.com/knpkv/npm/commit/38c3bc2e4c91bc411bab592f73066ddf142b9e86) Thanks [@konopkov](https://github.com/konopkov)! - New `@knpkv/herdr-fleet/job-outcome` export. `jobOutcome(record)` says what became of a job: pending, running, succeeded, rejected, expired, failed, or failed after a person approved it. `jobFailureReason(error)` sorts a failure into a closed set of reasons with one plain line each ("The agent didn't report back in time", "The hub restarted while it ran", "The checkout wasn't on main", …). A structured agent error is matched by its code before any text.
+
 ## 0.22.0
 
 ### Minor Changes

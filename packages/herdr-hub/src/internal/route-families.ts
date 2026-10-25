@@ -83,6 +83,11 @@ export const routeFamily = (method: string, pathname: string): RouteFamily | nul
   if (pathname.startsWith("/v1/connect/") || pathname === "/v1/host/resources") {
     return read ? family("connect.read", permission("view")) : null
   }
+  // Needs-you actions on a failed fleet job: dismissing is a person's write; Try again submits a job.
+  if (pathname === "/v1/modules/fleet/failures/dismiss") return write ? family("fleet.failures.dismiss", person) : null
+  if (pathname === "/v1/modules/fleet/failures/retry") {
+    return write ? family("fleet.failures.retry", permission("jobs.submit")) : null
+  }
   if (pathname === "/v1/modules" || pathname.startsWith("/v1/modules/")) {
     return read
       ? family("modules.read", permission("view"))

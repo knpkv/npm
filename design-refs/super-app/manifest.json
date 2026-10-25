@@ -14,7 +14,7 @@
     }
   },
   "files": {
-    "fixture.json": "14994007af90cf012da1dc2fc67eeb5377710c07acaa66c46b1897d23503ea32",
+    "fixture.json": "a05b50b67305f7c5afb2f8bf560e4cc7f007378d38ad025d3612afd9f4e5a800",
     "screens/usage-limits.html": "4a27c45b504692104b955120335bfb34faa0151ac133b018f4be301f749839f9",
     "screens/rly.css": "35e7a411e4fb4a422ebdaa33ef63e6d3a1480a5e8d30389d2b035025e636b1c6",
     "screens/chrome.css": "eb7b1c209644c22cc21536d063d54e747aa8a3cd19dc6e245df0811ca8b6febc",
@@ -26,7 +26,8 @@
     "screens/identity.html": "bd5057c5873b4266b6e0e4106058e7f7f293c46400c4b175c7cb58f8a471c44b",
     "screens/relay-screen-art-identity.js": "1cf249020877889dd660402646e615a18531373ad70cd91affe5a436c0e8b65b",
     "screens/needs-you.html": "f2bce9236a302854033242cd870daf8e9a6c1a17b72cbdbfba0b19b50bfaab69",
-    "screens/work.html": "691c3d33b193f22182028ffef99377274d4934d6d5483741da25d6f575dc1105"
+    "screens/work.html": "691c3d33b193f22182028ffef99377274d4934d6d5483741da25d6f575dc1105",
+    "screens/previews.html": "cbfee54a65baf36d94bdc8f2ab7d9f9854fd1dd14a2e0350491ce46e856cc1ce"
   },
   "states": [
     {
@@ -479,6 +480,83 @@
       "regions": ["nav", "session", "header", "tabs", "filter", "list", "action", "finished", "detail"],
       "source": "html",
       "ref": "screens/work.html"
+    },
+    {
+      "screen": "previews",
+      "state": "populated",
+      "route": "/#previews/running",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["nav", "session", "header", "list", "action"],
+      "source": "html",
+      "ref": "screens/previews.html"
+    },
+    {
+      "screen": "previews",
+      "state": "empty",
+      "route": "/#previews/running",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["nav", "session", "header", "status"],
+      "source": "html",
+      "ref": "screens/previews.html"
+    },
+    {
+      "screen": "previews",
+      "state": "loading",
+      "route": "/#previews/running",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["nav", "session", "header", "list"],
+      "source": "html",
+      "ref": "screens/previews.html"
+    },
+    {
+      "screen": "previews",
+      "state": "host-offline",
+      "route": "/#previews/running",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["nav", "session", "header", "notice", "list", "action"],
+      "source": "html",
+      "ref": "screens/previews.html"
+    },
+    {
+      "screen": "previews",
+      "state": "dead-preview-open",
+      "route": "/#previews/running",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["nav", "session", "header", "list", "action", "sheet"],
+      "source": "html",
+      "ref": "screens/previews.html"
+    },
+    {
+      "screen": "previews",
+      "state": "old-head",
+      "route": "/#previews/running",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["nav", "session", "header", "list", "action"],
+      "source": "html",
+      "ref": "screens/previews.html"
+    },
+    {
+      "screen": "previews",
+      "state": "stop-confirmed",
+      "route": "/#previews/running",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["nav", "session", "header", "notice", "list", "action"],
+      "source": "html",
+      "ref": "screens/previews.html"
     }
   ]
 }

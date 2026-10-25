@@ -2,6 +2,35 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.66.0
+
+### Minor Changes
+
+- [#1143](https://github.com/knpkv/npm/pull/1143) [`9d226d8`](https://github.com/knpkv/npm/commit/9d226d8a03eaaa6b8be04502953b973677a7ec5c) Thanks [@konopkov](https://github.com/konopkov)! - A failed fleet job in the Needs-you list can be dismissed or tried again. `POST /v1/modules/fleet/failures/dismiss` takes `{ host, jobId }` and hides a failed, interrupted or expired job from the list. `POST /v1/modules/fleet/failures/retry` takes `{ host, jobId, apply: "same" | "main" }` and submits the same request again, or `nix.apply main` for "Apply main instead", to the host that ran it. It submits as the person pressing it, exactly as `POST /v1/jobs` would: from the hub's tailnet page a request that needs an approval asks for one again. Only `nix.check`, `nix.apply`, `agent.delegate` and `agent.message` retry. A second press answers with the first retry's job and submits nothing. A `nix.apply` failure now carries `applyRef`, the ref it applied. Dismissals and retries are kept on the hub in `needs-you.sqlite`.
+
+## 0.65.0
+
+### Minor Changes
+
+- [#1136](https://github.com/knpkv/npm/pull/1136) [`101ebc5`](https://github.com/knpkv/npm/commit/101ebc57782606f66af3a217bba62206b16f26e3) Thanks [@konopkov](https://github.com/konopkov)! - The super-app shows who is logged in:
+
+  - a session control with a popover (who, how, until when, Log out);
+  - a "Continue as …?" card with Log in with Tailscale on Approvals;
+  - the `herdr-hub login` link exchange, with the code taken out of the address first.
+
+  An open page reads its session every minute, which renews a sliding one. Nothing is enforced yet, so no copy claims view-only access or passkeys.
+
+- [#1142](https://github.com/knpkv/npm/pull/1142) [`38c3bc2`](https://github.com/knpkv/npm/commit/38c3bc2e4c91bc411bab592f73066ddf142b9e86) Thanks [@konopkov](https://github.com/konopkov)! - The Needs-you read now also returns the fleet's failed and interrupted jobs from the last 7 days, across every host, newest first, at most 20. Each one carries its host, kind, who asked, why it failed in plain words, and whether a person had approved it. A job retried later on the same host with the same request, which then succeeded, drops out. The failures travel in a new `failures` list beside `items`, so pages built before it still read the response. Each contribution also reports `lastDecisionAt`, the newest approval or rejection in that week. Nothing on screen changes yet.
+
+### Patch Changes
+
+- Updated dependencies [[`5018c55`](https://github.com/knpkv/npm/commit/5018c55e103f52e2fab1343a6a0ace7dcec27324), [`8553d5a`](https://github.com/knpkv/npm/commit/8553d5a55e06eb733135f5347b4535036a9f7653), [`38c3bc2`](https://github.com/knpkv/npm/commit/38c3bc2e4c91bc411bab592f73066ddf142b9e86)]:
+  - @knpkv/herdr-connect@0.31.5
+  - @knpkv/herdr-work@0.13.0
+  - @knpkv/herdr-fleet@0.23.0
+  - @knpkv/herdr-coordinator@0.4.15
+  - @knpkv/herdr-usage@0.2.2
+
 ## 0.64.0
 
 ### Minor Changes

@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Previews</title>
+<link rel="stylesheet" href="rly.css">
+<link rel="stylesheet" href="chrome.css">
+<script src="relay-chef-modern.js"></script>
+<script src="relay-creature-states.js"></script>
+<script src="relay-screen-art-identity.js"></script>
+<style>
+@font-face { font-display: block; font-family: "Geist Variable"; font-style: normal; font-weight: 100 900; src: url("fonts/geist-variable.woff2") format("woff2-variations"), url("fonts/geist-variable.woff2") format("woff2"); }
+@font-face { font-display: block; font-family: "Geist"; font-style: normal; font-weight: 100 900; src: url("fonts/geist-variable.woff2") format("woff2-variations"), url("fonts/geist-variable.woff2") format("woff2"); }
+@font-face { font-display: block; font-family: "Geist Mono Variable"; font-style: normal; font-weight: 100 900; src: url("fonts/geist-mono-variable.woff2") format("woff2-variations"), url("fonts/geist-mono-variable.woff2") format("woff2"); }
+@font-face { font-display: block; font-family: "Geist Mono"; font-style: normal; font-weight: 100 900; src: url("fonts/geist-mono-variable.woff2") format("woff2-variations"), url("fonts/geist-mono-variable.woff2") format("woff2"); }
+html, body { margin: 0; }
+body { font: 430 1rem/1.5 var(--rly-font-ui); color: var(--rly-color-text-1); background: var(--rly-color-canvas); text-wrap: pretty; overflow-wrap: break-word; }
+a { color: inherit; text-decoration: none; }
+a:hover { color: var(--rly-color-text-1); text-decoration: underline; text-underline-offset: .2em; }
+button { font: inherit; }
+.state + .state { border-block-start: 1px solid var(--rly-color-border-2); }
+.screen { position: relative; overflow: clip; }
+.shell { min-block-size: 100vh; }
+.side-in { gap: 2rem; }
+.nav-heading { padding: .25rem .8rem .4rem; font-size: .75rem; color: var(--rly-color-text-3); }
+.nav-group { display: grid; gap: .3rem; }
+.nav-group + .nav-group { border-block-start: 1px solid var(--rly-color-border-1); margin-block-start: 1rem; padding-block-start: 1rem; }
+.session .avatar:empty { display: none; }
+.mast { block-size: 80px; gap: 1rem; }
+.mast-crumb { display: flex; gap: .7rem; align-items: center; font-size: .875rem; color: var(--rly-color-text-2); }
+.mast-crumb b { font-weight: 520; color: var(--rly-color-text-1); }
+.ask { border: 1px solid var(--rly-color-border-1); padding-inline: .7rem .65rem; }
+.hosts.p { display: none; }
+main { padding: 2rem 40px 3rem; }
+.page { display: grid; gap: 1.5rem; max-inline-size: 56rem; min-inline-size: 0; }
+.page-head { display: grid; gap: .35rem; }
+.page-head h1 { margin: 0; font-size: 2.25rem; font-weight: 620; letter-spacing: -0.045em; line-height: 1.08; }
+.hostline, .info { margin: 0; display: flex; gap: .45rem; align-items: start; font-size: .875rem; color: var(--rly-color-text-2); }
+.hostline relay-glyph, .info svg { flex: none; margin-block-start: .15rem; }
+.ftabs { display: flex; gap: 1.75rem; border-block-end: 1px solid var(--rly-color-border-1); overflow-x: auto; scrollbar-width: none; margin-block-start: -.25rem; }
+.ftab { flex: none; display: flex; gap: .4rem; align-items: center; min-block-size: 44px; white-space: nowrap; font-size: .9375rem; color: var(--rly-color-text-2); }
+.ftab[aria-current="page"] { font-weight: 620; color: var(--rly-color-text-1); box-shadow: inset 0 -2px 0 var(--rly-color-text-1); }
+.ftab .n { font-size: .75rem; min-inline-size: 20px; text-align: center; padding-inline: .3rem; border-radius: 6px; background: var(--rly-color-surface-2); color: var(--rly-color-text-1); }
+.ftab:hover { text-decoration: none; }
+.notice-row { display: flex; flex-wrap: wrap; gap: .75rem 1rem; align-items: center; }
+.notice-row > div { flex: 1 1 18rem; min-inline-size: 0; }
+.statecard { display: grid; justify-items: start; gap: .75rem; padding: 1.5rem; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-surface-1); max-inline-size: 40rem; }
+.statecard h2 { margin: 0; font-size: 1.4rem; font-weight: 620; letter-spacing: -0.02em; line-height: 1.3; }
+.statecard > p { margin: 0; font-size: .9375rem; color: var(--rly-color-text-2); }
+.cmd { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; inline-size: 100%; }
+.cmd code { flex: 1 1 12rem; min-inline-size: 0; padding: .6rem .9rem; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-field); background: var(--rly-color-surface-2); font: 430 .875rem/1.5 var(--rly-font-mono); overflow-wrap: anywhere; }
+.empty { display: grid; justify-items: start; gap: .75rem; padding-block: 1rem .5rem; max-inline-size: 34em; }
+.empty h2 { margin: 0; font-size: 1.6rem; font-weight: 620; letter-spacing: -0.025em; line-height: 1.25; }
+.empty p { margin: 0; color: var(--rly-color-text-2); }
+.empty p a { color: var(--rly-color-text-1); text-decoration: underline; text-underline-offset: .2em; }
+.skel { display: grid; gap: .75rem; }
+.skel .rly_Skeleton-module__block { block-size: 84px; }
+.grp { display: grid; gap: .6rem; min-inline-size: 0; }
+.grp-head { display: flex; gap: .6rem; align-items: baseline; }
+.grp-head h2 { margin: 0; font-size: 1.05rem; font-weight: 620; letter-spacing: -0.01em; line-height: 1.3; }
+.grp-head span { font-size: .875rem; color: var(--rly-color-text-2); font-variant-numeric: tabular-nums; }
+.row { display: flex; flex-wrap: wrap; gap: .75rem 1rem; align-items: center; padding: .9rem 1.1rem; background: var(--rly-color-surface-1); border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-control); min-inline-size: 0; }
+.row-main { flex: 1 1 20rem; min-inline-size: 0; display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 1rem; row-gap: .3rem; align-items: start; }
+.row-main.who { grid-template-columns: 44px minmax(0, 1fr); }
+.row-main.who > relay-agent { grid-row: span 4; }
+.row-main > * { grid-column: -2; }
+.row-main > relay-agent { grid-column: 1; }
+.row h3 { margin: 0; font-size: .9375rem; font-weight: 620; line-height: 1.4; overflow-wrap: anywhere; }
+.row .reason, .row blockquote { margin: 0; font-size: .875rem; overflow-wrap: anywhere; }
+.row .meta { margin: 0; font-size: .8125rem; color: var(--rly-color-text-2); overflow-wrap: anywhere; }
+.row .lbl { display: flex; margin-block-start: .15rem; }
+.row-act { display: flex; flex-wrap: wrap; gap: .5rem; flex: 0 0 auto; justify-content: flex-end; }
+.items { flex: 1 1 100%; margin: 0; padding: 0; list-style: none; display: grid; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-canvas); }
+.items li { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; padding: .6rem .85rem; }
+.items li + li { border-block-start: 1px solid var(--rly-color-border-1); }
+.items li > div:first-child { flex: 1 1 14rem; min-inline-size: 0; display: grid; gap: .1rem; }
+.items li a { font-size: .875rem; font-weight: 520; overflow-wrap: anywhere; }
+.items li span { font-size: .75rem; color: var(--rly-color-text-2); }
+.done { display: grid; gap: .6rem; min-inline-size: 0; }
+.done h2 { margin: 0; font: inherit; }
+.disc { display: flex; gap: .6rem; align-items: center; inline-size: 100%; min-block-size: 52px; padding-inline: 1rem; text-align: start; font: 620 1.05rem/1.3 var(--rly-font-ui); letter-spacing: -0.01em; color: var(--rly-color-text-1); background: transparent; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-control); cursor: pointer; }
+.disc .chev { display: flex; }
+.disc[aria-expanded="true"] .chev { transform: rotate(90deg); }
+.disc .n { font-weight: 430; font-size: .875rem; color: var(--rly-color-text-2); }
+.done ul { margin: 0; padding: 0; list-style: none; display: grid; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-control); background: var(--rly-color-surface-1); }
+.done li { display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: center; padding: .9rem 1.1rem; }
+.done li + li { border-block-start: 1px solid var(--rly-color-border-1); }
+.done li > div:first-child { flex: 1 1 18rem; min-inline-size: 0; display: grid; gap: .3rem; }
+.done li > div:first-child > a { font-size: .9375rem; font-weight: 620; line-height: 1.4; overflow-wrap: anywhere; }
+.done .out { display: flex; flex-wrap: wrap; gap: .25rem .75rem; align-items: center; }
+.done .out > span:last-child { font-size: .8125rem; color: var(--rly-color-text-2); }
+.backdrop { position: absolute; inset: 0; z-index: 9; background: oklch(10% 0 none / 0.35); }
+.sheet { position: absolute; z-index: 10; inset: 16px 16px auto auto; inline-size: 440px; box-sizing: border-box; display: grid; gap: 1.25rem; align-content: start; padding: 1.5rem; background: var(--rly-color-surface-1); color: var(--rly-color-text-1); border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-overlay); }
+.sheet h2 { margin: 0; font-size: 1.3rem; font-weight: 620; letter-spacing: -0.025em; line-height: 1.3; }
+.sheet > p { margin: 0; font-size: .9375rem; color: var(--rly-color-text-2); overflow-wrap: anywhere; }
+.facts { margin: 0; display: grid; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); }
+.facts > div { display: grid; grid-template-columns: minmax(0, 6.5rem) minmax(0, 1fr); gap: .2rem 1rem; padding: .65rem .9rem; }
+.facts > div + div { border-block-start: 1px solid var(--rly-color-border-1); }
+.facts dt { font-size: .8125rem; color: var(--rly-color-text-2); }
+.facts dd { margin: 0; font-size: .875rem; overflow-wrap: anywhere; }
+.goals { margin: 0; padding: 0; list-style: none; display: grid; max-block-size: 12.5rem; overflow-y: auto; border: 1px solid var(--rly-color-border-1); border-radius: var(--rly-radius-group); background: var(--rly-color-canvas); }
+.goals li { padding: .55rem .9rem; font-size: .875rem; overflow-wrap: anywhere; }
+.goals li + li { border-block-start: 1px solid var(--rly-color-border-1); }
+.actions { display: flex; flex-wrap: wrap; gap: .6rem; }
+.fail { padding: 2rem; display: grid; gap: .75rem; max-inline-size: 40em; }
+.fail h1 { margin: 0; font-size: 2rem; font-weight: 620; letter-spacing: -0.03em; }
+.fail p { margin: 0; color: var(--rly-color-text-2); }
+.fail code { font: 430 .875rem/1.4 var(--rly-font-mono); color: var(--rly-color-text-1); }
+@media (max-width: 599px) {
+  .shell { display: flex; flex-direction: column; }
+  .work { flex: 1; }
+  .screen .nav { position: sticky; order: 9; grid-template-columns: repeat(var(--bar-cols, 5), minmax(0, 1fr)); }
+  .nav-item .count { display: none; }
+  .mast { block-size: 72px; }
+  .mast-crumb, .ask { display: none; }
+  .hosts.d { display: none; }
+  .hosts.p { display: flex; font-size: .6875rem; padding-inline: .3rem; }
+  main { padding: .75rem 16px 6.5rem; }
+  .page { gap: 1.1rem; }
+  .page-head h1 { font-size: 1.75rem; }
+  .ftabs { gap: 1.25rem; }
+  .row { padding: .85rem .9rem; }
+  .row-main { column-gap: .75rem; }
+  .row-act, .items li > div:last-child { flex: 1 1 100%; }
+  .row-act .rly_Button-module__root, .items li > div:last-child .rly_Button-module__root, .notice-row .rly_Button-module__root, .done li .rly_Button-module__root { flex: 1 1 0; inline-size: 100%; }
+  .done li { padding: .85rem .9rem; }
+  .rly_Button-module__dense, .rly_Button-module__compact { min-block-size: var(--rly-control-height-default, 44px); }
+  .statecard { padding: 1.25rem; }
+  .statecard h2 { font-size: 1.25rem; }
+  .sheet { inset: auto 0 0 0; inline-size: auto; padding: 1.25rem 1rem 1.5rem; border-radius: 20px 20px 0 0; }
+  .sheet .actions { flex-direction: column; }
+  .sheet .actions .rly_Button-module__root { inline-size: 100%; }
+}
+.page-head .lead { margin: 0; font-size: .9375rem; color: var(--rly-color-text-2); }
+.nav-item[data-module="previews"] .count { background: var(--rly-color-surface-3); color: var(--rly-color-text-1); }
+.nav-item[data-module="previews"] svg { flex: none; }
+.row-main.who > relay-agent { grid-row: span 5; }
+.row .kind, .sheet .kind { display: flex; gap: .4rem; align-items: center; font-size: .75rem; color: var(--rly-color-text-2); }
+.row .head { margin: 0; font-size: .8125rem; color: var(--rly-color-text-1); overflow-wrap: anywhere; }
+.row .where { display: flex; flex-wrap: wrap; gap: .1rem .75rem; align-items: baseline; }
+.row .where > span { overflow-wrap: anywhere; }
+.row .guide { color: var(--rly-color-text-1); text-decoration: underline; text-underline-offset: .2em; }
+.sheet { inline-size: 460px; gap: 1.1rem; }
+.sheet-head { display: flex; gap: .75rem; align-items: start; }
+.sheet-head > div { flex: 1; min-inline-size: 0; display: grid; gap: .3rem; }
+.sheet-head h2 { overflow-wrap: anywhere; }
+.sheet .facts > div { grid-template-columns: minmax(0, 7.5rem) minmax(0, 1fr); padding: .6rem .9rem; }
+.sheet .cmd code { flex: 1 1 14rem; }
+@media (max-width: 599px) {
+  .sheet { inline-size: auto; }
+  .sheet .actions .rly_Button-module__root { min-block-size: var(--rly-control-height-default, 44px); }
+}
+</style>
+</head>
+<body data-rly-root data-theme="light">
+<div id="app"></div>
+<script>
+(() => {
+  const params = new URLSearchParams(location.search);
+  const theme = params.get("theme") === "dark" ? "dark" : "light";
+  const app = document.getElementById("app");
+  document.body.dataset.theme = theme;
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const svg = (size, inner) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true">${inner}</svg>`;
+  const ICON = {
+    clock: '<circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path>',
+    alert: '<circle cx="12" cy="12" r="10"></circle><line x1="12" x2="12" y1="8" y2="12"></line><line x1="12" x2="12.01" y1="16" y2="16"></line>',
+    minus: '<path d="M5 12h14"></path>',
+    check: '<path d="M20 6 9 17l-5-5"></path>',
+    info: '<circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path>',
+  };
+  const icon = (name, size = 16) => svg(size, ICON[name] || "");
+  const stateLabel = (label, tone, ic, compact) =>
+    `<span class="rly_StateLabel-module__root rly_StateLabel-module__${esc(tone)} rly_StateLabel-module__${compact ? "compact" : "defaultSize"}">${ic ? icon(ic) : ""}<span>${esc(label)}</span></span>`;
+  const NOTICE_ICON = { caution: "clock", critical: "alert", neutral: "info", positive: "check" };
+  const notice = (n, attrs = "") =>
+    `<div class="rly_Notice-module__root rly_Notice-module__${esc(n.tone)}" role="${esc(n.role)}"${attrs}><div class="rly_Notice-module__lead"><span aria-hidden="true" class="rly_Notice-module__icon">${icon(NOTICE_ICON[n.tone])}</span><div class="rly_Notice-module__message"><span>${esc(n.text)}</span></div></div></div>`;
+  const button = (label, o = {}) => {
+    const v = o.variant || "secondary", size = o.size || "dense";
+    const a = [`class="rly_Button-module__root rly_Button-module__${v} rly_Button-module__${size}"`, 'type="button"'];
+    if (o.disabled) a.push("disabled");
+    if (o.describedby) a.push(`aria-describedby="${esc(o.describedby)}"`);
+    if (o.label) a.push(`aria-label="${esc(o.label)}"`);
+    if (o.expanded != null) a.push(`aria-expanded="${o.expanded}"`);
+    if (o.controls) a.push(`aria-controls="${esc(o.controls)}"`);
+    if (o.haspopup) a.push('aria-haspopup="dialog"');
+    if (o.region) a.push(`data-region="${o.region}"`);
+    return `<button ${a.join(" ")}><span class="rly_Button-module__content"><span class="rly_Button-module__label">${esc(label)}</span></span></button>`;
+  };
+  const info = (text, id) => `<p class="info"${id ? ` id="${esc(id)}"` : ""}>${icon("info")}<span>${esc(text)}</span></p>`;
+  const skeleton = (variant, style = "") => `<div aria-hidden="true" class="rly_Skeleton-module__root rly_Skeleton-module__${variant}" role="presentation"${style ? ` style="${style}"` : ""}></div>`;
+
+  const loadFonts = async () => {
+    const specs = ['430 16px "Geist"', '620 16px "Geist"', '430 16px "Geist Variable"', '620 16px "Geist Variable"', '430 16px "Geist Mono"', '430 16px "Geist Mono Variable"'];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const res = await Promise.allSettled(specs.map((f) => document.fonts.load(f)));
+      res.forEach((r, i) => { if (r.status === "rejected") console.warn("font load failed", specs[i], r.reason); });
+      try { await document.fonts.ready; } catch (e) { console.warn("fonts.ready failed", e); }
+      if (document.fonts.check("16px Geist")) return true;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    return document.fonts.check("16px Geist");
+  };
+  const finish = async (status) => {
+    try { await Promise.all([customElements.whenDefined("relay-glyph"), customElements.whenDefined("relay-agent"), customElements.whenDefined("relay-chef")]); } catch (e) { console.warn("custom elements not defined", e); }
+    const ok = await loadFonts();
+    if (status === "1" && !ok) { app.innerHTML = `<main class="fail" role="alert"><h1>Fonts didn’t load</h1><p>Geist isn’t available from screens/fonts, so the screen can’t be captured.</p></main>`; return; }
+    requestAnimationFrame(() => requestAnimationFrame(() => { if (status === "1") document.documentElement.dataset.designReady = "true"; }));
+  };
+
+  // Chrome as on 25 Previews: the hub shell with Previews added after Fleet (its shell constants, not in data.previews).
+  const MOD = { connect: ["Connect", "home"], fleet: ["Fleet", "fleet"], previews: ["Previews", ""], code: ["Code", "code"], usage: ["Usage", "usage"], hostResources: ["Host resources", "host"], sandboxes: ["Sandboxes", "shield"], stacks: ["Stacks", "stacks"] };
+  const HUB = { main: ["connect", "fleet", "previews"], after: ["code", "usage", "hostResources", "sandboxes", "stacks"], afterLabel: "Personal tools", bar: ["connect", "fleet", "code", "usage"], cur: "previews" };
+  const PREVIEWS_GLYPH = (size) => `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true"><path d="M3 5h18v14H3zM3 9h18M10 12.5l4 2.25-4 2.25z"></path></svg>`;
+
+  const chrome = (P, s, X, hostText) => {
+    const g = (k, size) => k === "previews" ? PREVIEWS_GLYPH(size) : `<relay-glyph name="${MOD[k][1]}" size="${size}"></relay-glyph>`;
+    const navItem = (k) => {
+      const [name] = MOD[k], cur = k === HUB.cur;
+      const count = k === "previews" ? s.count : k === "fleet" ? P.fleetCount : "";
+      const aria = k === "previews" && s.count ? `Previews, ${s.countAria}` : k === "fleet" ? `Fleet, ${P.fleetAria}` : name;
+      return `<a href="#" class="nav-item" data-module="${k}"${HUB.after.includes(k) ? " data-secondary" : ""} data-bar="${HUB.bar.includes(k)}" aria-label="${esc(aria)}" aria-current="${cur ? "page" : "false"}"><span class="g19">${g(k, 19)}</span><span class="g24">${g(k, 24)}</span><span class="side-name">${esc(name)}</span><span class="bar-name">${esc(name)}</span>${count ? `<span class="count" aria-hidden="true">${esc(count)}</span>` : ""}</a>`;
+    };
+    const ses = X.person;
+    const nav = `<aside class="side" aria-label="Relay navigation"><div class="side-in">
+      <a href="#" class="brand" aria-label="Relay, Connect home"><relay-chef size="32"></relay-chef><span>Relay<small style="display: block; font-size: .65rem; font-weight: 430; letter-spacing: 0; margin-block-start: .2rem; color: var(--rly-color-text-2)">Ask anything about your work</small></span></a>
+      <nav class="nav" aria-label="Modules" data-region="nav" style="--bar-cols: ${HUB.bar.length + 1}">
+        <div class="nav-group">${HUB.main.map(navItem).join("")}</div>
+        <div class="nav-group"><span class="nav-heading">${esc(HUB.afterLabel)}</span>${HUB.after.map(navItem).join("")}</div>
+        <button type="button" class="nav-more" aria-label="${esc(P.moreAria)}" aria-current="page" aria-expanded="false" data-current="true"><relay-glyph name="grid" size="24"></relay-glyph><span>More</span></button>
+      </nav>
+      <button type="button" class="session" data-region="session" aria-label="${esc(`Your Tailscale session, ${ses.name}, logged in until ${ses.until}`)}" aria-expanded="false"><span class="avatar" aria-hidden="true">${esc(ses.name.slice(0, 1).toLowerCase())}</span><span>${esc(ses.name)}<small>${esc(`Logged in until ${ses.until}`)}</small></span><span class="online" aria-hidden="true"></span></button>
+    </div></aside>`;
+    const header = `<div data-region="header">
+      <header class="mast">
+        <a href="#" class="mast-brand" aria-label="Ask Relay"><relay-chef size="28"></relay-chef><b class="mast-name">Relay</b></a>
+        <div class="mast-crumb"><span>Relay</span><span aria-hidden="true">/</span><b>${esc(P.title)}</b></div>
+        <div class="tools">
+          <button type="button" class="hosts d" aria-label="${esc(hostText)}" aria-expanded="false"><relay-glyph name="shield" size="19"></relay-glyph><span>${esc(hostText)}</span></button>
+          <button type="button" class="hosts p" aria-label="${esc(hostText)}" aria-expanded="false"><relay-glyph name="shield" size="19"></relay-glyph><span>${esc(hostText)}</span></button>
+          <button type="button" class="bell" aria-label="Notifications" aria-expanded="false"><relay-glyph name="bell" size="19"></relay-glyph></button>
+          <button type="button" class="ask" aria-label="Ask Relay" aria-expanded="false"><span class="chef-desk"><relay-chef size="20"></relay-chef></span><span class="chef-phone"><relay-chef size="20"></relay-chef></span><span>Ask Relay</span><kbd>Ctrl J</kbd></button>
+        </div>
+      </header>
+      <nav class="crumb" aria-label="Breadcrumb"><span class="cur" aria-current="page">${esc(P.title)}</span></nav>
+    </div>`;
+    return { nav, header };
+  };
+
+  const screen = (id, V, s, X) => {
+    const key = id, R = V.rows, A = V.actions, ids = { notice: key + "--notice", sheet: key + "--sheet" };
+    const hostText = X.pills[s.pill || "all"];
+    const { nav, header } = chrome(V.shell, s, X, hostText);
+    const notices = (s.notices || []).map((k, i) => `<div class="notice-row" data-region="notice"><div>${notice(V.notices[k], i ? "" : ` id="${ids.notice}"`)}</div></div>`).join("");
+    const row = (rk) => {
+      const r = R[rk], tid = `${key}--${rk}`, K = V.kinds[r.kind];
+      const stale = !!(s.offlineHost && r.host === s.offlineHost), old = s.oldHead === rk;
+      const L = r.dead ? V.labels.dead : old ? V.labels.oldHead : null;
+      const action = r.dead ? A.remove : r.stop ? A.stop : A.open;
+      const aria = action === A.open ? A.openAria.replace("{title}", r.title) : `${action}: ${r.title}`;
+      const btn = button(action, { variant: "primary", label: aria, haspopup: !!r.stop, disabled: stale, describedby: stale ? ids.notice : "" });
+      return `<article class="row" aria-labelledby="${tid}" data-row="${esc(rk)}">
+        <div class="row-main${r.agent ? " who" : ""}">${r.agent ? `<relay-agent agent="${esc(r.agent)}" host="${esc(r.host)}" state="${r.stop ? "waiting" : "working"}" stale="${stale}" size="44"></relay-agent>` : ""}
+          <span class="kind"><relay-glyph name="${K.glyph}" size="14"></relay-glyph>${esc(K.word)}</span>
+          <h3 id="${tid}"><a href="#" aria-haspopup="dialog">${esc(r.title)}</a></h3>
+          ${old ? "" : `<p class="head">${esc(r.head)}</p>`}
+          <p class="meta where"><span>${esc(r.where + (stale ? V.lastKnown : ""))}</span>${r.guide ? `<a href="#" class="guide">${esc(A.guide)}</a>` : ""}</p>
+          ${L ? `<span class="lbl">${stateLabel(L.label, L.tone, L.icon, true)}</span>` : ""}
+        </div>
+        <div class="row-act" data-region="action">${btn}</div>
+      </article>`;
+    };
+    const groups = !s.groups.length ? "" : `<div class="grps" data-region="list" style="display: grid; gap: 1.5rem">${s.groups.map(([g, keys]) => `<section class="grp" aria-labelledby="${key}--${g}">
+        <div class="grp-head"><h2 id="${key}--${g}">${esc(V.groups[g])}</h2><span>${keys.length}</span></div>
+        ${keys.map(row).join("")}
+      </section>`).join("")}</div>`;
+    const loading = !s.loading ? "" : `<div class="skel" aria-label="Loading previews" aria-busy="true" data-region="list">${skeleton("text", "inline-size: 6rem")}${skeleton("block")}${skeleton("block")}${skeleton("block")}${skeleton("text", "inline-size: 8rem")}${skeleton("block")}</div>`;
+    const E = V.empty;
+    const empty = !s.empty ? "" : `<section class="empty" data-region="status"><relay-agent agent="pkgsrc" host="atlas" state="idle" size="88"></relay-agent><h2>${esc(E.title)}</h2><p>${esc(E.body)}</p></section>`;
+    let sheet = "";
+    if (s.sheet === "detail") {
+      const D = V.detailSheet, r = R[D.row], K = V.kinds[r.kind], L = V.labels.dead;
+      sheet = `<div class="backdrop" aria-hidden="true"></div><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="${ids.sheet}" data-region="sheet">
+        <div class="sheet-head"><div><span class="kind"><relay-glyph name="${K.glyph}" size="14"></relay-glyph>${esc(K.word)}</span><h2 id="${ids.sheet}">${esc(r.title)}</h2></div>${button(D.close, { variant: "quiet" })}</div>
+        <span style="display: flex">${stateLabel(L.label, L.tone, L.icon, false)}</span>
+        <div class="cmd"><code>${esc(D.url)}</code>${button(D.copy, { label: D.copyAria })}</div>
+        <dl class="facts">${D.facts.map(([k, x]) => `<div><dt>${esc(k)}</dt><dd>${esc(x)}</dd></div>`).join("")}</dl>
+        <div class="actions">${button(D.openPr, { label: D.openPrAria })}${button(D.openGuide, { label: D.openGuideAria })}${button(D.remove, { variant: "primary" })}</div></div>`;
+    }
+    return `<div class="screen"><div class="shell">${nav}<div class="work">${header}<main><div class="page">
+        <div class="page-head"><h1>${esc(V.shell.title)}</h1><p class="lead">${esc(V.shell.lead)}</p></div>
+        ${notices}${loading}${empty}${groups}
+      </div></main></div></div>${sheet}</div>`;
+  };
+
+  const render = (data) => {
+    const V = data.previews;
+    const X = { person: data.identity.person, pills: data.needsYou.shell.pills };
+    const req = params.get("state") === "all" ? null : params.get("state");
+    if (req && !V.states[req]) {
+      document.documentElement.dataset.state = "unknown";
+      app.innerHTML = `<main class="fail" role="alert" data-region="notice"><h1>Unknown state</h1><p>No state <code>${esc(req)}</code> in fixture.json.</p><p>Known states: ${Object.keys(V.states).map((k) => `<code>${esc(k)}</code>`).join(", ")}.</p></main>`;
+      return;
+    }
+    document.documentElement.dataset.state = req || "all";
+    const list = Object.entries(V.states).filter(([id]) => !req || id === req);
+    app.innerHTML = list.map(([id, s]) => `<section class="state" id="${esc(id)}" aria-label="${esc(s.name)}" data-state="${esc(id)}" data-page="${esc(s.page)}">${screen(id, V, s, X)}</section>`).join("");
+  };
+
+  fetch("../fixture.json", { cache: "no-store" })
+    .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then((fx) => { render(fx.data); finish("1"); })
+    .catch((e) => {
+      app.innerHTML = `<main class="fail" role="alert"><h1>Couldn’t load fixture.json</h1><p>${esc(e.message)}. Serve the project folder over HTTP and open this page from it.</p></main>`;
+      finish("error");
+    });
+})();
+</script>
+</body>
+</html>
