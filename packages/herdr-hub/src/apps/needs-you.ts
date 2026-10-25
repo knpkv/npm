@@ -1,4 +1,12 @@
-/** Ready apps that declare `needs-you` join the hub's collector; each is read from its own endpoint. @module */
+/**
+ * Ready apps that declare `needs-you` join the hub's collector; each is read from its own endpoint.
+ *
+ * The collector is built once for every listener, so a third-party app's items also show where its page is
+ * `local_only`. Left so on purpose: an item carries no free text (only ids, a page and counts), and following it
+ * lands on the panel that says the app opens only on this machine.
+ *
+ * @module
+ */
 import { appPaths } from "@knpkv/hub-app"
 import { Effect } from "effect"
 import type { NeedsYouProvider } from "../module-needs-you-server.js"

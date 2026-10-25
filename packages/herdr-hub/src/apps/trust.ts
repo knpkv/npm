@@ -41,6 +41,15 @@ const serviceWords = {
   badge: "can show a badge in the navigation"
 } satisfies Record<ShellService, string>
 
+/**
+ * Scopes whose app pages open on every listener. Until apps get their own origin an app's page runs with the hub
+ * page's authority, which on an approval surface includes deciding jobs, so only the hub's own scope gets that.
+ */
+const firstPartyScopes = ["@knpkv"]
+
+/** Whether `pkg`, the name the installer verified (never one the app reports), may open its page everywhere. */
+export const opensEverywhere = (pkg: string): boolean => isTrusted(firstPartyScopes, pkg)
+
 /** Whether signatures could be checked on the registry the package came from. */
 export type SignatureCheck = "verified" | "registry_has_no_signatures"
 
@@ -58,5 +67,8 @@ export const trustLines = (app: ResolvedApp, signatures: SignatureCheck | null):
   app.hubApp.services.length === 0
     ? "Hub access: none"
     : `Hub access: ${app.hubApp.services.map((service) => serviceWords[service]).join("; ")}`,
-  "This app runs as you, with access to your files."
+  "This app runs as you, with access to your files.",
+  opensEverywhere(app.package)
+    ? "Its page runs inside the hub in your browser and can do what the hub page can, on every device you open the hub on."
+    : "Its page opens only on this machine's hub until apps get their own origin."
 ]

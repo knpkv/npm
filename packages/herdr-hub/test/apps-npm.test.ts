@@ -246,7 +246,17 @@ describe("trust", () => {
         "Install scripts: none declared",
         "Registry signatures: this registry has none",
         "Hub access: reads the state of every fleet host",
-        "This app runs as you, with access to your files."
+        "This app runs as you, with access to your files.",
+        "Its page runs inside the hub in your browser and can do what the hub page can, on every device you open the hub on."
       ])
+    }).pipe(Effect.runSync))
+
+  // Until apps get their own origin, only a first-party app's page opens on every device.
+  it("tells a third-party app's installer its page opens only on this machine", () =>
+    Effect.gen(function*() {
+      const resolved = yield* resolvedFrom("elsewhere-app", { ...fixtureVersion("1.0.0"), name: "elsewhere-app" })
+      expect(trustLines(resolved, null).at(-1)).toBe(
+        "Its page opens only on this machine's hub until apps get their own origin."
+      )
     }).pipe(Effect.runSync))
 })

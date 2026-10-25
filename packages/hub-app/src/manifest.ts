@@ -28,7 +28,13 @@ export type AppId = typeof AppId.Type
 export const ShellService = Schema.Literals(["fleet.read", "host", "jobs.submit", "relay.post", "needs-you", "badge"])
 export type ShellService = typeof ShellService.Type
 
-const AssetPath = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/))
+/**
+ * A file under the client directory: `/`-separated segments of letters, digits, `.`, `_` and `-`, none of them `.` or
+ * `..`, so `/apps/<id>/app/assets/<path>` never resolves outside that prefix.
+ */
+const AssetPath = Schema.String.check(
+  Schema.isPattern(/^(?!\.\.?(?:\/|$))[A-Za-z0-9._-]+(?:\/(?!\.\.?(?:\/|$))[A-Za-z0-9._-]+)*$/)
+)
 
 /** The client the runner serves under `/app/assets/`: one ES module entry and its stylesheets. */
 export const AppClientAssets = Schema.Struct({
@@ -129,7 +135,10 @@ export const AppUnavailableReason = Schema.Literals([
   "id_mismatch",
   "incompatible",
   "duplicate",
-  "client_failed"
+  "client_failed",
+  // Its page runs only on the hub's loopback listener: a listener that can approve jobs opens no third-party page
+  // until apps get their own origin.
+  "local_only"
 ])
 export type AppUnavailableReason = typeof AppUnavailableReason.Type
 
