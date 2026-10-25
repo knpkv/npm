@@ -2731,6 +2731,347 @@
           "finishedOpen": true
         }
       }
+    },
+    "previews": {
+      "meta": {
+        "about": "Synthetic fixture for 25 Previews, a hub app listing every running preview: per-PR deploy previews and the local servers agents start on hosts, in three groups (Running, Forgotten?, Not answering). A PR\u2019s guide is a link on its row. Every PR-linked row shows the head it serves next to the PR\u2019s head. All data is invented. Times are en-GB, 24-hour.",
+        "locale": "en-GB",
+        "now": "13:47",
+        "defaultState": "populated",
+        "source": "25 Previews.dc.html",
+        "reuses": [
+          "data.identity.person",
+          "data.needsYou.shell.pills",
+          "data.fleet.shell.hubHost"
+        ]
+      },
+      "shell": {
+        "title": "Previews",
+        "lead": "Every preview your agents and PRs are running.",
+        "fleetCount": "6",
+        "fleetAria": "6 need you",
+        "moreAria": "More, Previews is here"
+      },
+      "kinds": {
+        "deploy": {
+          "word": "Deploy",
+          "glyph": "delivery"
+        },
+        "local": {
+          "word": "Local server",
+          "glyph": "host"
+        }
+      },
+      "groups": {
+        "running": "Running",
+        "forgotten": "Forgotten?",
+        "dead": "Not answering"
+      },
+      "actions": {
+        "open": "Open \u2197",
+        "openAria": "Open {title} in a new tab",
+        "stop": "Stop",
+        "remove": "Remove",
+        "guide": "Guide"
+      },
+      "rows": {
+        "l451": {
+          "kind": "local",
+          "agent": "ds-rly",
+          "host": "atlas",
+          "title": "rly \u00b7 PR #451 Port Tabs to the owned API",
+          "head": "serves 3b9d0e2 \u00b7 PR is at 3b9d0e2",
+          "where": "ds-rly \u00b7 atlas \u00b7 :5173 \u00b7 since 20 min"
+        },
+        "d174": {
+          "kind": "deploy",
+          "title": "relay \u00b7 PR #174 Needs you inbox",
+          "head": "serves 7f3ac41 \u00b7 PR is at 7f3ac41",
+          "where": "PR \u00b7 workers.dev \u00b7 since 2 h",
+          "guide": true
+        },
+        "lbirch": {
+          "kind": "local",
+          "agent": "rev-usage",
+          "host": "birch",
+          "title": "usage-reader \u00b7 week-cache",
+          "head": "serves 2d81c5f \u00b7 no PR, branch only",
+          "where": "rev-usage \u00b7 birch \u00b7 :4310 \u00b7 since 5 h"
+        },
+        "d172": {
+          "kind": "deploy",
+          "title": "relay \u00b7 PR #172 Work stage track",
+          "head": "serves e4a0b19 \u00b7 PR is at e4a0b19",
+          "where": "PR \u00b7 workers.dev \u00b7 since 1 d",
+          "guide": true
+        },
+        "py": {
+          "kind": "local",
+          "agent": "coord",
+          "host": "atlas",
+          "title": "relay \u00b7 screens-preview",
+          "head": "running 4 days \u00b7 no open PR",
+          "where": "coord \u00b7 atlas \u00b7 :8765 \u00b7 python3 http.server",
+          "stop": true
+        },
+        "tsx": {
+          "kind": "local",
+          "agent": "docs-sync",
+          "host": "cedar",
+          "title": "confluence-sync \u00b7 draft-pages",
+          "head": "running 9 days \u00b7 no open PR \u00b7 open to the tailnet",
+          "where": "docs-sync \u00b7 cedar \u00b7 :43157 \u00b7 tsx server",
+          "stop": true
+        },
+        "d169": {
+          "kind": "deploy",
+          "title": "relay \u00b7 PR #169 Remove the Approvals tab",
+          "head": "serves 0c5e8d3 \u00b7 PR is at 0c5e8d3",
+          "where": "PR \u00b7 workers.dev \u00b7 since 3 d",
+          "guide": true,
+          "dead": true
+        }
+      },
+      "labels": {
+        "dead": {
+          "label": "Not answering since 13:40",
+          "tone": "critical",
+          "icon": "alert"
+        },
+        "oldHead": {
+          "label": "Serves 566fed4 \u00b7 PR is at 7f3ac41 \u00b7 a new deploy is running",
+          "tone": "caution",
+          "icon": "clock"
+        }
+      },
+      "lastKnown": " \u00b7 last known 13:47",
+      "empty": {
+        "title": "No previews running",
+        "body": "Deploy previews appear when a PR is opened; local servers when an agent starts one."
+      },
+      "notices": {
+        "hostOffline": {
+          "tone": "caution",
+          "role": "status",
+          "text": "cedar didn\u2019t answer since 13:47; its local servers may be missing."
+        },
+        "stopped": {
+          "tone": "neutral",
+          "role": "status",
+          "text": "Stopped python3 http.server on atlas :8765."
+        }
+      },
+      "detailSheet": {
+        "row": "d169",
+        "close": "Close",
+        "url": "https://relay-pr-169.example.workers.dev",
+        "copy": "Copy",
+        "copyAria": "Copy the preview address",
+        "facts": [
+          [
+            "Serves",
+            "0c5e8d3"
+          ],
+          [
+            "PR is at",
+            "0c5e8d3"
+          ],
+          [
+            "Last answered",
+            "13:40"
+          ],
+          [
+            "Checked",
+            "every 5 min, last at 13:45"
+          ],
+          [
+            "Owner",
+            "PR #169, deploy preview"
+          ]
+        ],
+        "openPr": "Open PR \u2197",
+        "openPrAria": "Open PR #169 in a new tab",
+        "openGuide": "Open guide \u2197",
+        "openGuideAria": "Open the guide for PR #169 in a new tab",
+        "remove": "Remove"
+      },
+      "states": {
+        "populated": {
+          "page": "25a",
+          "name": "Populated",
+          "count": "6",
+          "countAria": "6 running",
+          "groups": [
+            [
+              "running",
+              [
+                "l451",
+                "d174",
+                "lbirch",
+                "d172"
+              ]
+            ],
+            [
+              "forgotten",
+              [
+                "py",
+                "tsx"
+              ]
+            ],
+            [
+              "dead",
+              [
+                "d169"
+              ]
+            ]
+          ]
+        },
+        "empty": {
+          "page": "25b",
+          "name": "Empty",
+          "count": "",
+          "countAria": "none running",
+          "groups": [],
+          "empty": true
+        },
+        "loading": {
+          "page": "25c",
+          "name": "Loading",
+          "count": "6",
+          "countAria": "6 running, last known",
+          "groups": [],
+          "loading": true
+        },
+        "host-offline": {
+          "page": "25d",
+          "name": "One host can\u2019t be read",
+          "count": "6+",
+          "countAria": "at least 6 running",
+          "pill": "partial",
+          "groups": [
+            [
+              "running",
+              [
+                "l451",
+                "d174",
+                "lbirch",
+                "d172"
+              ]
+            ],
+            [
+              "forgotten",
+              [
+                "py",
+                "tsx"
+              ]
+            ],
+            [
+              "dead",
+              [
+                "d169"
+              ]
+            ]
+          ],
+          "offlineHost": "cedar",
+          "notices": [
+            "hostOffline"
+          ]
+        },
+        "dead-preview-open": {
+          "page": "25e",
+          "name": "One dead preview",
+          "count": "6",
+          "countAria": "6 running",
+          "groups": [
+            [
+              "running",
+              [
+                "l451",
+                "d174",
+                "lbirch",
+                "d172"
+              ]
+            ],
+            [
+              "forgotten",
+              [
+                "py",
+                "tsx"
+              ]
+            ],
+            [
+              "dead",
+              [
+                "d169"
+              ]
+            ]
+          ],
+          "sheet": "detail"
+        },
+        "old-head": {
+          "page": "25f",
+          "name": "Old head",
+          "count": "6",
+          "countAria": "6 running",
+          "groups": [
+            [
+              "running",
+              [
+                "d174",
+                "l451",
+                "lbirch",
+                "d172"
+              ]
+            ],
+            [
+              "forgotten",
+              [
+                "py",
+                "tsx"
+              ]
+            ],
+            [
+              "dead",
+              [
+                "d169"
+              ]
+            ]
+          ],
+          "oldHead": "d174"
+        },
+        "stop-confirmed": {
+          "page": "25g",
+          "name": "Stop confirmed",
+          "count": "5",
+          "countAria": "5 running",
+          "groups": [
+            [
+              "running",
+              [
+                "l451",
+                "d174",
+                "lbirch",
+                "d172"
+              ]
+            ],
+            [
+              "forgotten",
+              [
+                "tsx"
+              ]
+            ],
+            [
+              "dead",
+              [
+                "d169"
+              ]
+            ]
+          ],
+          "notices": [
+            "stopped"
+          ]
+        }
+      }
     }
   }
 }
