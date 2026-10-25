@@ -3,12 +3,11 @@
  *
  * **Mental model**
  *
- * - **Over Tailscale the cookie carries the session.** The hub sets an HttpOnly `__Host-` cookie when the
- *   person presses Log in with Tailscale; this page never sees the token.
- * - **On loopback the page carries it.** `herdr-hub login` opens the page with a one-time code in the URL
- *   fragment. The page takes the code out of the address first ({@link takeLoginFragment}), spends it, and
- *   keeps the token it gets in its own session storage, sending it as `x-herdr-session`. Cookies don't
- *   separate ports, so a loopback cookie would reach every local server.
+ * - **A cookie carries the session on both listeners.** The hub sets an HttpOnly cookie when the person
+ *   presses Log in with Tailscale, or when the page spends `herdr-hub login`'s one-time code on loopback; this
+ *   page never sees the token, and every request it makes, the terminal included, sends it.
+ * - **The code leaves the address first.** `herdr-hub login` opens the page with the code in the URL fragment;
+ *   the page takes it out ({@link takeLoginFragment}) before spending it.
  * - **Writes carry the CSRF token** the session read returned.
  *
  * @module
@@ -18,10 +17,8 @@ import { Effect, Schema } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 
-/** The header the loopback page sends its session token in. */
-const sessionHeader = "x-herdr-session"
 /** The header a session's writes carry its CSRF token in. */
-const csrfHeader = "x-herdr-csrf"
+export const csrfHeader = "x-herdr-csrf"
 const Credential = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/u))
 
 /** What `GET /v1/session` says about the caller. */
@@ -38,7 +35,11 @@ export const HubSessionView = Schema.Union([
     signedIn: Schema.Literal(false),
     kind: Schema.Literal("tailscale"),
     login: Schema.String,
-    device: Schema.optionalKey(Schema.String)
+    device: Schema.optionalKey(Schema.String),
+    /** The caller's node runs agents. */
+    fleetHost: Schema.optionalKey(Schema.Boolean),
+    /** The request carried a session that has ended. */
+    ended: Schema.optionalKey(Schema.Boolean)
   }),
   Schema.Struct({
     signedIn: Schema.Literal(true),
@@ -46,18 +47,13 @@ export const HubSessionView = Schema.Union([
     expiresAt: Schema.Number,
     csrf: Credential
   }),
-  Schema.Struct({ signedIn: Schema.Literal(false), kind: Schema.Literal("local") })
+  Schema.Struct({
+    signedIn: Schema.Literal(false),
+    kind: Schema.Literal("local"),
+    ended: Schema.optionalKey(Schema.Boolean)
+  })
 ])
 export type HubSessionView = typeof HubSessionView.Type
-
-const LocalSessionMinted = Schema.Struct({ token: Credential })
-
-/** Where the loopback page keeps its session token: the page's own session storage in the browser. */
-export interface SessionTokenStore {
-  readonly read: () => string | null
-  readonly write: (token: string) => void
-  readonly clear: () => void
-}
 
 /** The session read failed; the page keeps showing what it last knew. */
 export class HubSessionReadFailed extends Schema.TaggedError<HubSessionReadFailed>()("HubSessionReadFailed", {
@@ -69,22 +65,17 @@ export class HubSessionChangeFailed extends Schema.TaggedError<HubSessionChangeF
   reason: Schema.Literals(["refused", "network"])
 }) {}
 
-const withToken = (store: SessionTokenStore) => (request: HttpClientRequest.HttpClientRequest) => {
-  const token = store.read()
-  return token === null ? request : HttpClientRequest.setHeader(request, sessionHeader, token)
-}
-
 /** Who the caller is, and whether they are logged in. */
-export const loadHubSession = Effect.fn("HubSessionClient.load")(function*(store: SessionTokenStore) {
+export const loadHubSession = Effect.gen(function*() {
   const client = yield* HttpClient.HttpClient
-  const response = yield* client.execute(withToken(store)(HttpClientRequest.get("/v1/session"))).pipe(
+  const response = yield* client.execute(HttpClientRequest.get("/v1/session")).pipe(
     Effect.mapError(() => new HubSessionReadFailed({ detail: "network" }))
   )
   if (response.status !== 200) return yield* new HubSessionReadFailed({ detail: "status" })
   return yield* decodeBoundedResponseJson(response, HubSessionView, 4_096).pipe(
     Effect.mapError(() => new HubSessionReadFailed({ detail: "invalid_response" }))
   )
-})
+}).pipe(Effect.withSpan("HubSessionClient.load"))
 
 /** One POST with a JSON body; anything but 200 is refused. */
 const post = Effect.fn("HubSessionClient.post")(function*(
@@ -105,31 +96,14 @@ export const logInWithTailscale = post(HttpClientRequest.post("/v1/session/tails
   Effect.withSpan("HubSessionClient.logInWithTailscale")
 )
 
-/** Spends `herdr-hub login`'s one-time code, keeping the local session token it gets. */
-export const spendLoginCode = Effect.fn("HubSessionClient.spendLoginCode")(function*(
-  code: string,
-  store: SessionTokenStore
-) {
-  const response = yield* post(HttpClientRequest.post("/v1/session/local"), { code })
-  const minted = yield* decodeBoundedResponseJson(response, LocalSessionMinted, 4_096).pipe(
-    Effect.mapError(() => new HubSessionChangeFailed({ reason: "refused" }))
-  )
-  store.write(minted.token)
+/** Spends `herdr-hub login`'s one-time code; the hub sets the local session cookie. */
+export const spendLoginCode = Effect.fn("HubSessionClient.spendLoginCode")(function*(code: string) {
+  yield* post(HttpClientRequest.post("/v1/session/local"), { code })
 })
 
-/**
- * Logs out with the session's CSRF token, and forgets the kept local token. A refused logout means the hub
- * no longer holds that session, so the token goes then too; after a network failure it stays, since the
- * logout may not have happened.
- */
-export const logOutOfHub = Effect.fn("HubSessionClient.logOut")(function*(csrf: string, store: SessionTokenStore) {
-  const request = withToken(store)(
-    HttpClientRequest.setHeader(HttpClientRequest.post("/v1/session/logout"), csrfHeader, csrf)
-  )
-  yield* post(request, {}).pipe(
-    Effect.tapError((failure) => failure.reason === "refused" ? Effect.sync(store.clear) : Effect.void)
-  )
-  store.clear()
+/** Logs out with the session's CSRF token; the hub clears the session cookie. */
+export const logOutOfHub = Effect.fn("HubSessionClient.logOut")(function*(csrf: string) {
+  yield* post(HttpClientRequest.setHeader(HttpClientRequest.post("/v1/session/logout"), csrfHeader, csrf), {})
 })
 
 /**

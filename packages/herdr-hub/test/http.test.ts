@@ -349,11 +349,17 @@ esac
     ),
     (server) => Effect.promise(server.close)
   )
-  if (running.serveUrl === null) return yield* Effect.die("hub listener missing")
-  const url = new URL("/v1/connect/session?host=SER9&agent=agent-relayed&cols=100&rows=30&takeover=1", running.serveUrl)
+  const serveUrl = running.serveUrl
+  if (serveUrl === null) return yield* Effect.die("hub listener missing")
+  const url = new URL("/v1/connect/session?host=SER9&agent=agent-relayed&cols=100&rows=30&takeover=1", serveUrl)
   const origin = url.origin
   url.protocol = "wss:"
-  return { url, origin, probes, upgrades, sockets }
+  // The person opening the terminal is logged in on the hub's node.
+  const session = yield* Effect.promise(() =>
+    secureTailnetSession(serveUrl.replace(/\/$/u, ""), { host: new URL(serveUrl).host, origin })
+  )
+  const headers = { origin, cookie: session.cookie }
+  return { url, origin, headers, probes, upgrades, sockets }
 })
 
 const secureRequestBody = (
@@ -382,6 +388,18 @@ const secureRequestBody = (
     request.once("error", reject)
     request.end(options.body === undefined ? undefined : JSON.stringify(options.body))
   })
+
+/** The WhoIs login logged in over Tailscale on the TLS hub at `url`: its session cookie and CSRF token. */
+const secureTailnetSession = async (
+  url: string,
+  headers: Readonly<Record<string, string>>
+): Promise<{ readonly cookie: string; readonly "x-herdr-csrf": string }> => {
+  const answer = await secureRequestBody(`${url}/v1/session/tailscale`, headers, { method: "POST" })
+  const cookie = answer.setCookie?.split(";", 1)[0]
+  if (answer.status !== 200 || cookie === undefined) throw new Error(`login refused: ${answer.status} ${answer.body}`)
+  const { csrf } = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({ csrf: Schema.String })))(answer.body)
+  return { cookie, "x-herdr-csrf": csrf }
+}
 
 /**
  * Picks a free loopback port and releases it. Another process can take it
@@ -537,9 +555,18 @@ const workPreflightFromFleetctl = async (
   operation: "admission-preflight" | "recovery-preflight" | "recovery-context",
   configPath: string,
   targetJson: string | undefined,
-  host = "SER8"
+  host = "SER8",
+  hubHome?: string
 ): Promise<{ readonly code: number; readonly stdout: string; readonly stderr: string }> => {
   const entry = await (fleetctlEntry ??= buildFleetctlEntry())
+  const base = {
+    ...process.env,
+    FLEET_CONFIG_PATH: configPath,
+    // Synthetic TLS certificate only; the real listener still authorizes every request.
+    NODE_TLS_REJECT_UNAUTHORIZED: host === "SER8" ? "0" : process.env.NODE_TLS_REJECT_UNAUTHORIZED
+  }
+  // Where fleetctl finds the hub's CLI token on loopback (`<hubState>/cli`).
+  const env = hubHome === undefined ? base : { ...base, HERDR_HUB_HOME: hubHome }
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [
       entry,
@@ -548,12 +575,7 @@ const workPreflightFromFleetctl = async (
       host,
       ...(targetJson === undefined ? [] : [targetJson])
     ], {
-      env: {
-        ...process.env,
-        FLEET_CONFIG_PATH: configPath,
-        // Synthetic TLS certificate only; the real listener still authorizes every request.
-        NODE_TLS_REJECT_UNAUTHORIZED: host === "SER8" ? "0" : process.env.NODE_TLS_REJECT_UNAUTHORIZED
-      }
+      env
     })
     let stdout = ""
     let stderr = ""
@@ -632,15 +654,46 @@ const decodeWorkCheckpoint = (input: WorkCheckpointTestPayload) =>
     )
   )
 
-const requestStatus = (url: string, host: string): Promise<number> =>
+const requestStatus = (url: string, host: string, headers: Record<string, string> = {}): Promise<number> =>
   new Promise((resolve, reject) => {
-    const request = httpRequest(url, { headers: { host } }, (response) => {
+    const request = httpRequest(url, { headers: { ...headers, host } }, (response) => {
       response.resume()
       response.once("end", () => resolve(response.statusCode ?? 0))
     })
     request.once("error", reject)
     request.end()
   })
+
+/** The session cookie and CSRF token a login answer carries, as headers for the requests after it. */
+const sessionHeaders = async (response: Response): Promise<Record<string, string>> => {
+  if (response.status !== 200) throw new Error(`login refused: ${response.status} ${await response.text()}`)
+  const cookie = response.headers.get("set-cookie")?.split(";", 1)[0]
+  const body: unknown = await response.json()
+  const { csrf } = Schema.decodeUnknownSync(Schema.Struct({ csrf: Schema.String }))(body)
+  if (cookie === undefined) throw new Error(`no session cookie: ${response.status}`)
+  return { cookie, "x-herdr-csrf": csrf }
+}
+
+/** The CLI token a hub whose apps keep their state in `appState` wrote: what agents present on loopback. */
+const cliHeadersAt = (appState: string) => ({
+  "x-hub-cli-token": readFileSync(join(appState, "cli", "token"), "utf8").trim()
+})
+
+/** The CLI token of a hub with the default app state under `stateDirectory`. */
+const cliHeaders = (stateDirectory: string) => cliHeadersAt(join(stateDirectory, "hub-apps"))
+
+/** The local user logged in on the loopback listener at `url`, as `herdr-hub login` does it. */
+const localSession = async (url: string, appState: string): Promise<Record<string, string>> => {
+  const minted = await fetch(`${url}/v1/session/local-code`, { headers: cliHeadersAt(appState), method: "POST" })
+  const { code } = Schema.decodeUnknownSync(Schema.Struct({ code: Schema.String }))(await minted.json())
+  return sessionHeaders(
+    await fetch(`${url}/v1/session/local`, {
+      body: JSON.stringify({ code }),
+      headers: { "content-type": "application/json", origin: new URL(url).origin },
+      method: "POST"
+    })
+  )
+}
 
 const waitForFile = Effect.fn("HostHttpTest.waitForFile")(function*(path: string) {
   while (!existsSync(path)) yield* Effect.yieldNow
@@ -2203,7 +2256,7 @@ esac
             ),
             (running) => Effect.promise(running.close)
           )
-          const response = yield* Effect.promise(() => fetch(`${server.url}/v1/status`))
+          const response = yield* Effect.promise(() => fetch(`${server.url}/v1/status`, { headers: cliHeaders(root) }))
           expect(response.status).toBe(503)
           expect(yield* Effect.promise(() => response.json())).toEqual({
             error: "FleetOperationError",
@@ -2238,7 +2291,8 @@ esac
             ),
             (running) => Effect.promise(running.close)
           )
-          const get = (path: string) => Effect.promise(() => fetch(`${server.url}${path}`))
+          const get = (path: string) =>
+            Effect.promise(() => fetch(`${server.url}${path}`, { headers: cliHeaders(root) }))
           expect((yield* get("/assets/relay-192.png")).status).toBe(404)
           expect((yield* get("/manifest.webmanifest")).status).toBe(200)
           expect((yield* get("/assets/relay-icon.svg")).status).toBe(200)
@@ -2270,7 +2324,8 @@ esac
             Effect.promise(() => startHttpServer(config(root), fleet, assets, { terminalConnector: unusedTerminal })),
             (running) => Effect.promise(running.close)
           )
-          const get = (path: string) => Effect.promise(() => fetch(`${server.url}${path}`))
+          const get = (path: string) =>
+            Effect.promise(() => fetch(`${server.url}${path}`, { headers: cliHeaders(root) }))
           const manifest = yield* get("/manifest.webmanifest")
           expect(manifest.headers.get("content-type")).toBe("application/manifest+json; charset=utf-8")
           expect(yield* Effect.promise(() => manifest.json())).toMatchObject({
@@ -2738,11 +2793,15 @@ esac
         return yield* Effect.die("voice fixture listeners missing")
       }
       const canonical = server.serveUrl
+      const session = yield* Effect.promise(() =>
+        secureTailnetSession(canonical, { host: "ser8.example.test:0", origin: "https://ser8.example.test:0" })
+      )
+      // Agents report as their host; the person's push settings ride their session.
       const headers = { host: "ser8.example.test:0", "content-type": "application/json" }
-      const pushHeaders = { ...headers, origin: "https://ser8.example.test:0" }
+      const pushHeaders = { ...headers, origin: "https://ser8.example.test:0", ...session }
       const settingsUrl = `${canonical}/v1/push/blocked-settings`
       const preferences = { mutedAgents: [{ host: "SER8", agentId: "agent-one" }], quietHours: null }
-      expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, headers))).body.trim()).toBe(
+      expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, pushHeaders))).body.trim()).toBe(
         JSON.stringify({ mutedAgents: [], quietHours: null })
       )
       expect(
@@ -2754,7 +2813,7 @@ esac
         ))
           .status
       ).toBe(200)
-      expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, headers))).body.trim()).toBe(
+      expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, pushHeaders))).body.trim()).toBe(
         JSON.stringify(preferences)
       )
       expect(
@@ -2796,7 +2855,7 @@ esac
           })
         )).status
       ).toBe(200)
-      expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, headers))).body.trim()).toBe(
+      expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, pushHeaders))).body.trim()).toBe(
         JSON.stringify(zonedPreferences)
       )
       expect(
@@ -2807,7 +2866,7 @@ esac
           })
         )).status
       ).not.toBe(200)
-      expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, headers))).body.trim()).toBe(
+      expect((yield* Effect.promise(() => secureRequestBody(settingsUrl, pushHeaders))).body.trim()).toBe(
         JSON.stringify(zonedPreferences)
       )
       const heartbeat = { clientId: "browser-one", target: { host: "SER8", agentId: "agent-one" } }
@@ -2952,8 +3011,9 @@ esac
       expect((yield* post(body)).body).toContain("UnboundAgent")
       expect((yield* post({ ...body, agentId: "agent-remote" })).status).toBe(200)
       writeFileSync(identityMode, "node-foreign")
-      expect((yield* me("agent-one", { mood: "happy" })).body).toContain("Denied")
-      expect((yield* post(body)).body).toContain("Denied")
+      // A node outside the fleet is no host: the gate refuses its reports.
+      expect((yield* me("agent-one", { mood: "happy" })).status).toBe(403)
+      expect((yield* post(body)).status).toBe(403)
       for (const listener of [server.url, server.tailnetUrl, server.lanWorkUrl]) {
         expect(
           (yield* Effect.promise(() =>
@@ -3300,7 +3360,12 @@ esac
         return yield* Effect.die("archive listener fixture missing")
       }
       const canonicalUrl = server.serveUrl
-      const headers = { host: "ser8.example.test:0" }
+      const headers = {
+        host: "ser8.example.test:0",
+        ...(yield* Effect.promise(() =>
+          secureTailnetSession(canonicalUrl, { host: "ser8.example.test:0", origin: "https://ser8.example.test:0" })
+        ))
+      }
       const get = (path: string) => Effect.promise(() => secureRequestBody(`${canonicalUrl}${path}`, headers))
       const page = Effect.fn("ArchiveHttpTest.page")(function*() {
         const response = yield* get("/v1/connect/archive")
@@ -3364,7 +3429,9 @@ esac
         expect(invalid.status, cursor).toBe(400)
       }
       // The loopback serves the super-app, so it reads the archive too; other listeners never do.
-      expect((yield* Effect.promise(() => fetch(`${server.url}/v1/connect/archive`))).status).toBe(200)
+      expect(
+        (yield* Effect.promise(() => fetch(`${server.url}/v1/connect/archive`, { headers: cliHeaders(root) }))).status
+      ).toBe(200)
       for (const listener of [server.tailnetUrl, server.lanWorkUrl]) {
         expect((yield* Effect.promise(() => fetch(`${listener}/v1/connect/archive`))).status).toBe(404)
       }
@@ -3418,7 +3485,9 @@ esac
         fetch(`${server.url}/v1/host/resources`, { headers: { "tailscale-user-login": "viewer@example.test" } })
       )
       expect(denied.status).toBe(403)
-      const response = yield* Effect.promise(() => fetch(`${server.url}/v1/host/resources`))
+      const response = yield* Effect.promise(() =>
+        fetch(`${server.url}/v1/host/resources`, { headers: cliHeaders(root) })
+      )
       expect(response.status).toBe(200)
       expect(response.headers.get("cache-control")).toBe("no-store")
       const snapshot = yield* Schema.decodeUnknownEffect(HostResources)(yield* Effect.promise(() => response.json()))
@@ -3462,7 +3531,7 @@ esac
             (running) => Effect.promise(running.close)
           )
           const response = yield* Effect.promise(() =>
-            fetch(`${server.url}/v1/connect/usage?range=30d&timeZone=Europe%2FAmsterdam`)
+            fetch(`${server.url}/v1/connect/usage?range=30d&timeZone=Europe%2FAmsterdam`, { headers: cliHeaders(root) })
           )
           expect(response.status).toBe(200)
           const body = Schema.decodeUnknownSync(FleetUsage)(yield* Effect.promise(() => response.json()))
@@ -3471,14 +3540,19 @@ esac
           ])
           // A zone that could split the command line, or a range agent-usage does not offer, never reaches it.
           for (const query of ["range=30d&timeZone=UTC%20limits", "range=90d&timeZone=UTC", "range=7d"]) {
-            const refused = yield* Effect.promise(() => fetch(`${server.url}/v1/connect/usage?${query}`))
+            const refused = yield* Effect.promise(() =>
+              fetch(`${server.url}/v1/connect/usage?${query}`, { headers: cliHeaders(root) })
+            )
             expect(refused.status, query).toBe(400)
           }
           // Only a peer's tailnet listener answers the hub's per-host question.
           expect(
-            (yield* Effect.promise(() => fetch(`${server.url}/v1/connect/usage/local?range=7d&timeZone=UTC`))).status
+            (yield* Effect.promise(() =>
+              fetch(`${server.url}/v1/connect/usage/local?range=7d&timeZone=UTC`, { headers: cliHeaders(root) })
+            )).status
           )
-            .toBe(404)
+            // The gate refuses it: only the hub's own node calls a peer's per-host routes.
+            .toBe(403)
         }).pipe(Effect.scoped),
       (store) =>
         Effect.sync(() => {
@@ -3523,7 +3597,9 @@ esac
             ),
             (running) => Effect.promise(running.close)
           )
-          const response = yield* Effect.promise(() => fetch(`${server.url}/v1/connect/limits`))
+          const response = yield* Effect.promise(() =>
+            fetch(`${server.url}/v1/connect/limits`, { headers: cliHeaders(root) })
+          )
           expect(response.status).toBe(200)
           const body = Schema.decodeUnknownSync(FleetLimits)(yield* Effect.promise(() => response.json()))
           expect(body.failures).toEqual([])
@@ -3531,7 +3607,10 @@ esac
             ["ALPHA", { _tag: "Read", limits: report, skipped: 0 }]
           ])
           // Only a peer's tailnet listener answers the hub's per-host question.
-          expect((yield* Effect.promise(() => fetch(`${server.url}/v1/connect/limits/local`))).status).toBe(404)
+          expect(
+            (yield* Effect.promise(() => fetch(`${server.url}/v1/connect/limits/local`, { headers: cliHeaders(root) })))
+              .status
+          ).toBe(403)
         }).pipe(Effect.scoped),
       (store) =>
         Effect.sync(() => {
@@ -3603,6 +3682,8 @@ case "$1" in
   whois)
     if [ "$(cat '${identityMode}')" = allowed ]; then
       printf '%s\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"owner@example.com"}}'
+    elif [ "$(cat '${identityMode}')" = agent ]; then
+      printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"owner@example.com"}}'
     else
       printf '%s\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"mallory@example.com"}}'
     fi ;;
@@ -3715,7 +3796,21 @@ esac
         }
         const path =
           "/v1/work/pull-request-link?repository=knpkv%2Fnpm&pullRequest=433&goalId=goal-work&laneId=lane-pr-433"
-        const headers = { host: `127.0.0.1:${approvalPort}` }
+        const serveUrl = server.serveUrl
+        const headers = {
+          host: `127.0.0.1:${approvalPort}`,
+          ...(yield* Effect.promise(() =>
+            secureTailnetSession(serveUrl, {
+              host: `127.0.0.1:${approvalPort}`,
+              origin: `https://127.0.0.1:${approvalPort}`
+            })
+          ))
+        }
+        // fleetctl runs where agents do, on a fleet host: that node, not the person's phone.
+        const asAgent = <A>(run: () => Promise<A>): Promise<A> => {
+          writeFileSync(identityMode, "agent")
+          return run().finally(() => writeFileSync(identityMode, "allowed"))
+        }
         const accepted = yield* Effect.promise(() => secureRequestBody(`${server.serveUrl}${path}`, headers))
         expect(accepted.status).toBe(200)
         expect(JSON.parse(accepted.body)).toMatchObject({
@@ -3791,7 +3886,7 @@ esac
         }
         expect(JSON.parse(contextResponse.body)).toEqual(expectedContext)
         const cliContext = yield* Effect.promise(() =>
-          workPreflightFromFleetctl("recovery-context", cliConfigPath, unlinked.goal.id)
+          asAgent(() => workPreflightFromFleetctl("recovery-context", cliConfigPath, unlinked.goal.id))
         )
         expect(cliContext.code, cliContext.stderr).toBe(0)
         expect(JSON.parse(cliContext.stdout)).toEqual(expectedContext)
@@ -3812,16 +3907,20 @@ esac
         )
         expect(missingContext.status).toBe(400)
         const cliRecovery = yield* Effect.promise(() =>
-          workPreflightFromFleetctl(
-            "recovery-preflight",
-            cliConfigPath,
-            JSON.stringify({ ...recoveryTarget, ...contextFacts })
+          asAgent(() =>
+            workPreflightFromFleetctl(
+              "recovery-preflight",
+              cliConfigPath,
+              JSON.stringify({ ...recoveryTarget, ...contextFacts })
+            )
           )
         )
         expect(cliRecovery.code, cliRecovery.stderr).toBe(0)
         expect(JSON.parse(cliRecovery.stdout)).toMatchObject({ _tag: "recoverable", target: recoveryTarget })
         const cliAdmission = yield* Effect.promise(() =>
-          workPreflightFromFleetctl("admission-preflight", cliConfigPath, JSON.stringify(admissionTarget))
+          asAgent(() =>
+            workPreflightFromFleetctl("admission-preflight", cliConfigPath, JSON.stringify(admissionTarget))
+          )
         )
         expect(cliAdmission.code, cliAdmission.stderr).toBe(0)
         expect(JSON.parse(cliAdmission.stdout)).toMatchObject({ _tag: "prospective", target: admissionTarget })
@@ -3832,22 +3931,28 @@ esac
         for (const operation of preflightOperations) {
           const target = operation === "admission-preflight" ? admissionTarget : recoveryTarget
           const invalid = yield* Effect.promise(() =>
-            workPreflightFromFleetctl(operation, cliConfigPath, JSON.stringify({ ...target, head: "bad" }))
+            asAgent(() =>
+              workPreflightFromFleetctl(operation, cliConfigPath, JSON.stringify({ ...target, head: "bad" }))
+            )
           )
           expect(invalid.code).not.toBe(0)
           expect(invalid.stderr).toContain("invalid")
-          const missing = yield* Effect.promise(() => workPreflightFromFleetctl(operation, cliConfigPath, undefined))
+          const missing = yield* Effect.promise(() =>
+            asAgent(() => workPreflightFromFleetctl(operation, cliConfigPath, undefined))
+          )
           expect(missing.code).not.toBe(0)
-          const malformed = yield* Effect.promise(() => workPreflightFromFleetctl(operation, cliConfigPath, "{"))
+          const malformed = yield* Effect.promise(() =>
+            asAgent(() => workPreflightFromFleetctl(operation, cliConfigPath, "{"))
+          )
           expect(malformed.code).not.toBe(0)
           expect(malformed.stderr).toContain("invalid")
           const noncanonical = yield* Effect.promise(() =>
-            workPreflightFromFleetctl(operation, cliConfigPath, JSON.stringify(target), "ALPHA")
+            asAgent(() => workPreflightFromFleetctl(operation, cliConfigPath, JSON.stringify(target), "ALPHA"))
           )
           expect(noncanonical.code).not.toBe(0)
           expect(noncanonical.stderr).toContain("canonical approval hub")
           const foreign = yield* Effect.promise(() =>
-            workPreflightFromFleetctl(operation, cliConfigPath, JSON.stringify(target), "FOREIGN")
+            asAgent(() => workPreflightFromFleetctl(operation, cliConfigPath, JSON.stringify(target), "FOREIGN"))
           )
           expect(foreign.code).not.toBe(0)
           expect(foreign.stderr).toContain("unknown host")
@@ -3912,8 +4017,15 @@ esac
       const store = yield* JobStore.open(join(root, "jobs.sqlite"))
       yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
       const fleet = yield* makeFleetService({ approvalEnabled: false, host: "ALPHA", operations, store })
+      // fleetctl reads the CLI token from its hub state, so hostd writes it there.
+      const hubHome = join(root, "hub-home")
       const server = yield* Effect.acquireRelease(
-        Effect.promise(() => startHttpServer(hostConfig, fleet, assets, { terminalConnector: unusedTerminal })),
+        Effect.promise(() =>
+          startHttpServer(hostConfig, fleet, assets, {
+            terminalConnector: unusedTerminal,
+            apps: { stateDirectory: join(hubHome, "state", "herdr-hub") }
+          })
+        ),
         (running) => Effect.promise(running.close)
       )
       expect(server.url).toMatch(/^http:\/\/127\.0\.0\.1:[1-9][0-9]*$/)
@@ -3944,7 +4056,7 @@ esac
         JSON.stringify({ ...hostConfig, localPort: boundPort(server.url), port: boundPort(server.workUrl) })
       )
       const context = yield* Effect.promise(() =>
-        workPreflightFromFleetctl("recovery-context", cliConfigPath, unlinked.goal.id, "ALPHA")
+        workPreflightFromFleetctl("recovery-context", cliConfigPath, unlinked.goal.id, "ALPHA", hubHome)
       )
       expect(context.code, context.stderr).toBe(0)
       expect(JSON.parse(context.stdout)).toEqual({
@@ -3958,12 +4070,18 @@ esac
       expect(nonlocalContext.code).not.toBe(0)
       expect(nonlocalContext.stderr).toContain("local host")
       const admission = yield* Effect.promise(() =>
-        workPreflightFromFleetctl("admission-preflight", cliConfigPath, JSON.stringify(admissionTarget), "ALPHA")
+        workPreflightFromFleetctl(
+          "admission-preflight",
+          cliConfigPath,
+          JSON.stringify(admissionTarget),
+          "ALPHA",
+          hubHome
+        )
       )
       expect(admission.code, admission.stderr).toBe(0)
       expect(JSON.parse(admission.stdout)).toMatchObject({ _tag: "prospective", target: admissionTarget })
       const recovery = yield* Effect.promise(() =>
-        workPreflightFromFleetctl("recovery-preflight", cliConfigPath, JSON.stringify(recoveryTarget), "ALPHA")
+        workPreflightFromFleetctl("recovery-preflight", cliConfigPath, JSON.stringify(recoveryTarget), "ALPHA", hubHome)
       )
       expect(recovery.code, recovery.stderr).toBe(0)
       expect(JSON.parse(recovery.stdout)).toMatchObject({ _tag: "recoverable", target: recoveryTarget })
@@ -4979,7 +5097,7 @@ esac
               pageUrl.searchParams.set("cursorCreatedAt", String(cursor.createdAt))
               pageUrl.searchParams.set("cursorId", cursor.id)
             }
-            const response = yield* Effect.promise(() => fetch(pageUrl))
+            const response = yield* Effect.promise(() => fetch(pageUrl, { headers: cliHeaders(root) }))
             const body = yield* Effect.promise(() => response.text())
             expect(response.status).toBe(200)
             expect(Buffer.byteLength(body)).toBeLessThanOrEqual(
@@ -4993,7 +5111,9 @@ esac
           expect(ids).toEqual(
             Array.from({ length: 8 }, (_, index) => `job-history-${String(7 - index).padStart(2, "0")}`)
           )
-          const dashboardResponse = yield* Effect.promise(() => fetch(`${server.url}/v1/dashboard`))
+          const dashboardResponse = yield* Effect.promise(() =>
+            fetch(`${server.url}/v1/dashboard`, { headers: cliHeaders(root) })
+          )
           const dashboardBody = yield* Effect.promise(() => dashboardResponse.text())
           expect(Buffer.byteLength(dashboardBody)).toBeLessThanOrEqual(
             fleetResponseBodyMaxBytes
@@ -5238,9 +5358,14 @@ esac
           )
           expect(server.serveUrl).toMatch(/^https:\/\//)
           expect(server.approvalUrl).toBe(server.serveUrl)
+          const serveUrl = server.serveUrl ?? ""
+          // The header names someone else; WhoIs decides who logs in.
           const requestHeaders = {
             host: "ser8.example.test:0",
-            "tailscale-user-login": "attacker@example.com"
+            "tailscale-user-login": "attacker@example.com",
+            ...(yield* Effect.promise(() =>
+              secureTailnetSession(serveUrl, { host: "ser8.example.test:0", origin: "https://ser8.example.test:0" })
+            ))
           }
           const dashboardResponse = yield* Effect.promise(() =>
             secureRequestBody(`${server.serveUrl}/v1/dashboard`, requestHeaders)
@@ -5362,11 +5487,15 @@ esac
           const approveAs = (node: string, jobId: string) =>
             Effect.promise(async () => {
               writeFileSync(caller, node)
-              const dashboard = await secureRequestBody(`${serveUrl}/v1/dashboard`, scripted)
-              const cookie = dashboard.setCookie?.split(";", 1).join("") ?? ""
-              return secureRequestBody(`${serveUrl}/v1/jobs/${jobId}/approve`, { ...scripted, cookie }, {
-                method: "POST"
-              })
+              // The person logs in on that node first; approving still needs an approval node.
+              const session = await secureTailnetSession(serveUrl, scripted)
+              const dashboard = await secureRequestBody(`${serveUrl}/v1/dashboard`, { ...scripted, ...session })
+              const proof = dashboard.setCookie?.split(";", 1).join("") ?? ""
+              return secureRequestBody(
+                `${serveUrl}/v1/jobs/${jobId}/approve`,
+                { ...scripted, ...session, cookie: `${session.cookie}; ${proof}` },
+                { method: "POST" }
+              )
             })
 
           const fromFleetHost = yield* approveAs("node-alpha", "ser8-job-00")
@@ -5431,7 +5560,7 @@ esac
             (running) => Effect.promise(running.close)
           )
           const request = yield* Effect.forkChild(
-            Effect.tryPromise(() => fetch(`${server.url}/v1/status`))
+            Effect.tryPromise(() => fetch(`${server.url}/v1/status`, { headers: cliHeaders(root) }))
           )
           yield* Deferred.await(entered)
           const closing = yield* Effect.forkChild(Effect.promise(server.close))
@@ -5467,7 +5596,7 @@ esac
             ),
             (running) => Effect.promise(running.close)
           )
-          const html = yield* Effect.promise(() => fetch(`${server.url}/`))
+          const html = yield* Effect.promise(() => fetch(`${server.url}/`, { headers: cliHeaders(root) }))
           expect(html.headers.get("content-security-policy")).toContain(
             "frame-ancestors 'none'"
           )
@@ -5484,13 +5613,25 @@ esac
               method: "POST"
             })
           )
-          expect(hostile.status).toBe(403)
+          // A cross-site page holds no credential: the gate asks it to log in, and nothing is submitted.
+          expect(hostile.status).toBe(401)
+          expect(yield* fleet.history(10)).toHaveLength(0)
+          // Even holding the CLI token, a browser's cross-site write is refused by its Origin.
+          const hostileWithToken = yield* Effect.promise(() =>
+            fetch(`${server.url}/v1/jobs`, {
+              body: JSON.stringify({ payload: { kind: "nix.check" } }),
+              headers: { ...cliHeaders(root), "content-type": "text/plain", origin: "https://attacker.example" },
+              method: "POST"
+            })
+          )
+          expect(hostileWithToken.status).toBe(403)
           expect(yield* fleet.history(10)).toHaveLength(0)
 
+          // Agents submit originless JSON with the CLI token.
           const accepted = yield* Effect.promise(() =>
             fetch(`${server.url}/v1/jobs`, {
               body: JSON.stringify({ payload: { kind: "nix.check" } }),
-              headers: { "content-type": "application/json" },
+              headers: { ...cliHeaders(root), "content-type": "application/json" },
               method: "POST"
             })
           )
@@ -5502,7 +5643,7 @@ esac
               body: JSON.stringify({
                 payload: { kind: "agent.delegate", mode: "work", prompt: "ship", repository: "nix" }
               }),
-              headers: { "content-type": "application/json" },
+              headers: { ...cliHeaders(root), "content-type": "application/json" },
               method: "POST"
             })
           )
@@ -5670,7 +5811,9 @@ esac
           }
           const approvalUrl = server.approvalUrl
           const segment = encodeURIComponent(pending.id)
-          const fetched = yield* Effect.promise(() => fetch(`${server.url}/v1/jobs/${segment}`))
+          const fetched = yield* Effect.promise(() =>
+            fetch(`${server.url}/v1/jobs/${segment}`, { headers: cliHeaders(root) })
+          )
           expect(fetched.status).toBe(200)
           expect(
             Schema.decodeUnknownSync(JobRecord)(yield* Effect.promise(() => fetched.json())).id
@@ -5696,7 +5839,8 @@ esac
           expect(yield* Effect.promise(() => requestStatus(`${server.url}/v1/jobs/job-🦊/with-slash`, localHost))).toBe(
             404
           )
-          expect(yield* Effect.promise(() => requestStatus(`${server.url}/v1/jobs/%`, localHost))).toBe(400)
+          expect(yield* Effect.promise(() => requestStatus(`${server.url}/v1/jobs/%`, localHost, cliHeaders(root))))
+            .toBe(400)
         }).pipe(Effect.scoped),
       (store) =>
         Effect.sync(() => {
@@ -5758,7 +5902,7 @@ esac
             const accepted = yield* Effect.promise(() =>
               fetch(`${server.url}/v1/jobs`, {
                 body: JSON.stringify({ payload: { kind: "nix.check" } }),
-                headers: { "content-type": "application/json" },
+                headers: { ...cliHeaders(root), "content-type": "application/json" },
                 method: "POST"
               })
             )
@@ -5883,9 +6027,11 @@ esac
           if (tailnetUrl === null) return yield* Effect.die("tailnet listener missing")
           const submit = (url: string, headers: Record<string, string>, extra: Record<string, string> = {}) =>
             Effect.promise(async () => {
+              // On loopback agents present the CLI token; the tailnet listener decides by node.
+              const credential = url === server.url ? cliHeaders(root) : {}
               const response = await fetch(`${url}/v1/jobs`, {
                 body: JSON.stringify({ payload: { kind: "nix.apply", ref: "abc123" }, ...extra }),
-                headers: { "content-type": "application/json", ...headers },
+                headers: { "content-type": "application/json", ...credential, ...headers },
                 method: "POST"
               })
               return { body: await response.json(), status: response.status }
@@ -5957,7 +6103,7 @@ esac
             ),
             (running) => Effect.promise(running.close)
           )
-          const response = yield* Effect.promise(() => fetch(`${server.url}/v1/status`))
+          const response = yield* Effect.promise(() => fetch(`${server.url}/v1/status`, { headers: cliHeaders(root) }))
           expect(response.status).toBe(200)
         }).pipe(Effect.scoped),
       (store) =>
@@ -6428,7 +6574,7 @@ esac
           }))
         const client = yield* controllerClient(peer.url, true, {
           rejectUnauthorized: false,
-          headers: { origin: peer.origin }
+          headers: peer.headers
         })
         expect(yield* Effect.promise(() => client.ready)).toBe(4_423)
         expect(blockedPort).toBeDefined()
@@ -6449,7 +6595,7 @@ esac
       const peer = yield* terminalRelayFixture(capability)
       const client = yield* controllerClient(peer.url, true, {
         rejectUnauthorized: false,
-        headers: { origin: peer.origin }
+        headers: peer.headers
       })
       expect(yield* Effect.promise(() => client.ready)).toBe(4_423)
       expect(peer.upgrades).toEqual([])
@@ -6461,36 +6607,30 @@ esac
       const peer = yield* terminalRelayFixture("transport")
       const client = yield* controllerClient(peer.url, true, {
         rejectUnauthorized: false,
-        headers: { origin: peer.origin }
+        headers: peer.headers
       })
       expect(yield* Effect.promise(() => client.ready)).toBe(4_503)
       expect(peer.upgrades).toEqual([])
     }).pipe(Effect.scoped, provideNodeServices))
 
-  // A terminal session is a WebSocket upgrade, outside the request handler: shadow mode still sees it once
-  // today's checks accept it. The fixture's WhoIs answers the hub's own node, a fleet host.
-  it.effect("shadows an accepted terminal session from a fleet-host node as a refused host terminal", () =>
+  // A terminal session is a WebSocket upgrade, outside the request handler, yet behind the same gate: the
+  // hub's own node without a session is a fleet host, which never opens a person's terminal: it must log in.
+  it.effect("refuses a terminal session from a fleet-host node without a session", () =>
     Effect.gen(function*() {
-      const logged = vi.spyOn(Logger.defaultLogger, "log")
-      yield* Effect.addFinalizer(() => Effect.sync(() => logged.mockRestore()))
       const peer = yield* terminalRelayFixture("supported")
-      const client = yield* controllerClient(peer.url, true, {
-        rejectUnauthorized: false,
-        headers: { origin: peer.origin }
-      })
-      expect(yield* Effect.promise(() => client.ready)).toBe("ready")
-      const shadowLines = () =>
-        logged.mock.calls.flatMap(([entry]) =>
-          [entry.message].flat().filter(Schema.is(Schema.String.check(Schema.isPattern(/^identity shadow:/u))))
-        )
-      for (
-        let attempt = 0;
-        attempt < 100 && !shadowLines().includes("identity shadow: refused serve Host connect.terminal");
-        attempt++
-      ) {
-        yield* Effect.sleep("20 millis")
-      }
-      expect(shadowLines()).toContain("identity shadow: refused serve Host connect.terminal")
+      const refused = yield* Effect.promise(() =>
+        new Promise<number>((resolve) => {
+          const socket = new WebSocketClient(peer.url, { rejectUnauthorized: false, headers: { origin: peer.origin } })
+          socket.once("unexpected-response", (_request, response) => {
+            resolve(response.statusCode ?? 0)
+            socket.terminate()
+          })
+          // Terminating a socket that never opened reports it; the refusal above already answered.
+          socket.once("error", () => resolve(-1))
+        })
+      )
+      expect(refused).toBe(401)
+      expect(peer.upgrades).toEqual([])
     }).pipe(Effect.scoped, provideNodeServices))
 
   it.effect("probes takeover freshly and relays intent and the typed close through a capable host", () =>
@@ -6498,7 +6638,7 @@ esac
       const peer = yield* terminalRelayFixture("supported")
       const client = yield* controllerClient(peer.url, true, {
         rejectUnauthorized: false,
-        headers: { origin: peer.origin }
+        headers: peer.headers
       })
       let reason = ""
       client.socket.once("close", (_code, text) => {
@@ -6519,13 +6659,13 @@ esac
       ordinary.searchParams.delete("takeover")
       const reconnect = yield* controllerClient(ordinary, true, {
         rejectUnauthorized: false,
-        headers: { origin: peer.origin }
+        headers: peer.headers
       })
       expect(yield* Effect.promise(() => reconnect.ready)).toBe("ready")
       expect(peer.probes).toHaveLength(1)
       const fresh = yield* controllerClient(peer.url, true, {
         rejectUnauthorized: false,
-        headers: { origin: peer.origin }
+        headers: peer.headers
       })
       expect(yield* Effect.promise(() => fresh.ready)).toBe("ready")
       expect(peer.probes).toHaveLength(2)
@@ -6809,7 +6949,7 @@ esac
             yield* Effect.promise(() => firstClosed)
             yield* Deferred.await(openInterrupted)
             expect(
-              (yield* Effect.promise(() => fetch(`${server.url}/v1/status`))).status
+              (yield* Effect.promise(() => fetch(`${server.url}/v1/status`, { headers: cliHeaders(root) }))).status
             ).toBe(200)
 
             const cleanClose = yield* Effect.promise(
@@ -7269,7 +7409,9 @@ describe("Relay in the hub", () => {
 case "$1" in
   ip) printf '%s\\n' '127.0.0.1' ;;
   whois)
-    if [ "$(cat '${identityMode}')" = allowed ]; then
+    if [ "$(cat '${identityMode}')" = unavailable ]; then
+      exit 1
+    elif [ "$(cat '${identityMode}')" = allowed ]; then
       printf '{"Node":{"StableID":"%s"},"UserProfile":{"LoginName":"owner@example.com"}}\\n' "$(cat '${whoisNodeFile}')"
     else
       printf '{"Node":{"StableID":"%s"},"UserProfile":{"LoginName":"mallory@example.com"}}\\n' "$(cat '${whoisNodeFile}')"
@@ -7311,16 +7453,23 @@ esac
         }),
         (running) => Effect.promise(running.server.close)
       )
-      if (server.serveUrl === null) return yield* Effect.die("serve URL missing")
+      const serveUrl = server.serveUrl
+      if (serveUrl === null) return yield* Effect.die("serve URL missing")
       const origin = `https://127.0.0.1:${approvalPort}`
+      // The person on the phone logs in once; every request below rides that session.
+      const session = yield* Effect.promise(() =>
+        secureTailnetSession(serveUrl, { host: `127.0.0.1:${approvalPort}`, origin })
+      )
       return {
         server,
-        serveUrl: server.serveUrl,
-        headers: { host: `127.0.0.1:${approvalPort}` },
+        serveUrl,
+        headers: { host: `127.0.0.1:${approvalPort}`, ...session },
         origin,
         statusFile,
         deny: () => writeFileSync(identityMode, "denied"),
         allow: () => writeFileSync(identityMode, "allowed"),
+        /** WhoIs fails for every caller, as when tailscaled is down. */
+        whoisUnavailable: () => writeFileSync(identityMode, "unavailable"),
         /** The tailnet node WhoIs reports for every caller; the hub itself is `node-ser8`. */
         whoisNode: (stableId: string) => writeFileSync(whoisNodeFile, stableId)
       }
@@ -7523,14 +7672,14 @@ esac
       if (cookie === undefined) return yield* Effect.die("Dashboard must issue its proof cookie")
       const existingSession = yield* Effect.promise(() =>
         hubRequest(`${hub.serveUrl}/v1/modules/connect/needs-you`, {
-          headers: { ...hub.headers, cookie }
+          headers: { ...hub.headers, cookie: `${hub.headers.cookie}; ${cookie}` }
         })
       )
       expect(existingSession.cookies).toEqual([])
       const undisclosed = yield* Effect.promise(() =>
         hubRequest(`${hub.serveUrl}/v1/jobs/ser8-job-00/approve`, {
           method: "POST",
-          headers: { ...hub.headers, cookie, origin: hub.origin }
+          headers: { ...hub.headers, cookie: `${hub.headers.cookie}; ${cookie}`, origin: hub.origin }
         })
       )
       expect(undisclosed.status).toBe(409)
@@ -7586,7 +7735,7 @@ esac
     readonly apply?: "same" | "main"
   }
 
-  it.effect("Try again submits as the caller would: asked again from serve, queued from loopback", () => {
+  it.effect("Try again submits as the caller would: asked again from serve, queued for the CLI token", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-needs-you-retry-"))
     return Effect.gen(function*() {
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
@@ -7615,11 +7764,11 @@ esac
           })
         )
       const local = new URL(hub.server.url).origin
-      const fromLoopback = (route: string, body: FailureAction) =>
+      const fromLoopback = (route: string, body: FailureAction, headers: Record<string, string> = {}) =>
         Effect.promise(() =>
           fetch(`${local}/v1/modules/fleet/failures/${route}`, {
             method: "POST",
-            headers: { "content-type": "application/json", origin: local },
+            headers: { "content-type": "application/json", origin: local, ...headers },
             body: JSON.stringify(body)
           }).then(async (response) => ({ status: response.status, body: await response.text() }))
         )
@@ -7629,10 +7778,22 @@ esac
       expect(retried).toMatchObject({ _tag: "Retried", host: "SER8", status: "pending_approval" })
       const again = yield* fromServe("retry", { host: "SER8", jobId: "ser8-job-01", apply: "same" })
       expect(JSON.parse(again.body)).toEqual({ _tag: "AlreadyRetried", retryJobId: retried.jobId })
-      // Loopback is a verified local submission, exactly as POST /v1/jobs treats it there.
-      const looped = yield* fromLoopback("retry", { host: "SER8", jobId: "ser8-job-02", apply: "main" })
+      // Plain loopback is no one until it logs in; the CLI token holds jobs.submit, so an agent may retry any
+      // failed job, a nix.apply included, as a verified local submission like POST /v1/jobs.
+      const anonymous = yield* fromLoopback("retry", { host: "SER8", jobId: "ser8-job-02", apply: "main" })
+      expect(anonymous.status, anonymous.body).toBe(401)
+      expect(JSON.parse(anonymous.body)).toEqual({ error: "login_required" })
+      const looped = yield* fromLoopback(
+        "retry",
+        { host: "SER8", jobId: "ser8-job-02", apply: "main" },
+        cliHeaders(root)
+      )
       expect(looped.status, looped.body).toBe(200)
       expect(JSON.parse(looped.body)).toMatchObject({ _tag: "Retried", status: "queued" })
+      // Dismissing is a person's call: the CLI token can't, and plain loopback must log in first.
+      const agentDismiss = yield* fromLoopback("dismiss", { host: "SER8", jobId: "ser8-job-03" }, cliHeaders(root))
+      expect(agentDismiss.status, agentDismiss.body).toBe(403)
+      expect((yield* fromLoopback("dismiss", { host: "SER8", jobId: "ser8-job-03" })).status).toBe(401)
       const dismissed = yield* fromServe("dismiss", { host: "SER8", jobId: "ser8-job-03" })
       expect(dismissed.status, dismissed.body).toBe(200)
       const inbox = yield* Effect.promise(() =>
@@ -7642,6 +7803,199 @@ esac
       expect(failures.map(({ jobId }) => jobId)).not.toContain("ser8-job-01")
       expect(failures.map(({ jobId }) => jobId)).not.toContain("ser8-job-02")
       expect(failures.map(({ jobId }) => jobId)).not.toContain("ser8-job-03")
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
+  // The front door on the real listeners: what a browser without a session, a session's write without its
+  // CSRF token, a route no family names and an unreadable caller each get, over Tailscale and on loopback.
+  it.effect("refuses at the front door on both listeners", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-front-door-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const hub = yield* startHub(root, join(root, "relay"), scriptedBackends("Nothing waits."))
+      const local = new URL(hub.server.url).origin
+      const host = hub.headers.host
+      const serve = (path: string, headers: Record<string, string>, method = "GET") =>
+        Effect.promise(() => hubRequest(`${hub.serveUrl}${path}`, { method, headers: { host, ...headers } }))
+      const loopback = (path: string, headers: Record<string, string>, method = "GET") =>
+        Effect.promise(() =>
+          fetch(`${local}${path}`, { method, headers }).then(async (response) => ({
+            status: response.status,
+            body: await response.text()
+          }))
+        )
+      const loginRequired = { error: "login_required" }
+
+      // No session: the API says log in, a page is the login gate with no dashboard data in it.
+      for (const answer of [yield* serve("/v1/dashboard", {}), yield* loopback("/v1/dashboard", {})]) {
+        expect(answer.status, answer.body).toBe(401)
+        expect(JSON.parse(answer.body)).toEqual(loginRequired)
+      }
+      for (const page of [yield* serve("/", {}), yield* loopback("/", {})]) {
+        expect(page.status).toBe(200)
+        expect(page.body).toContain("data-login-gate")
+        expect(page.body).not.toContain("fleet-dashboard-data")
+      }
+      // An app's page a browser navigates to is the login gate too; its scripts' fetches get the JSON.
+      const navigated = yield* loopback("/apps/notes/", { "sec-fetch-dest": "document", accept: "text/html" })
+      expect(navigated.status).toBe(200)
+      expect(navigated.body).toContain("data-login-gate")
+      const fetched = yield* loopback("/apps/notes/", { "sec-fetch-dest": "empty", accept: "application/json" })
+      expect(fetched.status).toBe(401)
+      expect(JSON.parse(fetched.body)).toEqual(loginRequired)
+
+      // A session's write without its CSRF token is refused, over Tailscale and with the loopback cookie.
+      const tailnetWrite = yield* serve(
+        "/v1/push/subscriptions",
+        { cookie: hub.headers.cookie, origin: hub.origin, "content-type": "application/json" },
+        "POST"
+      )
+      expect(tailnetWrite.status, tailnetWrite.body).toBe(403)
+      expect(JSON.parse(tailnetWrite.body)).toEqual({ error: "csrf_required" })
+      const localCookie = (yield* Effect.promise(() => localSession(local, join(root, "hub-apps")))).cookie ?? ""
+      const loopbackWrite = yield* loopback(
+        "/v1/push/subscriptions",
+        { cookie: localCookie, origin: local, "content-type": "application/json" },
+        "POST"
+      )
+      expect(loopbackWrite.status, loopbackWrite.body).toBe(403)
+      expect(JSON.parse(loopbackWrite.body)).toEqual({ error: "csrf_required" })
+
+      // A route no family names is not found, even logged in: an unknown path, a method, a trailing slash.
+      const unknownRoutes: ReadonlyArray<readonly [string, string]> = [
+        ["GET", "/v2/anything"],
+        ["OPTIONS", "/v1/dashboard"],
+        ["GET", "/v1/dashboard/"]
+      ]
+      for (const [method, path] of unknownRoutes) {
+        expect((yield* serve(path, hub.headers, method)).status, `${method} ${path}`).toBe(404)
+        expect((yield* loopback(path, { cookie: localCookie }, method)).status, `${method} ${path}`).toBe(404)
+      }
+
+      // A browser on a fleet host (the hub's own node) without a session sees the login gate, never the
+      // dashboard, and a person's write asks for the login; its agents still read the hub's JSON as the host.
+      hub.whoisNode("node-ser8")
+      const fleetHostPage = yield* serve("/", {})
+      expect(fleetHostPage.body).toContain("data-login-gate")
+      expect(fleetHostPage.body).not.toContain("fleet-dashboard-data")
+      const fleetHostPush = yield* serve(
+        "/v1/push/subscriptions",
+        { origin: hub.origin, "content-type": "application/json" },
+        "POST"
+      )
+      expect(fleetHostPush.status, fleetHostPush.body).toBe(401)
+      expect(JSON.parse(fleetHostPush.body)).toEqual(loginRequired)
+      expect((yield* serve("/v1/dashboard", {})).status).toBe(200)
+      hub.whoisNode("node-phone")
+
+      // WhoIs down: the caller can't be read, so the request is refused, and the log says why.
+      const warnings = vi.spyOn(Logger.defaultLogger, "log")
+      yield* Effect.addFinalizer(() => Effect.sync(() => warnings.mockRestore()))
+      hub.whoisUnavailable()
+      const unreadable = yield* serve("/v1/dashboard", hub.headers)
+      hub.allow()
+      expect(unreadable.status).toBe(503)
+      expect(JSON.parse(unreadable.body)).toEqual({ error: "identity_unavailable" })
+      const gateWarnings = warnings.mock.calls.map(([entry]) => entry).filter((entry) =>
+        entry.logLevel === "Warn" && JSON.stringify(entry.message).includes("access gate")
+      )
+      expect(gateWarnings).toHaveLength(1)
+
+      // The terminal WebSocket on loopback needs the local session's cookie like any page.
+      const terminal = new URL("/v1/connect/session", local)
+      terminal.protocol = "ws:"
+      for (const [key, value] of Object.entries({ agent: "agent-1", cols: "100", host: "SER8", rows: "30" })) {
+        terminal.searchParams.set(key, value)
+      }
+      const upgrade = yield* Effect.promise(() =>
+        new Promise<string>((resolve) => {
+          const socket = new WebSocketClient(terminal, { headers: { origin: local } })
+          socket.once("open", () => {
+            socket.terminate()
+            resolve("open")
+          })
+          socket.once("unexpected-response", (_request, response) => {
+            response.resume()
+            socket.terminate()
+            resolve(`status:${response.statusCode}`)
+          })
+          socket.once("error", (error) => resolve(`error:${String(error)}`))
+        })
+      )
+      expect(upgrade).toBe("status:401")
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
+  // Apps get no CSRF token: a session's write to an app passes the front door only with the listener's own
+  // Origin, so a page on another port can't ride the cookie, and a write that names no Origin is refused.
+  it.effect("lets a session write to an app only from the hub's own origin, on both listeners", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-app-origin-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const hub = yield* startHub(root, join(root, "relay"), scriptedBackends("Nothing waits."))
+      const local = new URL(hub.server.url)
+      const localCookie = (yield* Effect.promise(() => localSession(local.origin, join(root, "hub-apps")))).cookie ?? ""
+      const otherPort = (origin: string) => {
+        const url = new URL(origin)
+        url.port = String(Number(url.port) + 1)
+        return url.origin
+      }
+      // The same host and port under the other scheme.
+      const otherScheme = (origin: string) => {
+        const url = new URL(origin)
+        return `${url.protocol === "https:" ? "http:" : "https:"}//${url.host}`
+      }
+      // The session's cookie, and the Origin when the request names one.
+      const sent = (cookie: Record<string, string>, origin: string | undefined) =>
+        origin === undefined ? cookie : { ...cookie, origin }
+      const serve = (origin: string | undefined) =>
+        Effect.promise(() =>
+          hubRequest(`${hub.serveUrl}/apps/notes/save`, {
+            method: "POST",
+            headers: sent({ host: hub.headers.host, cookie: hub.headers.cookie }, origin)
+          })
+        )
+      const loopback = (origin: string | undefined) =>
+        Effect.promise(() =>
+          new Promise<{ readonly status: number; readonly body: string }>((resolve, reject) => {
+            // fetch always names an Origin it chooses; the raw request sends exactly these headers.
+            const request = httpRequest(
+              `${local.origin}/apps/notes/save`,
+              {
+                method: "POST",
+                headers: sent({ cookie: localCookie }, origin)
+              },
+              (response) => {
+                let body = ""
+                response.setEncoding("utf8")
+                response.on("data", (chunk: string) => (body += chunk))
+                response.once("end", () => resolve({ status: response.statusCode ?? 0, body }))
+              }
+            )
+            request.once("error", reject)
+            request.end()
+          })
+        )
+      const originRequired = { error: "origin_required" }
+      const listeners: ReadonlyArray<
+        readonly [
+          string,
+          (origin: string | undefined) => Effect.Effect<{ readonly status: number; readonly body: string }>,
+          string
+        ]
+      > = [["tailnet", serve, hub.origin], ["loopback", loopback, local.origin]]
+      for (const [listener, write, own] of listeners) {
+        // The hub's own origin, without a CSRF token, reaches the apps route: no app is called notes.
+        const same = yield* write(own)
+        expect(same.status, `${listener} same origin: ${same.body}`).toBe(404)
+        expect(JSON.parse(same.body)).not.toEqual(originRequired)
+        // An opaque origin (a sandboxed frame, a file) sends the literal "null".
+        for (const origin of [otherPort(own), otherScheme(own), "null", undefined]) {
+          const refused = yield* write(origin)
+          expect(refused.status, `${listener} ${origin ?? "no origin"}: ${refused.body}`).toBe(403)
+          expect(JSON.parse(refused.body)).toEqual(originRequired)
+        }
+      }
     }).pipe(Effect.scoped, provideNodeServices)
   })
 
@@ -7729,7 +8083,9 @@ esac
       const remote = yield* Effect.promise(() => fetch(`${hub.server.tailnetUrl}/v1/modules/code/queue`))
       expect(remote.status).toBe(404)
       yield* Effect.promise(() => remote.text())
-      const loopback = yield* Effect.promise(() => fetch(`${hub.server.url}/v1/modules/code/queue`))
+      const loopback = yield* Effect.promise(() =>
+        fetch(`${hub.server.url}/v1/modules/code/queue`, { headers: cliHeaders(root) })
+      )
       expect(loopback.status).toBe(200)
       yield* Effect.promise(() => loopback.text())
     }).pipe(Effect.scoped, provideNodeServices)
@@ -8345,16 +8701,25 @@ esac
           )
         ),
         (running) => Effect.promise(running.close)
+      ).pipe(
+        // The local user logs in on loopback, as `herdr-hub login` does.
+        Effect.flatMap((server) =>
+          Effect.promise(() =>
+            localSession(server.url, apps === undefined ? join(root, "hub-apps") : apps(root).stateDirectory ?? root)
+          )
+            .pipe(Effect.map((local) => ({ ...server, root, local })))
+        )
       )
     }
   )
 
-  const plainSnapshot = (base: string) =>
-    Effect.promise(() => fetch(`${base}/v1/dashboard`).then((response) => response.json())).pipe(
+  const plainSnapshot = (base: string, headers: Record<string, string> = {}) =>
+    Effect.promise(() => fetch(`${base}/v1/dashboard`, { headers }).then((response) => response.json())).pipe(
       Effect.map(Schema.decodeUnknownSync(DashboardSnapshot))
     )
 
-  const plainStatus = (url: string) => Effect.promise(() => fetch(url).then((response) => response.status))
+  const plainStatus = (url: string, headers: Record<string, string> = {}) =>
+    Effect.promise(() => fetch(url, { headers }).then((response) => response.status))
 
   it.effect("serves the super-app on a standalone host's loopback and opens no tailnet listener", () =>
     Effect.gen(function*() {
@@ -8362,7 +8727,7 @@ esac
       expect(server.tailnetUrl).toBeNull()
       expect(server.approvalUrl).toBeNull()
       expect(server.serveUrl).toBeNull()
-      const snapshot = yield* plainSnapshot(server.url)
+      const snapshot = yield* plainSnapshot(server.url, server.local)
       expect(snapshot.approvalApp).toEqual({
         canonical: false,
         canonicalUrl: "https://ser8.example.test:4779/",
@@ -8374,7 +8739,9 @@ esac
       })
       // Modules answer on loopback; one that is not set up here says why instead of vanishing.
       const sandboxes = yield* Effect.promise(() =>
-        fetch(`${server.url}/v1/modules/sandboxes/overview`).then(async (response) => ({
+        fetch(`${server.url}/v1/modules/sandboxes/overview`, { headers: server.local }).then(async (
+          response
+        ) => ({
           status: response.status,
           body: Schema.decodeUnknownSync(Schema.Struct({ _tag: Schema.String, reason: Schema.String }))(
             await response.json()
@@ -8383,7 +8750,7 @@ esac
       )
       expect(sandboxes).toEqual({ status: 200, body: { _tag: "Unavailable", reason: "not_configured" } })
       // Push stays with the notification hub.
-      expect(yield* plainStatus(`${server.url}/v1/push/config`)).toBe(404)
+      expect(yield* plainStatus(`${server.url}/v1/push/config`, server.local)).toBe(404)
     }).pipe(Effect.scoped, provideNodeServices))
 
   it.effect("serves the super-app on a fleet host's loopback and keeps it off its tailnet listeners", () =>
@@ -8396,13 +8763,13 @@ esac
       }))
       expect(server.serveUrl).toBeNull()
       if (server.tailnetUrl === null || server.approvalUrl === null) return yield* Effect.die("peer listeners missing")
-      expect((yield* plainSnapshot(server.url)).approvalApp).toMatchObject({
+      expect((yield* plainSnapshot(server.url, server.local)).approvalApp).toMatchObject({
         canonical: false,
         fleet: true,
         superapp: true
       })
       expect((yield* plainSnapshot(server.tailnetUrl)).approvalApp).toMatchObject({ canonical: false, superapp: false })
-      expect(yield* plainStatus(`${server.url}/v1/modules/sandboxes/overview`)).toBe(200)
+      expect(yield* plainStatus(`${server.url}/v1/modules/sandboxes/overview`, server.local)).toBe(200)
       expect(yield* plainStatus(`${server.tailnetUrl}/v1/modules/sandboxes/overview`)).toBe(404)
     }).pipe(Effect.scoped, provideNodeServices))
 
@@ -8465,12 +8832,20 @@ esac
         return url.href
       }
       const origin = new URL(server.url).origin
+      const local = yield* Effect.promise(() => localSession(server.url, join(root, "hub-apps")))
       // A peer's terminal stays tailnet-only: the loopback never proxies one.
-      expect(yield* upgradeOutcome(session("ALPHA"), { origin })).toBe(403)
+      expect(yield* upgradeOutcome(session("ALPHA"), { origin, cookie: local.cookie ?? "" })).toBe(403)
       // A request a local proxy relayed may come from anywhere, so it is not local.
-      expect(yield* upgradeOutcome(session("SER8"), { origin, "x-forwarded-for": "198.51.100.7" })).toBe(403)
+      expect(
+        yield* upgradeOutcome(session("SER8"), {
+          origin,
+          cookie: local.cookie ?? "",
+          "x-forwarded-for": "198.51.100.7"
+        })
+      ).toBe(403)
       expect(opened).toEqual([])
-      expect(yield* upgradeOutcome(session("SER8"), { origin })).toBe("attached")
+      // The local user's session cookie rides the upgrade, as it does every loopback request.
+      expect(yield* upgradeOutcome(session("SER8"), { origin, cookie: local.cookie ?? "" })).toBe("attached")
       expect(opened).toEqual(["SER8"])
     }).pipe(Effect.scoped, provideNodeServices))
 
@@ -8506,7 +8881,7 @@ esac
         stateDirectory: join(short, "state"),
         runtimeDirectory: join(short, "run")
       }))
-      const states = yield* plainSnapshot(server.url).pipe(
+      const states = yield* plainSnapshot(server.url, server.local).pipe(
         Effect.map((snapshot) => snapshot.apps.states.map((state) => state._tag === "Ready" ? "ready" : state.reason)),
         Effect.filterOrFail((reasons) => reasons.length === 1 && reasons[0] !== "starting"),
         Effect.retry({ schedule: Schedule.spaced("100 millis"), times: 150 })
@@ -8574,7 +8949,7 @@ runApp(fixtureApp("ok", ${JSON.stringify(id)}), Layer.empty)
         if (server.serveUrl === null) return yield* Effect.die("canonical listener missing")
         const reasons = (snapshot: DashboardSnapshot) =>
           snapshot.apps.states.map((state) => state._tag === "Ready" ? "ready" : state.reason)
-        const local = yield* plainSnapshot(server.url).pipe(
+        const local = yield* plainSnapshot(server.url, server.local).pipe(
           Effect.filterOrFail((snapshot) =>
             reasons(snapshot).length === 2 && reasons(snapshot).every((reason) => reason === "ready")
           ),
@@ -8622,11 +8997,11 @@ runApp(fixtureApp("ok", ${JSON.stringify(id)}), Layer.empty)
         secureRequestBody(`${server.serveUrl}/v1/push/config`, { host: "ser8.example.test:0" })
       )
       expect(push.status).toBe(200)
-      expect((yield* plainSnapshot(server.url)).approvalApp).toMatchObject({
+      expect((yield* plainSnapshot(server.url, server.local)).approvalApp).toMatchObject({
         canonical: false,
         pushEnabled: false,
         superapp: true
       })
-      expect(yield* plainStatus(`${server.url}/v1/push/config`)).toBe(404)
+      expect(yield* plainStatus(`${server.url}/v1/push/config`, server.local)).toBe(404)
     }).pipe(Effect.scoped, provideNodeServices))
 })

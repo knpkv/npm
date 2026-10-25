@@ -125,12 +125,16 @@ describe("grantsFor", () => {
   // What each principal may do under the migrated config: no users map, so allowed logins hold everything.
   it("lists what each principal may do, in display order", () => {
     expect(grantsFor(config, tailnet("node-hub"))).toEqual(["view", "jobs.submit"])
-    expect(grantsFor(config, tailnet("node-laptop"))).toEqual(["view"])
+    expect(grantsFor(config, tailnet("node-laptop"))).toEqual([])
     expect(grantsFor(config, tailnet("node-laptop", { session: tailscaleSession("node-laptop") })))
       .toEqual(["view", "jobs.submit", "sandboxes.owner", "push", "connect.terminal", "apps.restart"])
     expect(grantsFor(config, tailnet("node-cedar", { session: tailscaleSession("node-cedar") })))
       .toEqual(["view", "jobs.submit", "push", "connect.terminal", "apps.restart"])
-    expect(grantsFor(config, loopback("127.0.0.1", undefined))).toEqual(["view"])
-    expect(grantsFor(config, loopback("127.0.0.1", undefined, { cli: true }))).toEqual(["apps.restart"])
+    expect(grantsFor(config, loopback("127.0.0.1", undefined))).toEqual([])
+    expect(grantsFor(config, loopback("127.0.0.1", undefined, { cli: true }))).toEqual([
+      "view",
+      "jobs.submit",
+      "apps.restart"
+    ])
   })
 })

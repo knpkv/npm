@@ -25,10 +25,11 @@ import {
   WorkRecoveryTarget,
   WorkSnapshots
 } from "@knpkv/herdr-work/model"
-import { Console, Effect, Layer, Schema, Stdio } from "effect"
+import { Console, Effect, Layer, Option, Path, Redacted, Schema, Stdio } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import { resolveApprovalPage } from "./approval-url.js"
+import { cliTokenHeader, readCliToken } from "./apps/cli-token.js"
 import { submitToHost } from "./fleetctl-submission.js"
 import { fleetConfigPath } from "./internal/config-path.js"
 import { followJob } from "./internal/fleet-follow.js"
@@ -110,6 +111,20 @@ const schemaResponseDecoder = <A>(
     Effect.mapError(operationError("fleet.response.decode"))
   )
 
+/**
+ * This computer's hub start's CLI token, for a request to its loopback listener: the hub is behind login, and
+ * agents and fleetctl call it with the token instead. None when the hub never wrote one (it isn't running).
+ */
+const loopbackCredential = Effect.fn("Fleetctl.loopbackCredential")(function*(url: string) {
+  if (new URL(url).hostname !== "127.0.0.1") return Option.none<string>()
+  const paths = yield* HubPaths
+  const path = yield* Path.Path
+  return yield* readCliToken(path.join(paths.hubState, "cli")).pipe(
+    Effect.map((token) => Option.some(Redacted.value(token))),
+    Effect.catchTag("CliTokenUnavailable", () => Effect.succeed(Option.none<string>()))
+  )
+})
+
 const requestAt = Effect.fn("Fleetctl.requestAt")(function*<A>(
   url: string,
   schema: Schema.Codec<A, unknown, never, never>,
@@ -117,12 +132,17 @@ const requestAt = Effect.fn("Fleetctl.requestAt")(function*<A>(
   decode: ResponseDecoder<A> = schemaResponseDecoder(schema)
 ) {
   const client = yield* HttpClient.HttpClient
-  const httpRequest = body === undefined
+  const token = yield* loopbackCredential(url)
+  const plain = body === undefined
     ? HttpClientRequest.get(url)
     : yield* HttpClientRequest.post(url).pipe(
       HttpClientRequest.bodyJson(body),
       Effect.mapError(operationError("fleet.request.encode"))
     )
+  const httpRequest = Option.match(token, {
+    onNone: () => plain,
+    onSome: (value) => HttpClientRequest.setHeader(plain, cliTokenHeader, value)
+  })
   return yield* withFleetRequestTimeout(
     Effect.gen(function*() {
       const response = yield* client.execute(httpRequest).pipe(

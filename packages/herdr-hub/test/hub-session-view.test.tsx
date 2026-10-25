@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { renderToStaticMarkup } from "react-dom/server"
 import type { HubSessionView } from "../src/hub-session-client.js"
-import { latestOnly, SessionControl, SessionDetails, TailscaleLoginCard } from "../src/hub-session-view.js"
+import { latestOnly, LoginGate, SessionControl, SessionDetails } from "../src/hub-session-view.js"
 
 const until = Date.UTC(2026, 9, 25, 21, 5)
 const csrf = "b".repeat(64)
@@ -92,36 +92,51 @@ describe("session details", () => {
   })
 })
 
-describe("Tailscale login card", () => {
-  // Page 22 states 1 and 3, without the lines that describe enforcement ("View only until you log in." and
-  // the fleet host's agents line), which ship with it.
-  it("offers to continue as the WhoIs login on this device", () => {
-    const markup = renderToStaticMarkup(<TailscaleLoginCard view={signedOut} busy={false} onLogIn={() => undefined} />)
+describe("login gate", () => {
+  const gate = (view: HubSessionView, busy = false) =>
+    renderToStaticMarkup(<LoginGate view={view} busy={busy} onLogIn={() => undefined} />)
+
+  // Page 22 gate-tailscale: the whole page is the Tailscale card, its title the page heading.
+  it("asks a Tailscale person to continue as the WhoIs login, as the page heading", () => {
+    const markup = gate(signedOut)
+    expect(markup).toContain(">Relay<")
     expect(markup).toContain("Not logged in")
-    expect(markup).toContain("Continue as owner@example.test?")
+    expect(markup).toMatch(/<h1[^>]*>Continue as owner@example.test\?<\/h1>/u)
     expect(markup).toContain("Tailscale says this is owner-laptop. Logging in keeps you signed in here for 8 hours.")
     expect(markup).toContain(">Log in with Tailscale<")
     expect(markup).not.toContain("View only")
-    expect(markup).not.toContain("runs agents")
-    // A plain section: a live region would be read out again on every minute's session read.
-    expect(markup).not.toContain('role="status"')
+    expect(markup).not.toContain("Your session ended")
   })
 
-  it("leaves out the device sentence when Tailscale names no device, and disables the button while logging in", () => {
-    const { device: _device, ...nameless } = signedOut
-    const markup = renderToStaticMarkup(<TailscaleLoginCard view={nameless} busy onLogIn={() => undefined} />)
-    expect(markup).not.toContain("Tailscale says")
-    expect(markup).toContain("Logging in keeps you signed in here for 8 hours.")
-    expect(markup).toMatch(/<button[^>]*disabled/)
+  // gate-session-ended: one caution line above the same card.
+  it("says the session ended above the card", () => {
+    const markup = gate({ ...signedOut, ended: true })
+    expect(markup).toContain("Your session ended. Log in again to continue.")
+    expect(markup).toContain(">Log in with Tailscale<")
   })
 
-  it("draws nothing for a logged-in person or the local user", () => {
-    expect(renderToStaticMarkup(<TailscaleLoginCard view={signedIn} busy={false} onLogIn={() => undefined} />)).toBe("")
-    expect(
-      renderToStaticMarkup(
-        <TailscaleLoginCard view={{ signedIn: false, kind: "local" }} busy={false} onLogIn={() => undefined} />
-      )
-    ).toBe("")
+  // gate-fleet-host: the card with the approved fleet-host line.
+  it("adds the fleet-host line on a fleet machine", () => {
+    expect(gate({ ...signedOut, fleetHost: true })).toContain(
+      "This computer runs agents. They keep working; only you, logged in here, can see and act."
+    )
+    expect(gate(signedOut)).not.toContain("runs agents")
+  })
+
+  // gate-loopback: the command that opens this page logged in, with Copy.
+  it("shows the local user the herdr-hub login command, with Copy", () => {
+    const markup = gate({ signedIn: false, kind: "local" })
+    expect(markup).toContain("Not logged in")
+    expect(markup).toMatch(/<h1[^>]*>Log in as local user<\/h1>/u)
+    expect(markup).toContain("Run this in a terminal on this computer. It opens this page logged in.")
+    expect(markup).toContain(">herdr-hub login<")
+    expect(markup).toContain('aria-label="Copy herdr-hub login"')
+    expect(markup).not.toContain("Tailscale")
+  })
+
+  it("disables the log-in while logging in, and draws nothing for a logged-in session", () => {
+    expect(gate(signedOut, true)).toMatch(/<button[^>]*disabled/u)
+    expect(gate(signedIn)).toBe("")
   })
 })
 

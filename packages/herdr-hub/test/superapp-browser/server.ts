@@ -24,7 +24,7 @@ import { BlockedPushSettings } from "../../src/blocked-push-model.js"
 import { DashboardSnapshot, PendingApprovalTarget } from "../../src/dashboard-model.js"
 import { fontPreloadLink } from "../../src/font-preload.js"
 import { HostResources } from "../../src/host-resources-model.js"
-import { dashboardPage } from "../../src/internal/dashboard-page.js"
+import { dashboardPage, loginGatePage } from "../../src/internal/dashboard-page.js"
 import { NeedsYouResult } from "../../src/modules.js"
 import { relayIconSvg } from "../../src/relay-icon.js"
 import {
@@ -357,6 +357,12 @@ const program = Effect.gen(function*() {
         : "text/javascript"
       response.writeHead(200, { "content-type": type })
       response.end(asset)
+      return
+    }
+    // The page a browser without a session gets: the login gate, with no dashboard data.
+    if (url.pathname === "/__fixture/login-gate") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
+      response.end(loginGatePage(fontPreload))
       return
     }
     if (url.pathname === "/" || url.pathname === "/fleet") {

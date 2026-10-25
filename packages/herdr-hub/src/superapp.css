@@ -861,19 +861,54 @@
   }
 
   /* Page 22: the log-in card above the approvals. */
-  .hub-login-card {
+  /* Page 22's login gate: the whole page for a browser without a session. */
+  .hub-login-gate {
+    box-sizing: border-box;
+    display: grid;
+    place-items: center;
+    min-block-size: 100dvh;
+    padding: 40px;
+    background: var(--rly-color-canvas);
+    color: var(--rly-color-text-1);
+  }
+
+  .hub-login-gate-body {
+    display: grid;
+    gap: 1.25rem;
+    justify-items: center;
+    inline-size: 100%;
+    max-inline-size: 32rem;
+  }
+
+  .hub-login-gate-body > * {
+    inline-size: 100%;
+  }
+
+  .hub-login-gate-body > .hub-login-gate-mark {
+    inline-size: auto;
+  }
+
+  .hub-login-gate-mark {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    font: 620 1.1rem/1.2 var(--rly-font-ui);
+    letter-spacing: -0.02em;
+  }
+
+  .hub-login-gate-card {
+    box-sizing: border-box;
     display: grid;
     justify-items: start;
     gap: 0.75rem;
-    margin-block-end: 1rem;
-    padding: 1.5rem;
+    inline-size: 100%;
+    padding: 1.75rem;
     border: 1px solid var(--rly-color-border-1);
     border-radius: var(--rly-radius-group);
     background: var(--rly-color-surface-1);
-    max-inline-size: 40rem;
   }
 
-  .hub-login-card h2 {
+  .hub-login-gate-card h1 {
     margin: 0;
     font-size: 1.4rem;
     font-weight: 620;
@@ -882,18 +917,49 @@
     overflow-wrap: break-word;
   }
 
-  .hub-login-card > p {
+  .hub-login-gate-card > p {
     margin: 0;
     font-size: 0.9375rem;
     color: var(--rly-color-text-2);
   }
 
+  .hub-login-gate-card > .hub-login-gate-line {
+    font-size: 0.875rem;
+  }
+
+  .hub-login-gate-command {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    inline-size: 100%;
+  }
+
+  .hub-login-gate-command code {
+    flex: 1 1 12rem;
+    min-inline-size: 0;
+    padding: 0.6rem 0.9rem;
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-field);
+    background: var(--rly-color-surface-2);
+    font: 430 0.875rem/1.5 var(--rly-font-mono);
+    overflow-wrap: break-word;
+  }
+
   @media (max-width: 40rem) {
-    .hub-login-card h2 {
+    .hub-login-gate {
+      padding: 24px 16px;
+    }
+
+    .hub-login-gate-card {
+      padding: 1.25rem;
+    }
+
+    .hub-login-gate-card h1 {
       font-size: 1.25rem;
     }
 
-    .hub-login-card > button {
+    .hub-login-gate-card > button {
       inline-size: 100%;
     }
   }

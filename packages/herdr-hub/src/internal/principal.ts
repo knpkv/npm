@@ -90,6 +90,25 @@ export const principalFor = (
   }
 }
 
+/**
+ * The principal the same request would be once its caller logged in on this listener: a session bound to
+ * the WhoIs login and node, or the local session. The gate asks for a login only when this would pass.
+ */
+export const principalAfterLogin = (
+  config: Parameters<typeof principalFor>[0],
+  input: PrincipalInput
+): Principal => {
+  switch (input._tag) {
+    case "Tailnet":
+      return principalFor(config, {
+        ...input,
+        session: { kind: "tailscale", login: input.login, nodeId: input.nodeId, sliding: false, expiresAt: 0 }
+      })
+    case "Loopback":
+      return principalFor(config, { ...input, session: { kind: "local", expiresAt: 0 } })
+  }
+}
+
 /** Every permission `principal` holds under `config`, in display order. */
 export const grantsFor = (config: Grants, principal: Principal): ReadonlyArray<Permission> =>
   permissions.filter((permission) => can(config, principal, permission))

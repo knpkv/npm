@@ -99,7 +99,8 @@ export const npxSmokeCases = [
     ready: /running standalone on http:\/\/127\.0\.0\.1:4778\//,
     serves: true,
     port: 4778,
-    bodyIncludes: "fleet-dashboard-data"
+    // Without a session the hub answers its login gate.
+    bodyIncludes: "data-login-gate"
   }
 ]
 
