@@ -12,20 +12,35 @@
  *   read the session token can't compute it.
  * - **Two lifetimes.** A fixed session ends 8 hours after logging in. A sliding one (a person's own
  *   device) is renewed on use: it ends after 8 idle hours, and 7 days after logging in at the latest.
+ * - **Reading never writes.** {@link read} only looks a token up. A caller renews a session with `touch`
+ *   once it has matched the session's binding to the request, so a cookie replayed from another node,
+ *   read and ignored, can't keep a session alive. Renewals and purges are throttled to once a minute, so
+ *   a polling dashboard doesn't write on every request.
  * - **A session is intent, not presence.** Before passkeys, anything on the same node that can press
  *   "Log in" can open one. It decides who acts, never that a person is present.
- * - **Bounded.** At most {@link sessionLimit} sessions; the oldest is dropped to make room. Expired rows
- *   are removed when read.
+ * - **Bounded.** At most {@link bindingLimit} sessions per login and node, and {@link sessionLimit} in all;
+ *   the oldest is dropped to make room.
  *
  * @module
  */
 import { credentialValuesEqual, hashCredential, issueSessionToken, type SessionToken } from "@knpkv/browser-pairing"
 import { openPrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
-import { Clock, Crypto, Effect, Redacted, Schema } from "effect"
+import { Clock, Crypto, Effect, Redacted, Ref, Schema } from "effect"
 import { Hex } from "effect/encoding"
 
-/** At most this many open sessions; logging in past it drops the oldest. */
+/** At most this many open sessions; logging in past it drops the oldest. A backstop behind {@link bindingLimit}. */
 export const sessionLimit = 64
+
+/**
+ * At most this many open sessions per login and node (or for the local user); logging in past it drops that
+ * binding's oldest, so something minting in a loop on one node can't push another device's session out.
+ */
+export const bindingLimit = 8
+
+/** A sliding session is renewed only when that moves its end by at least this much: once a minute at most. */
+const renewSlackMillis = 60_000
+/** Expired rows are removed when logging in, and on a renewal at most this often. */
+const purgeIntervalMillis = 60_000
 
 const hour = 60 * 60 * 1000
 const fixedLifetime = 8 * hour
@@ -107,6 +122,28 @@ export const makePersonSessions = Effect.fn("PersonSessions.make")(function*(pat
   const cryptoService = yield* Crypto.Crypto
   const withCrypto = <A, E>(effect: Effect.Effect<A, E, Crypto.Crypto>) =>
     Effect.provideService(effect, Crypto.Crypto, cryptoService)
+  const lastPurge = yield* Ref.make(Number.NEGATIVE_INFINITY)
+  const purgeStatement = database.prepare("DELETE FROM person_sessions WHERE expires_at <= ?")
+  /** Removes expired rows, at most once a minute unless `always`. */
+  const purge = Effect.fn("PersonSessions.purge")(function*(now: number, always: boolean) {
+    const due = yield* Ref.modify(
+      lastPurge,
+      (last): [boolean, number] => always || now - last >= purgeIntervalMillis ? [true, now] : [false, last]
+    )
+    if (!due) return
+    yield* Effect.try({ try: () => purgeStatement.run(now), catch: unavailable("purge") })
+  })
+  /** The stored row `token` names; null when it names none. */
+  const rowOf = Effect.fn("PersonSessions.rowOf")(function*(token: string) {
+    const digest = yield* hashCredential(Redacted.make(token)).pipe(Effect.option)
+    if (digest._tag === "None") return null
+    const found = yield* Effect.try({
+      try: () => database.prepare("SELECT * FROM person_sessions WHERE digest = ?").get(digest.value),
+      catch: unavailable("read")
+    })
+    if (found === undefined) return null
+    return yield* Schema.decodeUnknownEffect(Row)(found).pipe(Effect.mapError(unavailable("read")))
+  })
 
   /** Logs `binding` in: a fresh session token, which only the browser keeps, and its CSRF token. */
   const mint = Effect.fn("PersonSessions.mint")(function*(binding: SessionBinding) {
@@ -131,6 +168,16 @@ export const makePersonSessions = Effect.fn("PersonSessions.make")(function*(pat
             now,
             expiresAt
           )
+          const sameBinding = "kind = ? AND login IS ? AND node_id IS ?"
+          const bound = [
+            binding.kind,
+            binding.kind === "tailscale" ? binding.login : null,
+            binding.kind === "tailscale" ? binding.nodeId : null
+          ]
+          database.prepare(`DELETE FROM person_sessions WHERE rowid IN (
+            SELECT rowid FROM person_sessions WHERE ${sameBinding} ORDER BY issued_at, rowid
+            LIMIT MAX(0, (SELECT count(*) FROM person_sessions WHERE ${sameBinding}) - ?)
+          )`).run(...bound, ...bound, bindingLimit)
           database.prepare(`DELETE FROM person_sessions WHERE rowid IN (
             SELECT rowid FROM person_sessions ORDER BY issued_at, rowid
             LIMIT MAX(0, (SELECT count(*) FROM person_sessions) - ?)
@@ -143,40 +190,38 @@ export const makePersonSessions = Effect.fn("PersonSessions.make")(function*(pat
       },
       catch: unavailable("mint")
     })
+    yield* purge(now, true)
     yield* opened.secureFiles.pipe(Effect.mapError(unavailable("mint")))
     return { token, csrf, expiresAt }
   })
 
-  /** The open session `token` names, renewing a sliding one; null when it names none or has ended. */
+  /** The open session `token` names; null when it names none or has ended. Reads only, never renews. */
   const read = Effect.fn("PersonSessions.read")(function*(token: string) {
-    const digest = yield* hashCredential(Redacted.make(token)).pipe(Effect.option)
-    if (digest._tag === "None") return null
-    const now = yield* Clock.currentTimeMillis
-    yield* Effect.try({
-      try: () => database.prepare("DELETE FROM person_sessions WHERE expires_at <= ?").run(now),
-      catch: unavailable("read")
-    })
-    const found = yield* Effect.try({
-      try: () => database.prepare("SELECT * FROM person_sessions WHERE digest = ?").get(digest.value),
-      catch: unavailable("read")
-    })
-    if (found === undefined) return null
-    const row = yield* Schema.decodeUnknownEffect(Row)(found).pipe(Effect.mapError(unavailable("read")))
+    const row = yield* rowOf(token)
+    if (row === null) return null
     const binding = bindingOf(row)
-    if (binding === null) return null
-    const expiresAt = row.sliding === 1
-      ? Math.min(now + idleLifetime, row.issued_at + absoluteLifetime)
-      : row.expires_at
-    if (expiresAt <= now) return null
-    if (expiresAt !== row.expires_at) {
-      yield* Effect.try({
-        try: () =>
-          database.prepare("UPDATE person_sessions SET expires_at = ? WHERE digest = ?").run(expiresAt, row.digest),
-        catch: unavailable("read")
-      })
-    }
-    const open: OpenSession = { ...binding, expiresAt }
+    const now = yield* Clock.currentTimeMillis
+    if (binding === null || row.expires_at <= now) return null
+    const open: OpenSession = { ...binding, expiresAt: row.expires_at }
     return open
+  })
+
+  /**
+   * Renews `token`'s session if it slides, now that the caller has matched its binding to the request: 8
+   * more idle hours, never past 7 days after logging in. Writes only when that moves the end by a minute.
+   */
+  const touch = Effect.fn("PersonSessions.touch")(function*(token: string) {
+    const row = yield* rowOf(token)
+    const now = yield* Clock.currentTimeMillis
+    if (row === null || row.sliding !== 1 || row.expires_at <= now) return
+    const expiresAt = Math.min(now + idleLifetime, row.issued_at + absoluteLifetime)
+    if (expiresAt - row.expires_at < renewSlackMillis) return
+    yield* Effect.try({
+      try: () =>
+        database.prepare("UPDATE person_sessions SET expires_at = ? WHERE digest = ?").run(expiresAt, row.digest),
+      catch: unavailable("touch")
+    })
+    yield* purge(now, false)
   })
 
   /** Logs `token`'s session out; nothing happens when it names none. */
@@ -192,6 +237,7 @@ export const makePersonSessions = Effect.fn("PersonSessions.make")(function*(pat
   return {
     mint: (binding: SessionBinding) => withCrypto(mint(binding)),
     read: (token: string) => withCrypto(read(token)),
+    touch: (token: string) => withCrypto(touch(token)),
     end: (token: string) => withCrypto(end(token))
   }
 })

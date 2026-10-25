@@ -65,6 +65,8 @@ export interface SessionRequest<R = never> {
   readonly cli: boolean
   /** The `Origin` header, if any. */
   readonly origin: string | undefined
+  /** The `tailscale-user-login` header, if any. On loopback it names no one, so login routes refuse it. */
+  readonly headerLogin: string | undefined
   /** Fails when a write did not come from the hub's own page. */
   readonly sameOrigin: Effect.Effect<unknown, unknown, R>
   /** The caller's WhoIs identity on a tailnet listener; fails when the hub admits no such caller. */
@@ -114,20 +116,21 @@ export const sessionRoute = Effect.fn("SessionRoutes.route")(function*<R>(
   switch (route) {
     case "GET /v1/session": {
       if (!tailnet) {
-        return open?.kind === "local" && token !== undefined
-          ? answer(200, {
-            signedIn: true,
-            kind: "local",
-            expiresAt: open.expiresAt,
-            csrf: Redacted.value(yield* csrfFor(token))
-          })
-          : answer(200, { signedIn: false, kind: "local" })
+        if (open?.kind !== "local" || token === undefined) return answer(200, { signedIn: false, kind: "local" })
+        yield* context.sessions.touch(token)
+        return answer(200, {
+          signedIn: true,
+          kind: "local",
+          expiresAt: open.expiresAt,
+          csrf: Redacted.value(yield* csrfFor(token))
+        })
       }
       const identity = yield* request.identity.pipe(Effect.option)
       if (identity._tag === "None") return forbidden
       const who = identity.value.device === undefined
         ? { login: identity.value.login }
         : { login: identity.value.login, device: identity.value.device }
+      if (boundTo(open, identity.value) && token !== undefined) yield* context.sessions.touch(token)
       return boundTo(open, identity.value) && token !== undefined
         ? answer(200, {
           signedIn: true,
@@ -158,11 +161,12 @@ export const sessionRoute = Effect.fn("SessionRoutes.route")(function*<R>(
     }
     case "POST /v1/session/local-code": {
       if (tailnet) return notFound
-      if (!request.cli || request.origin !== undefined) return forbidden
+      if (!request.cli || request.origin !== undefined || request.headerLogin !== undefined) return forbidden
       return answer(200, { code: Redacted.value(yield* context.localLogin.mint) })
     }
     case "POST /v1/session/local": {
       if (tailnet) return notFound
+      if (request.headerLogin !== undefined) return forbidden
       if ((yield* request.sameOrigin.pipe(Effect.option))._tag === "None") return forbidden
       const body = yield* request.body.pipe(Effect.flatMap(Schema.decodeUnknownEffect(CodeBody)), Effect.option)
       if (body._tag === "None" || !(yield* context.localLogin.exchange(body.value.code))) {

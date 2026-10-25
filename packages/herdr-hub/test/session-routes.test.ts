@@ -2,6 +2,7 @@ import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { FleetHostName } from "@knpkv/herdr-fleet/model"
 import { Effect, FileSystem, Path, Redacted, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import { makeLocalLogin } from "../src/internal/local-login.js"
 import { csrfFor, makePersonSessions } from "../src/internal/person-sessions.js"
 import { readCookie, sessionCookieName, type SessionRequest, sessionRoute } from "../src/internal/session-routes.js"
@@ -24,6 +25,7 @@ const fixture = Effect.gen(function*() {
       csrf: undefined,
       cli: false,
       origin: undefined,
+      headerLogin: undefined,
       sameOrigin: Effect.void,
       identity: Effect.succeed({ login: "owner@example.test", nodeId: "node-phone", device: "owner-phone" }),
       body: Effect.succeed({}),
@@ -56,6 +58,28 @@ describe("session routes", () => {
         const after = yield* route({ listener: "serve", method: "GET", pathname: "/v1/session", cookieToken: token })
         expect(after?.body).toMatchObject({ signedIn: true, kind: "tailscale", login: "owner@example.test" })
         expect(after?.body).toHaveProperty("csrf")
+      })))
+
+    // Only a session matched to the caller's login and node is renewed: a cookie replayed from another node
+    // is read, ignored, and left to run out.
+    it.effect("renews a session only for the node it was opened on", () =>
+      Effect.scoped(Effect.gen(function*() {
+        const { route, sessions } = yield* fixture
+        const login = yield* route({ listener: "serve", method: "POST", pathname: "/v1/session/tailscale" })
+        const token = cookieValue(login?.setCookie) ?? ""
+        const opened = (yield* sessions.read(token))?.expiresAt
+        yield* TestClock.adjust("2 hours")
+        const elsewhere = yield* route({
+          listener: "serve",
+          method: "GET",
+          pathname: "/v1/session",
+          cookieToken: token,
+          identity: Effect.succeed({ login: "owner@example.test", nodeId: "node-laptop", device: undefined })
+        })
+        expect(elsewhere?.body).toMatchObject({ signedIn: false })
+        expect((yield* sessions.read(token))?.expiresAt).toBe(opened)
+        yield* route({ listener: "serve", method: "GET", pathname: "/v1/session", cookieToken: token })
+        expect((yield* sessions.read(token))?.expiresAt).toBeGreaterThan(opened ?? 0)
       })))
 
     // On a fleet machine the session is fixed at 8 hours; a person's own device slides up to 7 days.
@@ -136,6 +160,24 @@ describe("session routes", () => {
         ).toBe(401)
         const read = yield* route({ listener: "local", method: "GET", pathname: "/v1/session", headerToken: token })
         expect(read?.body).toMatchObject({ signedIn: true, kind: "local" })
+      })))
+
+    // Loopback naming a login is no one (any local process can set the header), so it neither gets nor
+    // spends a login code.
+    it.effect("refuses the loopback login routes to a request naming a login", () =>
+      Effect.scoped(Effect.gen(function*() {
+        const { route } = yield* fixture
+        for (const pathname of ["/v1/session/local-code", "/v1/session/local"]) {
+          expect(
+            (yield* route({
+              listener: "local",
+              method: "POST",
+              pathname,
+              cli: true,
+              headerLogin: "owner@example.test"
+            }))?.status
+          ).toBe(403)
+        }
       })))
 
     // The code exchange exists on the loopback listener only; the Tailscale login on the tailnet one only.

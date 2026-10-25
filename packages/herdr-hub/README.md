@@ -71,7 +71,7 @@ hostd then compares that principal with what the route's family will require. Ea
 
 Nothing is refused because of it.
 
-People log in at `/v1/session`. The hub stores only each session token's SHA-256 digest, in `person-sessions.sqlite` in the state directory, so sessions survive a restart. At most 64 sessions are open.
+People log in at `/v1/session`. The hub stores only each session token's SHA-256 digest, in `person-sessions.sqlite` in the state directory, so sessions survive a restart. At most 8 sessions are open per login and node, and 64 in all; logging in past that drops the oldest of the same login and node first. Reading a session never writes. A sliding session is renewed only once the request has matched its login and node, and at most once a minute.
 
 - **Tailscale (tailnet hub listener).** `POST /v1/session/tailscale` logs the WhoIs login in on its node.
   - The token goes in a `__Host-herdr_session` cookie (Secure, HttpOnly, SameSite=Strict, `Path=/`).

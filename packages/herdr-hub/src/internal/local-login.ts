@@ -12,6 +12,9 @@
  *   exchanges drop the live code, until a new one is minted. Spending is one atomic swap, so two racing
  *   exchanges can't both win.
  * - In memory: a restart drops the live code, and `herdr-hub login` simply asks again.
+ * - **No rate limit beyond that.** With one live code and the guess cap there is nothing left to limit. A
+ *   local process can burn the live code with 5 wrong guesses; that only makes `herdr-hub login` ask again,
+ *   and that process runs as the same user anyway.
  *
  * @module
  */

@@ -3404,6 +3404,7 @@ export const startHttpServer = async (
               csrf: header(request, csrfHeader),
               cli: cliToken !== null && presentsCliToken(header(request, cliTokenHeader), cliToken),
               origin: header(request, "origin"),
+              headerLogin: header(request, "tailscale-user-login"),
               sameOrigin: sameOrigin(request, expectedOrigin()),
               identity: tailnetIdentity(request, config, null),
               body: readJson(request, Schema.Unknown)

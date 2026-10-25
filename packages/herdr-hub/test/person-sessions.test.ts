@@ -4,6 +4,7 @@ import { Effect, FileSystem, Path, Redacted } from "effect"
 import { TestClock } from "effect/testing"
 import { DatabaseSync } from "node:sqlite"
 import {
+  bindingLimit,
   csrfFor,
   csrfMatches,
   makePersonSessions,
@@ -16,6 +17,14 @@ const phone: SessionBinding = { kind: "tailscale", login: "owner@example.test", 
 const build: SessionBinding = { kind: "tailscale", login: "owner@example.test", nodeId: "node-build", sliding: false }
 
 type Sessions = Effect.Success<ReturnType<typeof makePersonSessions>>
+
+/** Every stored session's expiry, read straight from the file. */
+const expiries = (file: string): string => {
+  const database = new DatabaseSync(file, { readOnly: true })
+  const rows = JSON.stringify(database.prepare("SELECT expires_at FROM person_sessions ORDER BY rowid").all())
+  database.close()
+  return rows
+}
 
 const withSessions = <A, E, R>(run: (sessions: Sessions, file: string) => Effect.Effect<A, E, R>) =>
   Effect.gen(function*() {
@@ -60,21 +69,54 @@ describe("person sessions", () => {
         })
       ))
 
-    // A personal device's session renews with use, up to 7 days after logging in.
-    it.effect("renews a sliding session on use, until 8 idle hours or 7 days", () =>
+    // A personal device's session renews when its owner uses it, up to 7 days after logging in.
+    it.effect("renews a sliding session when touched, until 8 idle hours or 7 days", () =>
       withSessions((sessions) =>
         Effect.gen(function*() {
           const idle = Redacted.value((yield* sessions.mint(phone)).token)
           yield* TestClock.adjust(9 * hour)
           expect(yield* sessions.read(idle)).toBeNull()
           const used = Redacted.value((yield* sessions.mint(phone)).token)
-          // Read every 7 hours: renewed each time, until 7 days (168 h) after logging in, when it ends.
+          // Touched every 7 hours: renewed each time, until 7 days (168 h) after logging in, when it ends.
           for (let step = 1; step <= 23; step++) {
             yield* TestClock.adjust(7 * hour)
             expect(yield* sessions.read(used), `after ${String(step * 7)} h`).not.toBeNull()
+            yield* sessions.touch(used)
           }
           yield* TestClock.adjust(7 * hour)
           expect(yield* sessions.read(used)).toBeNull()
+        })
+      ))
+
+    // Reading decides nothing and writes nothing: a cookie replayed from another node, read and then
+    // ignored, must not keep the session alive. Only a caller that matched the binding touches it.
+    it.effect("never renews or writes on a read", () =>
+      withSessions((sessions, file) =>
+        Effect.gen(function*() {
+          const token = Redacted.value((yield* sessions.mint(phone)).token)
+          const before = expiries(file)
+          yield* TestClock.adjust(1 * hour)
+          yield* sessions.read(token)
+          expect(expiries(file)).toEqual(before)
+          yield* TestClock.adjust(7 * hour + 1)
+          expect(yield* sessions.read(token)).toBeNull()
+        })
+      ))
+
+    // A dashboard polls every few seconds: renewing is throttled to once a minute.
+    it.effect("renews at most once a minute", () =>
+      withSessions((sessions, file) =>
+        Effect.gen(function*() {
+          const token = Redacted.value((yield* sessions.mint(phone)).token)
+          yield* TestClock.adjust(2 * 60 * 1000)
+          yield* sessions.touch(token)
+          const touched = expiries(file)
+          yield* TestClock.adjust(10 * 1000)
+          yield* sessions.touch(token)
+          expect(expiries(file)).toEqual(touched)
+          yield* TestClock.adjust(60 * 1000)
+          yield* sessions.touch(token)
+          expect(expiries(file)).not.toEqual(touched)
         })
       ))
 
@@ -102,14 +144,30 @@ describe("person sessions", () => {
         })
       ))
 
-    // A bounded table: past the limit, the oldest session is dropped.
-    it.effect("keeps at most the limit, dropping the oldest", () =>
+    // Logging in again and again on one device drops that device's oldest sessions, never another's: an
+    // agent minting in a loop on a fleet machine can't push the phone's session out.
+    it.effect("keeps at most 8 sessions per login and node, dropping that binding's oldest", () =>
+      withSessions((sessions) =>
+        Effect.gen(function*() {
+          const phoneSession = yield* sessions.mint(phone)
+          const oldest = yield* sessions.mint(build)
+          for (let index = 0; index < bindingLimit; index++) {
+            yield* TestClock.adjust(1000)
+            yield* sessions.mint(build)
+          }
+          expect(yield* sessions.read(Redacted.value(oldest.token))).toBeNull()
+          expect(yield* sessions.read(Redacted.value(phoneSession.token))).not.toBeNull()
+        })
+      ))
+
+    // A bounded table: past the global limit, the oldest session is dropped.
+    it.effect("keeps at most the global limit, dropping the oldest", () =>
       withSessions((sessions) =>
         Effect.gen(function*() {
           const oldest = yield* sessions.mint(build)
           for (let index = 0; index < sessionLimit; index++) {
             yield* TestClock.adjust(1000)
-            yield* sessions.mint(build)
+            yield* sessions.mint({ ...phone, nodeId: `node-${String(index)}` })
           }
           expect(yield* sessions.read(Redacted.value(oldest.token))).toBeNull()
         })
