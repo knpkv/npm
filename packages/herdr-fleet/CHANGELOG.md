@@ -1,5 +1,11 @@
 # @knpkv/herdr-fleet
 
+## 0.21.0
+
+### Minor Changes
+
+- [#1120](https://github.com/knpkv/npm/pull/1120) [`36501ee`](https://github.com/knpkv/npm/commit/36501ee2b18aaf1cdd2d45789b649ce15881287c) Thanks [@konopkov](https://github.com/konopkov)! - Add hub permissions: a closed `Permission` list, the optional `users`, `hosts` and `local` configuration keys, and `can(config, principal, permission)` for `Person`, `Host`, `Local`, `Service` and `Anonymous` callers. A permission name the hub does not know decodes, grants nothing, and is listed by `unknownPermissions`. No hub reads them yet.
+
 ## 0.20.0
 
 ### Minor Changes
