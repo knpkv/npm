@@ -7940,6 +7940,11 @@ esac
         url.port = String(Number(url.port) + 1)
         return url.origin
       }
+      // The same host and port under the other scheme.
+      const otherScheme = (origin: string) => {
+        const url = new URL(origin)
+        return `${url.protocol === "https:" ? "http:" : "https:"}//${url.host}`
+      }
       // The session's cookie, and the Origin when the request names one.
       const sent = (cookie: Record<string, string>, origin: string | undefined) =>
         origin === undefined ? cookie : { ...cookie, origin }
@@ -7984,7 +7989,8 @@ esac
         const same = yield* write(own)
         expect(same.status, `${listener} same origin: ${same.body}`).toBe(404)
         expect(JSON.parse(same.body)).not.toEqual(originRequired)
-        for (const origin of [otherPort(own), undefined]) {
+        // An opaque origin (a sandboxed frame, a file) sends the literal "null".
+        for (const origin of [otherPort(own), otherScheme(own), "null", undefined]) {
           const refused = yield* write(origin)
           expect(refused.status, `${listener} ${origin ?? "no origin"}: ${refused.body}`).toBe(403)
           expect(JSON.parse(refused.body)).toEqual(originRequired)

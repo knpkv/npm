@@ -1,4 +1,7 @@
-/** The real hub on its Tailscale listener over TLS, with one job waiting for approval; only Tailscale is a script. */
+/**
+ * The real hub on its Tailscale listener over TLS, with one job waiting for approval and one agent; only
+ * Tailscale is a script.
+ */
 import { NodeServices } from "@effect/platform-node"
 import {
   AgentInventory,
@@ -74,7 +77,21 @@ esac
         repository: { branch: "main", dirty: false, path: root, revision: "fixture" }
       }),
     listAgents: () =>
-      Schema.decodeUnknownEffect(AgentInventory)({ agents: [], available: true, error: null }).pipe(Effect.orDie),
+      Schema.decodeUnknownEffect(AgentInventory)({
+        agents: [{
+          agentId: "agent-worker",
+          activityRevision: 1,
+          kind: "claude",
+          name: "Worker",
+          paneId: "w1:p1",
+          parentAgentId: null,
+          relation: null,
+          status: "waiting",
+          work: "Reviewing the fixture"
+        }],
+        available: true,
+        error: null
+      }).pipe(Effect.orDie),
     run: () => Effect.succeed("done"),
     runLocal: () => Effect.succeed("done"),
     runCoordinatorChat: () => Effect.succeed("done")
