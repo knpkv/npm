@@ -18,6 +18,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./job-outcome": {
+      "types": "./dist/job-outcome.d.ts",
+      "import": "./dist/job-outcome.js"
+    },
     "./model": {
       "types": "./dist/model.d.ts",
       "import": "./dist/model.js"

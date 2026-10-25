@@ -7537,6 +7537,48 @@ esac
     }).pipe(Effect.scoped, provideNodeServices)
   })
 
+  it.effect("lists the week's failed jobs beside the approvals, without payloads", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-needs-you-failures-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const now = Date.now()
+      const interrupted: JobRecord = {
+        ...pendingRecord("SER8", 1),
+        approvalNonce: null,
+        approvedBy: "owner@example.com",
+        approvedAt: now - 2_000,
+        createdAt: now - 3_000,
+        updatedAt: now - 1_000,
+        status: "interrupted",
+        error: "hostd restarted while this job was running"
+      }
+      const hub = yield* startHub(
+        root,
+        join(root, "relay"),
+        scriptedBackends("Nothing waits."),
+        (store) =>
+          Effect.forEach([pendingRecord("SER8", 0), interrupted], (record) => store.put(record), { discard: true })
+      )
+      const response = yield* Effect.promise(() =>
+        hubRequest(`${hub.serveUrl}/v1/modules/connect/needs-you`, { headers: hub.headers })
+      )
+      expect(response.status, response.body).toBe(200)
+      expect(JSON.parse(response.body)).toMatchObject({
+        items: [{ key: "fleet:ser8:ser8-job-00" }],
+        contributions: expect.arrayContaining([{ provider: "fleet", asOf: null, lastDecisionAt: now - 2_000 }]),
+        failures: [{
+          key: "fleet:failed:ser8:ser8-job-01",
+          host: "SER8",
+          jobId: "ser8-job-01",
+          kind: "nix.check",
+          reason: "hub_restarted",
+          approved: true
+        }]
+      })
+      for (const field of ["payload", "hash", "error", "nonce"]) expect(response.body).not.toContain(`"${field}"`)
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
   /** The production mount uses whois authority, never a browser-supplied login header or query. */
   it.effect("keeps Code local, read-only and caller identity sourced from authenticated whois", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-code-auth-"))
@@ -7679,8 +7721,12 @@ esac
 
   it.effect("rereads peer availability and deduplicates case variants while preserving display case", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-today-peer-"))
-    const peer = createServer((_request, response) => {
+    const peer = createServer((request, response) => {
       response.writeHead(200, { "content-type": "application/json" })
+      if (request.url?.startsWith("/v1/history") === true) {
+        response.end(JSON.stringify({ records: [], nextCursor: null }))
+        return
+      }
       response.end(JSON.stringify({
         host: "ALPHA",
         nextCursor: null,
@@ -7783,7 +7829,7 @@ esac
         ],
         contributions: [
           { provider: "sandboxes", asOf: null },
-          { provider: "fleet", asOf: null }
+          { provider: "fleet", asOf: null, lastDecisionAt: null }
         ]
       })
       writeFileSync(hub.statusFile, "invalid status JSON")
@@ -7797,7 +7843,7 @@ esac
         ],
         contributions: [
           { provider: "sandboxes", asOf: null },
-          { provider: "fleet", asOf: null }
+          { provider: "fleet", asOf: null, lastDecisionAt: null }
         ]
       })
       expect(discoveryFailure.body).not.toContain("fixture busy")

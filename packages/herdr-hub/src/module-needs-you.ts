@@ -1,3 +1,4 @@
+import { JobFailureReason } from "@knpkv/herdr-fleet/job-outcome"
 import { FleetHostName, JobActor, JobIdentifier, JobPayload } from "@knpkv/herdr-fleet/model"
 import { Effect, Schema } from "effect"
 
@@ -38,6 +39,24 @@ export const NeedsYouCandidate = Schema.Struct({
 })
 export interface NeedsYouCandidate extends Schema.Schema.Type<typeof NeedsYouCandidate> {}
 
+/**
+ * A fleet job that failed or was interrupted: where it ran, why in a closed class, and whether a person approved it.
+ * It travels beside `items`, never in them: an older page decodes `items` with its own closed destination union and
+ * drops the unknown `failures` key, so a new kind of row can't fail its whole read.
+ */
+export const NeedsYouFailureCandidate = Schema.Struct({
+  sourceKey: SourceKey,
+  host: FleetHostName,
+  jobId: JobIdentifier,
+  kind: JobKind,
+  actor: JobActor,
+  createdAt: Timestamp,
+  failedAt: Timestamp,
+  reason: JobFailureReason,
+  approved: Schema.Boolean
+})
+export interface NeedsYouFailureCandidate extends Schema.Schema.Type<typeof NeedsYouFailureCandidate> {}
+
 export const NeedsYouFailureReason = Schema.Literals([
   "offline",
   "unavailable",
@@ -60,20 +79,27 @@ export const NeedsYouIssue = Schema.Union([
 ])
 export type NeedsYouIssue = typeof NeedsYouIssue.Type
 
+const lastDecisionAt = Schema.optionalKey(Schema.NullOr(Timestamp))
+
 /**
  * A failed or bounded source remains visible even when it returned no items.
  * `asOf` is the provider's own reading time, or null when it has none. Older clients omit it.
+ * `failures` are the provider's failed jobs (newest first); `lastDecisionAt` is the newest approval or rejection in its
+ * window, null for none in that window. Both are absent from older providers.
  */
 export const NeedsYouProviderResult = Schema.Struct({
   items: Schema.Array(NeedsYouCandidate),
   issues: Schema.Array(NeedsYouIssue),
-  asOf: Schema.NullOr(Timestamp).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null)))
+  asOf: Schema.NullOr(Timestamp).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
+  failures: Schema.optionalKey(Schema.Array(NeedsYouFailureCandidate)),
+  lastDecisionAt
 })
 export interface NeedsYouProviderResult extends Schema.Schema.Type<typeof NeedsYouProviderResult> {}
 
 export const NeedsYouContribution = Schema.Struct({
   provider: ProviderId,
-  asOf: Schema.NullOr(Timestamp)
+  asOf: Schema.NullOr(Timestamp),
+  lastDecisionAt
 })
 export interface NeedsYouContribution extends Schema.Schema.Type<typeof NeedsYouContribution> {}
 export const NeedsYouItem = Schema.Struct({
@@ -87,23 +113,40 @@ export const NeedsYouItem = Schema.Struct({
 })
 export interface NeedsYouItem extends Schema.Schema.Type<typeof NeedsYouItem> {}
 
+export const NeedsYouFailure = Schema.Struct({
+  key: NeedsYouItem.fields.key,
+  provider: ProviderId,
+  host: NeedsYouFailureCandidate.fields.host,
+  jobId: NeedsYouFailureCandidate.fields.jobId,
+  kind: NeedsYouFailureCandidate.fields.kind,
+  actor: NeedsYouFailureCandidate.fields.actor,
+  createdAt: NeedsYouFailureCandidate.fields.createdAt,
+  failedAt: NeedsYouFailureCandidate.fields.failedAt,
+  reason: NeedsYouFailureCandidate.fields.reason,
+  approved: NeedsYouFailureCandidate.fields.approved
+})
+export interface NeedsYouFailure extends Schema.Schema.Type<typeof NeedsYouFailure> {}
+
 export const NeedsYouSource = Schema.Struct({ provider: ProviderId, issue: NeedsYouIssue })
 export interface NeedsYouSource extends Schema.Schema.Type<typeof NeedsYouSource> {}
 
 const contributions = Schema.Array(NeedsYouContribution).pipe(
   Schema.withDecodingDefaultKey(Effect.succeed([]))
 )
+const failures = Schema.optionalKey(Schema.Array(NeedsYouFailure))
 
 /** Complete has no source problems; Partial always names at least one. Contributions follow provider order. */
 export const NeedsYouResult = Schema.Union([
   Schema.TaggedStruct("Complete", {
     items: Schema.Array(NeedsYouItem),
-    contributions
+    contributions,
+    failures
   }),
   Schema.TaggedStruct("Partial", {
     items: Schema.Array(NeedsYouItem),
     sources: Schema.Array(NeedsYouSource).check(Schema.isMinLength(1)),
-    contributions
+    contributions,
+    failures
   })
 ])
 export type NeedsYouResult = typeof NeedsYouResult.Type

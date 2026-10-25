@@ -1,6 +1,7 @@
 import { Cause, Effect, Exit, Option, Result, Schema } from "effect"
 import {
   type NeedsYouContribution,
+  type NeedsYouFailure,
   type NeedsYouItem,
   NeedsYouProviderResult,
   type NeedsYouResult,
@@ -10,7 +11,9 @@ import {
 interface Reading {
   readonly provider: NeedsYouContribution["provider"]
   readonly asOf: NeedsYouContribution["asOf"]
+  readonly lastDecisionAt?: number | null | undefined
   readonly items: ReadonlyArray<NeedsYouItem>
+  readonly failures: ReadonlyArray<NeedsYouFailure>
   readonly sources: ReadonlyArray<NeedsYouSource>
 }
 
@@ -44,6 +47,7 @@ export const collectNeedsYou = Effect.fn("ModuleRegistry.collectNeedsYou")(funct
           provider: provider.id,
           asOf: null,
           items: [],
+          failures: [],
           sources: [{
             provider: provider.id,
             issue: {
@@ -58,6 +62,7 @@ export const collectNeedsYou = Effect.fn("ModuleRegistry.collectNeedsYou")(funct
           provider: provider.id,
           asOf: null,
           items: [],
+          failures: [],
           sources: [{
             provider: provider.id,
             issue: {
@@ -80,6 +85,7 @@ export const collectNeedsYou = Effect.fn("ModuleRegistry.collectNeedsYou")(funct
           provider: provider.id,
           asOf: null,
           items: [],
+          failures: [],
           sources: [{
             provider: provider.id,
             issue: {
@@ -92,8 +98,14 @@ export const collectNeedsYou = Effect.fn("ModuleRegistry.collectNeedsYou")(funct
       return {
         provider: provider.id,
         asOf: decoded.success.asOf,
+        lastDecisionAt: decoded.success.lastDecisionAt,
         items: decoded.success.items.map(({ sourceKey, ...item }) => ({
           ...item,
+          provider: provider.id,
+          key: `${provider.id}:${sourceKey}`
+        })),
+        failures: (decoded.success.failures ?? []).map(({ sourceKey, ...failure }) => ({
+          ...failure,
           provider: provider.id,
           key: `${provider.id}:${sourceKey}`
         })),
@@ -133,8 +145,18 @@ export const collectNeedsYou = Effect.fn("ModuleRegistry.collectNeedsYou")(funct
       sources.push({ provider, issue: { state: "truncated" } })
     }
   }
-  const contributions = readings.map((reading) => ({ provider: reading.provider, asOf: reading.asOf }))
-  return sources.length === 0
+  const contributions = readings.map((reading): NeedsYouContribution =>
+    reading.lastDecisionAt === undefined
+      ? { provider: reading.provider, asOf: reading.asOf }
+      : { provider: reading.provider, asOf: reading.asOf, lastDecisionAt: reading.lastDecisionAt }
+  )
+  // Keys are provider-scoped, so failures need no dedupe; newest first.
+  const failures = readings.flatMap((reading) => reading.failures).sort((a, b) =>
+    b.failedAt - a.failedAt || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+  )
+  // Absent when empty, so a hub without failures answers exactly as before.
+  const result: NeedsYouResult = sources.length === 0
     ? { _tag: "Complete", items: bounded, contributions }
     : { _tag: "Partial", items: bounded, sources, contributions }
+  return failures.length === 0 ? result : { ...result, failures }
 })
