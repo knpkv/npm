@@ -89,6 +89,22 @@ for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">)
   })
 }
 
+// The popover is reachable by keyboard: opening it moves focus to Log out, and Escape returns focus to the
+// control. Phones have no session control yet (3b), so this runs on desktop.
+test("moves focus into the popover on open and back to the control on Escape", async ({ page }, info) => {
+  test.skip(phone(info.project.name), "no phone session control before 3b")
+  await answerSession(page, () => signedIn)
+  await page.goto("/#fleet/approvals")
+  const control = page.getByRole("button", { name: /^Your Tailscale session, mira@example.test/u })
+  await control.focus()
+  await page.keyboard.press("Enter")
+  await expect(page.getByRole("dialog", { name: "Your session" }).getByRole("button", { name: "Log out" }))
+    .toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog", { name: "Your session" })).toHaveCount(0)
+  await expect(control).toBeFocused()
+})
+
 // Pressing Log in POSTs once; the next read shows the person logged in and the card goes.
 test("logs in with Tailscale and reads the session again", async ({ page }) => {
   let current: typeof signedOut | typeof signedIn = signedOut

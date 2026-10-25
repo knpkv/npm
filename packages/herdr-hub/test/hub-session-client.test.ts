@@ -3,7 +3,7 @@ import { expect, it } from "@effect/vitest"
 import type { Schema } from "effect"
 import { Effect } from "effect"
 import type { HttpBody } from "effect/http"
-import { HttpClient, HttpClientResponse } from "effect/http"
+import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http"
 import {
   loadHubSession,
   logInWithTailscale,
@@ -117,6 +117,24 @@ it.effect("logs out with the session's CSRF token and forgets the kept token", (
       ["/v1/session/logout", csrf, token]
     ])
     expect(store.current()).toBeNull()
+  }))
+
+// A refused logout means the session already ended on the hub: the dead token goes. A network failure may
+// not have reached the hub, so the token stays.
+it.effect("forgets the kept token when logout is refused, and keeps it when the hub wasn't reached", () =>
+  Effect.gen(function*() {
+    const refusedStore = memoryStore(token)
+    yield* logOutOfHub(csrf, refusedStore).pipe(
+      Effect.provideService(HttpClient.HttpClient, answering(403, { error: "forbidden" })),
+      Effect.flip
+    )
+    expect(refusedStore.current()).toBeNull()
+    const offlineStore = memoryStore(token)
+    const offline = HttpClient.make((request) =>
+      Effect.fail(new HttpClientError.HttpClientError({ reason: new HttpClientError.TransportError({ request }) }))
+    )
+    yield* logOutOfHub(csrf, offlineStore).pipe(Effect.provideService(HttpClient.HttpClient, offline), Effect.flip)
+    expect(offlineStore.current()).toBe(token)
   }))
 
 // The code must not stay in history, session restore or synced tabs: the fragment is gone before it is spent.

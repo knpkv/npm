@@ -117,12 +117,18 @@ export const spendLoginCode = Effect.fn("HubSessionClient.spendLoginCode")(funct
   store.write(minted.token)
 })
 
-/** Logs out with the session's CSRF token, and forgets the kept local token. */
+/**
+ * Logs out with the session's CSRF token, and forgets the kept local token. A refused logout means the hub
+ * no longer holds that session, so the token goes then too; after a network failure it stays, since the
+ * logout may not have happened.
+ */
 export const logOutOfHub = Effect.fn("HubSessionClient.logOut")(function*(csrf: string, store: SessionTokenStore) {
   const request = withToken(store)(
     HttpClientRequest.setHeader(HttpClientRequest.post("/v1/session/logout"), csrfHeader, csrf)
   )
-  yield* post(request, {})
+  yield* post(request, {}).pipe(
+    Effect.tapError((failure) => failure.reason === "refused" ? Effect.sync(store.clear) : Effect.void)
+  )
   store.clear()
 })
 

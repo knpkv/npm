@@ -9,7 +9,7 @@
  */
 import { Button, StateLabel } from "@knpkv/rly/primitives"
 import { Effect } from "effect"
-import { type ReactElement, useCallback, useEffect, useRef, useState } from "react"
+import { type ReactElement, useCallback, useEffect, useId, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import type {
   HubSessionChangeFailed,
@@ -27,7 +27,7 @@ export interface HubSessionActions {
   readonly spendLoginCode: (code: string) => Effect.Effect<void, HubSessionChangeFailed>
 }
 
-/** How often an open page reads its session again; each read renews a sliding session on the hub. */
+/** How often a visible page reads its session again; each read renews a sliding session on the hub. */
 const pollMillis = 60_000
 
 /**
@@ -51,7 +51,11 @@ export const useHubSession = (actions: HubSessionActions) => {
         Effect.andThen(Effect.sync(refresh))
       )
     )
-    const timer = window.setInterval(refresh, pollMillis)
+    // A hidden tab doesn't read: a forgotten background tab must not keep a session alive to the 7-day cap.
+    // Becoming visible reads at once.
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") refresh()
+    }, pollMillis)
     const onVisible = () => {
       if (document.visibilityState === "visible") refresh()
     }
@@ -143,7 +147,10 @@ export const SessionControl = ({
   readonly view: HubSessionView
   readonly open: boolean
   readonly onToggle: () => void
-  /** Closes the popover: Escape, or a press outside the control and the popover. */
+  /**
+   * Closes the popover: on Escape, a press outside the control and the popover, Log out, or focus leaving
+   * it. Focus goes back to the control, except when focus left on its own.
+   */
   readonly onClose: () => void
   readonly onLogOut: () => void
   /**
@@ -154,16 +161,26 @@ export const SessionControl = ({
   readonly timeZone?: string
 }): ReactElement | null => {
   const anchor = useRef<HTMLDivElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
   const popover = useRef<HTMLDivElement>(null)
+  const popoverId = useId()
+  const closeToControl = useCallback(() => {
+    onClose()
+    trigger.current?.focus()
+  }, [onClose])
+  // Opening moves focus into the popover, to its first control (Log out): it renders at the end of the body.
+  useEffect(() => {
+    if (open) popover.current?.querySelector("button")?.focus()
+  }, [open])
   useEffect(() => {
     if (!open) return
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose()
+      if (event.key === "Escape") closeToControl()
     }
     const onPointer = (event: PointerEvent) => {
       const path = event.composedPath()
       const inside = [anchor.current, popover.current].some((node) => node !== null && path.includes(node))
-      if (!inside) onClose()
+      if (!inside) closeToControl()
     }
     document.addEventListener("keydown", onKey)
     document.addEventListener("pointerdown", onPointer)
@@ -171,7 +188,7 @@ export const SessionControl = ({
       document.removeEventListener("keydown", onKey)
       document.removeEventListener("pointerdown", onPointer)
     }
-  }, [open, onClose])
+  }, [open, closeToControl])
   if (!view.signedIn) {
     if (view.kind === "local") return null
     const where = view.device === undefined ? "" : ` on ${view.device}`
@@ -203,7 +220,9 @@ export const SessionControl = ({
         className="superapp-session hub-session"
         aria-label={label}
         aria-expanded={open}
+        aria-controls={open ? popoverId : undefined}
         onClick={onToggle}
+        ref={trigger}
       >
         <span className="superapp-session-avatar" aria-hidden="true">
           {tailscale ? view.login.slice(0, 1) : ""}
@@ -217,8 +236,26 @@ export const SessionControl = ({
       {open
         ? inRoot(
             overlayRoot,
-            <div className="hub-session-pop" role="dialog" aria-label="Your session" ref={popover}>
-              <SessionDetails view={view} onLogOut={onLogOut} {...(timeZone === undefined ? {} : { timeZone })} />
+            <div
+              className="hub-session-pop"
+              role="dialog"
+              aria-label="Your session"
+              id={popoverId}
+              ref={popover}
+              onBlur={(event) => {
+                // Tab past Log out leaves the popover: close it rather than leave it open behind the page.
+                const next = event.relatedTarget
+                if (next === null || (popover.current?.contains(next) !== true && next !== trigger.current)) onClose()
+              }}
+            >
+              <SessionDetails
+                view={view}
+                onLogOut={() => {
+                  onLogOut()
+                  trigger.current?.focus()
+                }}
+                {...(timeZone === undefined ? {} : { timeZone })}
+              />
             </div>
           )
         : null}
@@ -275,7 +312,7 @@ export const TailscaleLoginCard = ({
   if (view.signedIn || view.kind !== "tailscale") return null
   const device = view.device === undefined ? "" : `Tailscale says this is ${view.device}. `
   return (
-    <section className="hub-login-card" role="status">
+    <section className="hub-login-card">
       <StateLabel icon="minus" label="Not logged in" tone="neutral" />
       <h2>{`Continue as ${view.login}?`}</h2>
       <p>{`${device}Logging in keeps you signed in here for 8 hours.`}</p>

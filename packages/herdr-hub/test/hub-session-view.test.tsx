@@ -50,6 +50,7 @@ describe("session control", () => {
   it("opens a popover with who, how, until when and Log out, and nothing about passkeys", () => {
     const markup = control(signedIn, true)
     expect(markup).toContain('aria-expanded="true"')
+    expect(markup).toMatch(/aria-controls="([^"]+)"[\s\S]*id="\1"/u)
     expect(markup).toContain('role="dialog" aria-label="Your session"')
     expect(markup).toContain(">owner@example.test<")
     expect(markup).toContain("Logged in with Tailscale on owner-laptop")
@@ -102,6 +103,8 @@ describe("Tailscale login card", () => {
     expect(markup).toContain(">Log in with Tailscale<")
     expect(markup).not.toContain("View only")
     expect(markup).not.toContain("runs agents")
+    // A plain section: a live region would be read out again on every minute's session read.
+    expect(markup).not.toContain('role="status"')
   })
 
   it("leaves out the device sentence when Tailscale names no device, and disables the button while logging in", () => {
