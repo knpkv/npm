@@ -54,3 +54,26 @@ ${fontPreload}<link rel="stylesheet" href="/assets/index.css">
 </body>
 </html>`
 }
+
+/**
+ * The page a browser without a session gets at any hub page: the shell's assets and no data. `approval.js`
+ * finds no dashboard data and draws the login gate (page 22), then reloads once logged in.
+ */
+export const loginGatePage = (fontPreload: string): string =>
+  `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,interactive-widget=resizes-content">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#111418">
+<title>Relay</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/assets/relay-favicon.svg" type="image/svg+xml">
+${fontPreload}<link rel="stylesheet" href="/assets/index.css">
+</head>
+<body data-rly-root data-rly-theme="dark">
+<div id="fleet-dashboard-root" data-login-gate></div>
+<script src="/assets/approval.js" defer></script>
+</body>
+</html>`

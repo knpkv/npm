@@ -8,9 +8,9 @@
  *   the hub's own computer, the `Cli` (a command holding the hub's CLI token), another hub node calling as
  *   a `Service`, or no one (`Anonymous`). Deciding which one a request is belongs to the listener; this
  *   module only answers what each may do.
- * - **A person acts only once logged in.** Logging in is a deliberate press in a browser, so a person
- *   without a session only views, on any node. Before passkeys a session shows intent, not presence: an
- *   agent on the same node could press it too.
+ * - **The hub is behind login.** Logging in is a deliberate press in a browser, so a person without a
+ *   session gets nothing, on any node, and neither does plain loopback. Before passkeys a session shows
+ *   intent, not presence: an agent on the same node could press it too.
  * - **Grants come from the fleet configuration.** `users` maps a login to its permissions, `hosts` is what
  *   any fleet host may do, `local` what a signed-in local user may do. While `users` is absent, every login
  *   in `allowedUsers` holds every permission, as before permissions existed. A `users` entry for a login
@@ -19,9 +19,10 @@
  *   fleet hosts under the owner's login and on the hub's own computer under its user account, so neither a
  *   host nor the local user ever holds them, whatever `hosts` or `local` says. A person logged in on a fleet
  *   machine never owns Sandboxes either: there the session can't tell them from the agents beside them.
- *   Plain loopback without the local sign-in only views.
- * - **The CLI only restarts apps.** Every process of the user can read the CLI token, agents included, so
- *   it adds intent, not isolation: it holds `apps.restart`, which nix activation uses, and nothing else.
+ *   Plain loopback without the local sign-in gets nothing.
+ * - **The CLI is the computer's agents.** Every process of the user can read the CLI token, agents
+ *   included, so it adds intent, not isolation: it views, submits jobs (agents do) and restarts apps (nix
+ *   activation does), and never acts for the owner.
  * - **Approving needs the approval node or a passkey.** A person approves from a node in `approvalNodes`,
  *   as before identities existed, or from any node once a passkey proved them present for that decision.
  * - **A service is checked by its node, not here.** Hub-to-peer calls are admitted by the hub's node id
@@ -60,6 +61,9 @@ export const PermissionName = Schema.String.check(
 
 /** What a host may do when `hosts` is absent. */
 export const defaultHostPermissions: ReadonlyArray<Permission> = ["view", "jobs.submit"]
+
+/** What the CLI token holds: the computer's agents read and submit jobs, nix activation restarts apps. */
+const cliPermissions: ReadonlyArray<Permission> = ["view", "jobs.submit", "apps.restart"]
 
 /** Permissions that act for the owner; a host never holds them. */
 const ownerOnly: ReadonlySet<Permission> = new Set<Permission>(["approve", "sandboxes.owner"])
@@ -105,7 +109,7 @@ const grantedTo = (config: Grants, principal: Principal): ReadonlyArray<Permissi
   switch (principal._tag) {
     case "Person": {
       const granted = personGrants(config, principal.login)
-      if (!principal.session) return granted.filter((permission) => permission === "view")
+      if (!principal.session) return []
       const present = principal.presence === "passkey" || config.approvalNodes.includes(principal.nodeId)
       const onMachine = config.machines.some(({ nodeId }) => nodeId === principal.nodeId)
       return granted.filter((permission) =>
@@ -117,9 +121,9 @@ const grantedTo = (config: Grants, principal: Principal): ReadonlyArray<Permissi
     case "Local":
       return principal.session
         ? withoutOwnerOnly(config.local === undefined ? permissions : grantsOf(config.local))
-        : ["view"]
+        : []
     case "Cli":
-      return ["apps.restart"]
+      return cliPermissions
     case "Service":
     case "Anonymous":
       return []

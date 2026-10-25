@@ -53,7 +53,9 @@ Voice is host-bounded in v1: the hub authenticates the Tailscale node and checks
 
 `hostd` reads `FLEET_CONFIG_PATH`, defaulting to `~/.config/fleet/config.json`. The file is decoded by `@knpkv/herdr-fleet`; invalid or missing fields fail startup. When no file exists there, `hostd` runs standalone: `npx -y -p @knpkv/herdr-hub hostd` serves the super-app on `http://127.0.0.1:4778/` with the fleet off, keeps state in `$XDG_STATE_HOME/fleet` (else `~/.local/state/fleet`; `%LOCALAPPDATA%\fleet` on Windows), refuses Nix and agent-delegation jobs, and prints one stderr line naming the path it looked for. A taken port stops startup with an error naming the address. With `crossHost: false`, the loopback listener, the Work-only listener bound to `workBindAddress` (loopback by default), and immediately queued safe jobs are available, with no Tailscale dependency. Cross-host listeners authenticate the actual socket peer with Tailscale WhoIs. Forwarded identity headers are never trusted. An approve or reject needs an `allowedUsers` login on a node in `approvalNodes`, on the hub's listener as on each peer's approval listener: fleet hosts run agents under the same login, and a script can read the dashboard's proof and set any `Origin`, so the login alone does not show a person decided.
 
-Identity-based access runs in shadow mode: today's checks still decide every request. Once a response is sent, hostd works out who identity says the caller is:
+The hub is behind login. Its own listeners (the tailnet hub listener and loopback) admit a request only after the access gate (`internal/access-gate.ts`) has decided who the caller is and checked that against what the route's family requires. Today's per-route checks still run after it. Per-host listeners (a peer's tailnet listener, the approval, Work and LAN listeners) keep their node checks.
+
+Who a request is:
 
 - A fleet machine's node is a `Host`, the hub's own node included, until someone logs in in a browser there. The exception is the hub calling a peer's per-host route, which is a `Service`.
 - An allowed login on any other node is a `Person`, with or without a session.
@@ -63,37 +65,42 @@ Identity-based access runs in shadow mode: today's checks still decide every req
   - one with a local session is the local user with a session;
   - anything else is the local user without one.
 
-hostd then compares that principal with what the route's family will require. Each of these is logged once per listener, principal and family as an `identity shadow:` warning:
+What the gate answers:
 
-- a served request identity would refuse;
-- a session's write that came without its CSRF token;
-- a route no family names.
+- **A person or the local user without a session** gets the login gate on a page (design page 22) and `401 {"error":"login_required"}` from the API, wherever logging in would let them through. The session routes and static files stay open.
+- **Agents and hosts keep their own credentials.** On loopback agents, `fleetctl` and `herdr-hub apps` present the CLI token (`x-hub-cli-token`, read from `<hubState>/cli/token`): it views, submits jobs and restarts apps. A fleet host's node views, submits jobs and reports as itself.
+- **Anyone a login wouldn't help** gets `403 {"error":"forbidden"}`: no one, a credential that can't hold the permission, or a person approving from a node that can't approve.
+- **A session's write without its CSRF token** (`x-herdr-csrf`) gets `403 {"error":"csrf_required"}`.
+- **A route no family names** gets `404`, so a new route can't slip past the gate.
+- **A caller the hub can't read** (WhoIs unavailable) gets `503 {"error":"identity_unavailable"}`.
+- The browser terminal's WebSocket upgrade passes the same gate.
 
-Nothing is refused because of it.
+An admitted session request renews a sliding session, at most once a minute.
 
-People log in at `/v1/session`. The hub stores only each session token's SHA-256 digest, in `person-sessions.sqlite` in the state directory, so sessions survive a restart. At most 8 sessions are open per login and node, and 64 in all; logging in past that drops the oldest of the same login and node first. Reading a session never writes. A sliding session is renewed only once the request has matched its login and node, and at most once a minute.
+People log in at `/v1/session`. The hub stores only each session token's SHA-256 digest, in `person-sessions.sqlite` in the state directory, so sessions survive a restart. At most 8 sessions are open per login and node, and 64 in all; logging in past that drops the oldest of the same login and node first. Reading a session never writes. A sliding session is renewed only once the request has matched its login and node.
 
 - **Tailscale (tailnet hub listener).** `POST /v1/session/tailscale` logs the WhoIs login in on its node.
   - The token goes in a `__Host-herdr_session` cookie (Secure, HttpOnly, SameSite=Strict, `Path=/`).
   - A session counts only on the node and login it was opened for.
   - On a person's own device it renews on use: it ends after 8 idle hours, or 7 days after logging in. On a fleet machine it ends 8 hours after logging in.
 - **Local user (loopback).** `herdr-hub login` trades the CLI token for a one-time code (60 seconds, single use, dropped after 5 wrong guesses) at `POST /v1/session/local-code`. It then prints and opens `http://127.0.0.1:<port>/#login=<code>`.
-  - The page spends the code at `POST /v1/session/local`.
-  - The page keeps the token in its own storage and sends it in `x-herdr-session`. It is never a cookie, since cookies don't separate ports and a loopback cookie would reach every local server.
-- **Session reads and logout.** `GET /v1/session` says who the caller is, and gives the session's CSRF token when they are logged in. `POST /v1/session/logout` needs that token in `x-herdr-csrf`.
+  - The page takes the code out of the address, then spends it at `POST /v1/session/local`.
+  - The hub sets a `herdr_local_session` cookie (HttpOnly, SameSite=Strict, `Path=/`, 8 hours). Plain http can't set a `__Host-` cookie. Cookies don't separate ports, so every local server sees it, but each of those is the user's own process, which could run `herdr-hub login` itself.
+- **Session reads and logout.** `GET /v1/session` says who the caller is, and gives the session's CSRF token when they are logged in. Logged out, it says whether the request carried a session that has ended (`ended`), and over Tailscale whether the caller is on a fleet machine (`fleetHost`). `POST /v1/session/logout` needs the CSRF token in `x-herdr-csrf` and clears the cookie.
 - **What a session proves.** Before passkeys a session shows intent, not presence: anything on the same node can press the same button. Every process of the user can read the CLI token, so the `Cli` adds intent, not isolation. A person logged in on a fleet machine never owns Sandboxes.
 
-The super-app shows who is logged in (design page 22, the parts that are true before enforcement):
+The super-app's identity screens (design page 22):
 
+- **Login gate.** A browser without a session sees only the Relay mark and one card, desktop and phone:
+  - over Tailscale, "Continue as <login>?" with Log in with Tailscale, plus "This computer runs agents. They keep working; only you, logged in here, can see and act." on a fleet machine;
+  - after a session ended, "Your session ended. Log in again to continue." above the same card;
+  - on loopback, "Log in as local user" with the `herdr-hub login` command and Copy.
+    Logging in reloads into the hub.
 - **Desktop sidebar session control.**
   - A logged-in Tailscale person: their name and "Logged in until 21:05", opening a popover with the login, "Logged in with Tailscale on <device>", "Until 21:05" and Log out.
   - The local user logged in through `herdr-hub login`: "This computer" and "Logged in until …".
-  - A Tailscale person who isn't logged in: their name and "Not logged in".
-- **Phone.** The phone shell has no sidebar and no host status yet, so its session details ship in 3b with the design's phone host status.
-- **Approvals log-in card.** For a Tailscale person who isn't logged in, Approvals shows a "Continue as <login>?" card with Log in with Tailscale.
-- **`#login` exchange.** The page takes the code out of the address before spending it, and keeps the local token in this tab's session storage.
-- **Renewal.** An open page reads `/v1/session` every minute and when it becomes visible, which renews a sliding session.
-- **Waiting for enforcement and passkeys:** the "view only" wording, the disabled Approve and Reject, the "You can" list, the fleet host's agents line and the loopback view-only card.
+- **Renewal and lapse.** An open page reads `/v1/session` every minute and when it becomes visible, which renews a sliding session. A session that lapses under an open page reloads it into the gate.
+- **Waiting for passkeys:** the "You can" list, the passkey states and the phone's session details.
 
 Consumers that own durable orchestration import `makeHostdProgram` and `HostdOperationsComposer` from `@knpkv/herdr-hub/hostd-runtime`. The composer receives the decoded host configuration, the package's default typed operations, and a narrow `fork` function that registers work for the hostd process lifetime without exposing its closeable scope. It may decorate the typed `run` and `runCoordinatorChat` methods while reusing every default status, local recovery, and command adapter. Each run receives the accepted job ID and actor, the existing `workerStarted` callback, and a typed lifecycle callback. The required `AgentDelegate.mode` distinguishes ordinary `consult` work from `transition_summary`; durable adapters project those to Luna medium and Luna low respectively, without reading prompt text or defaulting an unknown intent. Status and wait remain outside model dispatch, while `review` and `work` remain Sol high. A durable adapter supplies `recovery.matches` and `recovery.resume`. It submits one `OrchestratorCommand`, calls `lifecycle.accepted` with its durable receipt, returns that receipt, and registers later queue, run, worker binding, and terminal work through `fork`. Fleet marks matching jobs durable before invocation, persists the receipt separately, and keeps the wrapper running until `lifecycle.terminal` mirrors `settled`, `delivery_failed`, or `task_failed` from the coordinator. After restart, `recovery.resume` receives the same deterministic job ID, fresh callbacks, either the receipt or `null`, and the exact persisted worker or `null`. The `null` receipt path resubmits the same idempotency key to close the crash window after coordinator commit but before Fleet receipt persistence; it must not create a second request. A present worker is reattached by replaying `workerStarted` without a new prompt. Terminal values are explicit bounded Fleet summaries produced with `summarizeHostOperationTerminalDetail`; full authoritative values remain in coordinator events. Consumers stream those durable events by request ID from the same coordinator instance. They call its authoritative `workerStarted` before the fleet callback so Work and Connect receive the same worker identity. A failed Luna dispatch becomes a new Sol dispatch through `submitSolEscalation` and `OrchestratorLinkedSolDispatchReference`. The accepted v2 Work handoff supplies both its bounded context delta and immutable expected revision; the adapter uses that persisted revision at worker start instead of refreshing lane authority.
 

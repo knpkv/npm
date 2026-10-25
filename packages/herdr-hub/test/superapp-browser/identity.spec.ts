@@ -8,7 +8,6 @@ const shotsDirectory = Option.getOrUndefined(
 )
 
 const csrf = "b".repeat(64)
-const token = "a".repeat(64)
 const code = "c".repeat(64)
 const signedOut = { signedIn: false, kind: "tailscale", login: "mira@example.test", device: "mira-laptop" }
 const signedIn = {
@@ -38,30 +37,37 @@ const shoot = async (page: Page, name: string, project: string, theme: string) =
   })
 }
 
+const ended = { ...signedOut, ended: true }
+const fleetHost = { ...signedOut, device: "build-01", fleetHost: true }
+const localSignedOut = { signedIn: false, kind: "local" }
+
 for (const theme of ["light", "dark"] satisfies ReadonlyArray<"light" | "dark">) {
-  // Page 22 state 1, as 3a draws it: the card offers the log-in; nothing claims view only before enforcement.
-  test(
-    `tailscale-continue ${theme}: offers to continue as the WhoIs login, without view-only copy`,
-    async ({ page }, info) => {
+  // Page 22's login gate: the whole page for a browser without a session, one state per session read.
+  for (
+    const [state, view, checks] of [
+      ["gate-tailscale", signedOut, ["Continue as mira@example.test?", "Log in with Tailscale"]],
+      ["gate-session-ended", ended, ["Your session ended. Log in again to continue.", "Log in with Tailscale"]],
+      [
+        "gate-fleet-host",
+        fleetHost,
+        ["This computer runs agents. They keep working; only you, logged in here, can see and act."]
+      ],
+      ["gate-loopback", localSignedOut, ["Log in as local user", "herdr-hub login"]]
+    ] satisfies ReadonlyArray<readonly [string, object, ReadonlyArray<string>]>
+  ) {
+    test(`${state} ${theme}: draws the gate and no hub page`, async ({ page }, info) => {
       await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" })
-      await answerSession(page, () => signedOut)
-      await page.goto("/#fleet/approvals")
+      await answerSession(page, () => view)
+      await page.goto("/__fixture/login-gate")
       await page.locator("body").evaluate((body, selected) => body.setAttribute("data-rly-theme", selected), theme)
-      const card = page.locator(".hub-login-card")
-      await expect(card.getByRole("heading", { name: "Continue as mira@example.test?" })).toBeVisible()
-      await expect(card).toContainText(
-        "Tailscale says this is mira-laptop. Logging in keeps you signed in here for 8 hours."
-      )
-      await expect(card.getByRole("button", { name: "Log in with Tailscale" })).toBeEnabled()
-      if (!phone(info.project.name)) {
-        await expect(page.getByRole("group", { name: "Your Tailscale session on mira-laptop, not logged in" }))
-          .toBeVisible()
-      }
-      await expect(page.getByText("view only", { exact: false })).toHaveCount(0)
+      const gate = page.getByRole("main")
+      for (const text of checks) await expect(gate).toContainText(text)
+      await expect(gate.getByRole("heading", { level: 1 })).toBeVisible()
+      await expect(page.getByRole("navigation")).toHaveCount(0)
       await expect(page.getByText("View only", { exact: false })).toHaveCount(0)
-      await shoot(page, "tailscale-continue", info.project.name, theme)
-    }
-  )
+      await shoot(page, state, info.project.name, theme)
+    })
+  }
 
   // Page 22 state 2: the session control opens a popover with who, how, until when and Log out.
   test(`signed-in-person ${theme}: shows the session and its details, without passkey copy`, async ({ page }, info) => {
@@ -105,8 +111,8 @@ test("moves focus into the popover on open and back to the control on Escape", a
   await expect(control).toBeFocused()
 })
 
-// Pressing Log in POSTs once; the next read shows the person logged in and the card goes.
-test("logs in with Tailscale and reads the session again", async ({ page }) => {
+// Pressing Log in on the gate POSTs once; once the read says logged in, the page reloads into the hub.
+test("logs in from the gate with Tailscale and reloads into the hub", async ({ page }) => {
   let current: typeof signedOut | typeof signedIn = signedOut
   await answerSession(page, () => current)
   const posts: Array<string> = []
@@ -115,32 +121,37 @@ test("logs in with Tailscale and reads the session again", async ({ page }) => {
     current = signedIn
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ signedIn: true }) })
   })
-  await page.goto("/#fleet/approvals")
+  await page.goto("/__fixture/login-gate")
+  const reloaded = page.waitForEvent("load")
   await page.getByRole("button", { name: "Log in with Tailscale" }).click()
-  await expect(page.locator(".hub-login-card")).toHaveCount(0)
+  await reloaded
   expect(posts).toEqual(["POST"])
 })
 
-// `herdr-hub login`'s link: the code leaves the address before it is spent, and the page then sends the
-// token it kept, never a cookie.
-test("spends a #login code after taking it out of the address, then sends the kept token", async ({ page }) => {
+// `herdr-hub login`'s link: the code leaves the address before it is spent; the hub sets the session cookie,
+// so the page keeps no token of its own, and it reloads into the hub.
+test("spends a #login code after taking it out of the address, keeping no token", async ({ page }) => {
+  const loggedIn = { signedIn: true, kind: "local", expiresAt: signedIn.expiresAt, csrf }
+  let current: typeof localSignedOut | typeof loggedIn = localSignedOut
   const reads: Array<Record<string, string>> = []
-  await answerSession(page, () => ({ signedIn: true, kind: "local", expiresAt: signedIn.expiresAt, csrf }), reads)
+  await answerSession(page, () => current, reads)
   const spent: Array<{ readonly body: string | null; readonly hash: string }> = []
   await page.route("**/v1/session/local", async (route) => {
     spent.push({ body: route.request().postData(), hash: await page.evaluate(() => window.location.hash) })
+    current = loggedIn
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ signedIn: true, kind: "local", expiresAt: signedIn.expiresAt, token, csrf })
+      body: JSON.stringify({ signedIn: true, kind: "local", expiresAt: signedIn.expiresAt, csrf })
     })
   })
-  await page.goto(`/#login=${code}`)
+  const reloaded = page.waitForEvent("load")
+  await page.goto(`/__fixture/login-gate#login=${code}`)
   await expect.poll(() => spent.length).toBe(1)
   expect(spent[0]?.body).toBe(JSON.stringify({ code }))
   expect(spent[0]?.hash.includes(code)).toBe(false)
-  await expect.poll(() => reads.some((headers) => headers["x-herdr-session"] === token)).toBe(true)
+  await reloaded
   expect(await page.evaluate(() => window.location.href)).not.toContain(code)
-  const cookies = await page.context().cookies()
-  expect(cookies.some((cookie) => cookie.value === token)).toBe(false)
+  expect(reads.every((headers) => headers["x-herdr-session"] === undefined)).toBe(true)
+  expect(await page.evaluate(() => Object.keys(window.sessionStorage))).toEqual([])
 })

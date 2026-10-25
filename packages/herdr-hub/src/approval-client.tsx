@@ -98,13 +98,7 @@ import { useDashboardPendingTarget } from "./internal/use-dashboard-pending-targ
 import type { PendingApprovalTargetRevalidation } from "./internal/dashboard-pending-state.js"
 import type { ApprovalNotificationCandidate } from "./model.js"
 import { loadHubSession, logInWithTailscale, logOutOfHub, spendLoginCode } from "./hub-session-client.js"
-import {
-  browserTokenStore,
-  type HubSessionActions,
-  SessionControl,
-  TailscaleLoginCard,
-  useHubSession
-} from "./hub-session-view.js"
+import { LoginGatePage, type HubSessionActions, SessionControl, useHubSession } from "./hub-session-view.js"
 
 class BrowserNetworkError extends Schema.TaggedError<BrowserNetworkError>()("BrowserNetworkError", {
   detail: Schema.String
@@ -455,11 +449,13 @@ const appStateId = (state: AppState): string => (state._tag === "Ready" ? state.
 const DashboardApp = ({
   atoms,
   codeReads,
-  readToday
+  readToday,
+  relay
 }: {
   readonly atoms: DashboardAtoms
   readonly readToday: Effect.Effect<typeof NeedsYouResult.Type, TodayReadFailed>
   readonly codeReads: CodeModuleReads
+  readonly relay: HubRelayConversation
 }) => {
   const result = useAtomValue(atoms.dashboard)
   const { refreshFailed, snapshot } = dashboardRefreshView(result, atoms.bootstrap)
@@ -488,7 +484,7 @@ const DashboardApp = ({
   const [decisionStatus, setDecisionStatus] = useState<DecisionStatus | null>(null)
   const [pull, setPull] = useAtom(atoms.pull)
   const [historyBusy, setHistoryBusy] = useState(false)
-  const [historyState, setHistoryState] = useState(dashboardHistoryState(0, [], initial.historyNextCursor))
+  const [historyState, setHistoryState] = useState(dashboardHistoryState(0, [], atoms.bootstrap.historyNextCursor))
   const [pendingBusy, setPendingBusy] = useState(false)
   const [routeSearch, setRouteSearch] = useState(window.location.search)
   const [appBadges, setAppBadges] = useState<Readonly<Record<string, ShellBadge>>>({})
@@ -720,14 +716,7 @@ const DashboardApp = ({
   const fleet = makeFleetHubModuleViews({
     // One stable tree whether or not the session is known yet: switching shape would remount the dashboard and
     // drop the focus an approval link put on its request.
-    approvals: (
-      <>
-        {hubSession.view === null ? null : (
-          <TailscaleLoginCard view={hubSession.view} busy={hubSession.busy} onLogIn={hubSession.logIn} />
-        )}
-        {dashboardView}
-      </>
-    ),
+    approvals: dashboardView,
     connect: null,
     hostCount,
     notice: refreshNotice,
@@ -848,22 +837,6 @@ const DashboardApp = ({
   )
 }
 
-const initialNode = document.querySelector("#fleet-dashboard-data")
-const root = document.querySelector("#fleet-dashboard-root")
-if (initialNode === null || root === null) {
-  throw new DashboardBootstrapError({ cause: null, detail: "bootstrap nodes are missing" })
-}
-const initialResult = Schema.decodeUnknownResult(Schema.fromJsonString(DashboardSnapshot))(
-  initialNode.textContent ?? ""
-)
-if (Result.isFailure(initialResult)) {
-  throw new DashboardBootstrapError({
-    cause: initialResult.failure,
-    detail: "bootstrap snapshot is invalid"
-  })
-}
-const initial = initialResult.success
-const atoms = makeDashboardAtoms(initial)
 /**
  * Relay's one conversation, on any listener that serves the super-app (the only ones that serve `/v1/relay`): one
  * stream for the page, closed when the page goes away for good.
@@ -916,27 +889,51 @@ const sandboxesWrites: SandboxesModuleWrites = {
   startAwsSignIn: runCodeRead(startSandboxAwsSignIn),
   signOutAws: runCodeRead(signOutSandboxAws)
 }
-/** Logging in and out; on loopback the page keeps its session token in this tab's session storage. */
-const hubSessionStore = browserTokenStore()
+/** Logging in and out; the hub carries the session in a cookie on both listeners. */
 const hubSessionActions: HubSessionActions = {
-  load: runCodeRead(loadHubSession(hubSessionStore)),
+  load: runCodeRead(loadHubSession),
   logIn: runCodeRead(logInWithTailscale),
-  logOut: (csrf) => runCodeRead(logOutOfHub(csrf, hubSessionStore)),
-  spendLoginCode: (code) => runCodeRead(spendLoginCode(code, hubSessionStore))
+  logOut: (csrf) => runCodeRead(logOutOfHub(csrf)),
+  spendLoginCode: (code) => runCodeRead(spendLoginCode(code))
 }
-const relayConversations = makeRelayConversations(
-  makeRelayClient({ base: "/v1/relay", origin: window.location.href }),
-  applicationRuntime
-)
-const relay: HubRelayConversation = {
-  conversations: relayConversations,
-  conversation: { product: "herdr", kind: "fleet", id: initial.host }
+
+/** The dashboard: the snapshot the hub rendered into the page, hydrated or rendered by the super-app. */
+const bootDashboard = (root: Element) => {
+  const initialNode = document.querySelector("#fleet-dashboard-data")
+  if (initialNode === null) {
+    throw new DashboardBootstrapError({ cause: null, detail: "bootstrap nodes are missing" })
+  }
+  const initialResult = Schema.decodeUnknownResult(Schema.fromJsonString(DashboardSnapshot))(
+    initialNode.textContent ?? ""
+  )
+  if (Result.isFailure(initialResult)) {
+    throw new DashboardBootstrapError({
+      cause: initialResult.failure,
+      detail: "bootstrap snapshot is invalid"
+    })
+  }
+  const initial = initialResult.success
+  const atoms = makeDashboardAtoms(initial)
+  const relayConversations = makeRelayConversations(
+    makeRelayClient({ base: "/v1/relay", origin: window.location.href }),
+    applicationRuntime
+  )
+  const relay: HubRelayConversation = {
+    conversations: relayConversations,
+    conversation: { product: "herdr", kind: "fleet", id: initial.host }
+  }
+  watchRelayPage(window, relay)
+  const application = (
+    <RegistryProvider>
+      <DashboardApp atoms={atoms} readToday={readToday} codeReads={codeReads} relay={relay} />
+    </RegistryProvider>
+  )
+  if (initial.approvalApp.superapp) createRoot(root).render(application)
+  else hydrateRoot(root, application)
 }
-watchRelayPage(window, relay)
-const application = (
-  <RegistryProvider>
-    <DashboardApp atoms={atoms} readToday={readToday} codeReads={codeReads} />
-  </RegistryProvider>
-)
-if (initial.approvalApp.superapp) createRoot(root).render(application)
-else hydrateRoot(root, application)
+
+const root = document.querySelector("#fleet-dashboard-root")
+if (root === null) throw new DashboardBootstrapError({ cause: null, detail: "bootstrap nodes are missing" })
+// Without a session the hub serves the login gate (page 22) and no data; logging in reloads into the dashboard.
+if (root.hasAttribute("data-login-gate")) createRoot(root).render(<LoginGatePage actions={hubSessionActions} />)
+else bootDashboard(root)

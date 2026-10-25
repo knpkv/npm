@@ -1,22 +1,17 @@
 /**
  * Who is logged in to the hub, drawn from page 22 "Identity and sign-in".
  *
- * Only copy that is true now ships: nothing is enforced and there are no passkeys yet, so the design's
- * "view only" wording, its "You can" list and the fleet host's agents line wait for the PRs that make them
- * true. A loopback page without a session keeps the shell's existing session line.
+ * The whole hub is behind login: a browser without a session gets the login gate ({@link LoginGatePage}) and
+ * no hub page. There are no passkeys yet, so the design's "You can" list waits for the PR that makes it true.
  *
  * @module
  */
-import { Button, StateLabel } from "@knpkv/rly/primitives"
+import { RelayMark } from "@knpkv/rly/patterns"
+import { Button, Notice, StateLabel } from "@knpkv/rly/primitives"
 import { Effect } from "effect"
 import { type ReactElement, useCallback, useEffect, useId, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import type {
-  HubSessionChangeFailed,
-  HubSessionReadFailed,
-  HubSessionView,
-  SessionTokenStore
-} from "./hub-session-client.js"
+import type { HubSessionChangeFailed, HubSessionReadFailed, HubSessionView } from "./hub-session-client.js"
 import { takeLoginFragment } from "./hub-session-client.js"
 
 /** What the page needs from `/v1/session`, with the HTTP client already provided. */
@@ -47,7 +42,8 @@ const pollMillis = 60_000
 
 /**
  * The page's session: read on load (after spending a `#login=` code, taken out of the address first), again
- * every minute and when the page becomes visible. A failed read keeps what the page last knew.
+ * every minute and when the page becomes visible. A failed read keeps what the page last knew. A session that
+ * lapses under an open page reloads it: the hub then serves the login gate.
  */
 export const useHubSession = (actions: HubSessionActions) => {
   const [view, setView] = useState<HubSessionView | null>(null)
@@ -59,7 +55,16 @@ export const useHubSession = (actions: HubSessionActions) => {
     const isLatest = reads.begin()
     void Effect.runPromise(
       actions.load.pipe(
-        Effect.match({ onFailure: () => undefined, onSuccess: (next) => (isLatest() ? setView(next) : undefined) })
+        Effect.match({
+          onFailure: () => undefined,
+          onSuccess: (next) => {
+            if (!isLatest()) return
+            setView((previous) => {
+              if (previous?.signedIn === true && !next.signedIn) window.location.reload()
+              return next
+            })
+          }
+        })
       )
     )
   }, [actions, reads])
@@ -111,31 +116,6 @@ export const useHubSession = (actions: HubSessionActions) => {
   }
 }
 
-/** The loopback page's session token, in this tab's session storage; unavailable storage keeps nothing. */
-export const browserTokenStore = (key = "herdr-hub-session"): SessionTokenStore => ({
-  read: () => {
-    try {
-      return window.sessionStorage.getItem(key)
-    } catch {
-      return null
-    }
-  },
-  write: (token) => {
-    try {
-      window.sessionStorage.setItem(key, token)
-    } catch {
-      // Storage refused (private mode, quota): the page stays logged out, as before the code was spent.
-    }
-  },
-  clear: () => {
-    try {
-      window.sessionStorage.removeItem(key)
-    } catch {
-      // Nothing was kept.
-    }
-  }
-})
-
 /** `node` rendered into `root` when there is one, in place otherwise. */
 const inRoot = (root: Element | undefined, node: ReactElement): ReactElement =>
   root === undefined ? node : createPortal(node, root)
@@ -169,7 +149,7 @@ export const SessionControl = ({
   readonly onToggle: () => void
   /**
    * Closes the popover: on Escape, a press outside the control and the popover, Log out, or focus leaving
-   * it. Focus goes back to the control, except when focus left on its own.
+   * it. Escape and Log out put focus back on the control; a press elsewhere or focus leaving keeps it there.
    */
   readonly onClose: () => void
   readonly onLogOut: () => void
@@ -197,10 +177,11 @@ export const SessionControl = ({
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeToControl()
     }
+    // A press elsewhere goes where it was aimed: the popover closes without taking focus back.
     const onPointer = (event: PointerEvent) => {
       const path = event.composedPath()
       const inside = [anchor.current, popover.current].some((node) => node !== null && path.includes(node))
-      if (!inside) closeToControl()
+      if (!inside) onClose()
     }
     document.addEventListener("keydown", onKey)
     document.addEventListener("pointerdown", onPointer)
@@ -208,7 +189,7 @@ export const SessionControl = ({
       document.removeEventListener("keydown", onKey)
       document.removeEventListener("pointerdown", onPointer)
     }
-  }, [open, closeToControl])
+  }, [open, closeToControl, onClose])
   if (!view.signedIn) {
     if (view.kind === "local") return null
     const where = view.device === undefined ? "" : ` on ${view.device}`
@@ -261,6 +242,7 @@ export const SessionControl = ({
               role="dialog"
               aria-label="Your session"
               id={popoverId}
+              tabIndex={-1}
               ref={popover}
               onBlur={(event) => {
                 // Tab past Log out leaves the popover: close it rather than leave it open behind the page.
@@ -316,29 +298,102 @@ export const SessionDetails = ({
   )
 }
 
+/** Page 22's gate copy: the Tailscale card, the local user's command, and the lines above and inside them. */
+const gateCopy = {
+  eyebrow: "Not logged in",
+  sessionEnded: "Your session ended. Log in again to continue.",
+  fleetHost: "This computer runs agents. They keep working; only you, logged in here, can see and act.",
+  tailscaleBody: "Logging in keeps you signed in here for 8 hours.",
+  logIn: "Log in with Tailscale",
+  localTitle: "Log in as local user",
+  localBody: "Run this in a terminal on this computer. It opens this page logged in.",
+  command: "herdr-hub login",
+  copy: "Copy"
+}
+
 /**
- * Page 22's log-in card for a Tailscale person who isn't logged in: continue as the WhoIs login on this
- * device. Nothing for a logged-in person or the local user.
+ * Page 22's login gate, the whole page for a browser without a session: the Relay mark, a caution line when a
+ * session ended, and one card. Over Tailscale the card offers to continue as the WhoIs login (with the
+ * fleet-host line on a fleet machine); on loopback it gives the `herdr-hub login` command. Nothing for a
+ * logged-in session.
  */
-export const TailscaleLoginCard = ({
+export const LoginGate = ({
   busy,
+  onCopy,
   onLogIn,
   view
 }: {
   readonly view: HubSessionView
   readonly busy: boolean
   readonly onLogIn: () => void
+  /** Copies the command; absent where there is no clipboard (server rendering, tests). */
+  readonly onCopy?: (text: string) => void
 }): ReactElement | null => {
-  if (view.signedIn || view.kind !== "tailscale") return null
-  const device = view.device === undefined ? "" : `Tailscale says this is ${view.device}. `
+  const headingId = useId()
+  if (view.signedIn) return null
+  const tailscale = view.kind === "tailscale"
   return (
-    <section className="hub-login-card">
-      <StateLabel icon="minus" label="Not logged in" tone="neutral" />
-      <h2>{`Continue as ${view.login}?`}</h2>
-      <p>{`${device}Logging in keeps you signed in here for 8 hours.`}</p>
-      <Button variant="primary" disabled={busy} onClick={onLogIn}>
-        Log in with Tailscale
-      </Button>
-    </section>
+    <main className="hub-login-gate">
+      <div className="hub-login-gate-body">
+        <div className="hub-login-gate-mark">
+          <RelayMark.Tile size={24} />
+          <span>Relay</span>
+        </div>
+        {view.ended === true ? <Notice tone="caution">{gateCopy.sessionEnded}</Notice> : null}
+        <section className="hub-login-gate-card" aria-labelledby={headingId}>
+          <StateLabel icon="minus" label={gateCopy.eyebrow} tone="neutral" />
+          {tailscale ? (
+            <>
+              <h1 id={headingId}>{`Continue as ${view.login}?`}</h1>
+              <p>
+                {view.device === undefined
+                  ? gateCopy.tailscaleBody
+                  : `Tailscale says this is ${view.device}. ${gateCopy.tailscaleBody}`}
+              </p>
+              {view.fleetHost === true ? <p className="hub-login-gate-line">{gateCopy.fleetHost}</p> : null}
+              <Button variant="primary" disabled={busy} onClick={onLogIn}>
+                {gateCopy.logIn}
+              </Button>
+            </>
+          ) : (
+            <>
+              <h1 id={headingId}>{gateCopy.localTitle}</h1>
+              <p>{gateCopy.localBody}</p>
+              <div className="hub-login-gate-command">
+                <code>{gateCopy.command}</code>
+                <Button
+                  variant="secondary"
+                  aria-label={`Copy ${gateCopy.command}`}
+                  onClick={() => onCopy?.(gateCopy.command)}
+                >
+                  {gateCopy.copy}
+                </Button>
+              </div>
+            </>
+          )}
+        </section>
+      </div>
+    </main>
+  )
+}
+
+/**
+ * The page the hub serves a browser without a session: reads the session (spending a `#login=` code first),
+ * draws the gate, and reloads into the hub once logged in.
+ */
+export const LoginGatePage = ({ actions }: { readonly actions: HubSessionActions }): ReactElement | null => {
+  const session = useHubSession(actions)
+  const view = session.view
+  useEffect(() => {
+    if (view?.signedIn === true) window.location.reload()
+  }, [view])
+  if (view === null) return null
+  return (
+    <LoginGate
+      view={view}
+      busy={session.busy}
+      onLogIn={session.logIn}
+      onCopy={(text) => void navigator.clipboard.writeText(text)}
+    />
   )
 }

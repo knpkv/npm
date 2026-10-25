@@ -104,13 +104,23 @@ export const makeHubClient = Effect.fn("AppsCli.hubClient")(function*(options: {
   const url = options.url
   const states: HubClient["states"] = url === null
     ? Effect.succeed(Option.none())
-    : http.get(new URL("v1/apps", url).href).pipe(
+    : readCliToken(options.tokenDirectory).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+      // The hub is behind login: the CLI reads app states with this start's token.
+      Effect.flatMap((token) =>
+        HttpClientRequest.get(new URL("v1/apps", url).href).pipe(
+          HttpClientRequest.setHeader(cliTokenHeader, Redacted.value(token)),
+          http.execute
+        )
+      ),
       Effect.flatMap((response) => response.json),
       Effect.flatMap(decodeStates),
       Effect.map((body): Option.Option<ReadonlyArray<AppState>> => Option.some(body.apps)),
       Effect.timeoutOrElse({ duration: Duration.seconds(5), orElse: () => Effect.succeed(Option.none()) }),
       // A refused connection, a non-JSON or undecodable answer: the hub isn't answering for apps.
       Effect.catchTags({
+        CliTokenUnavailable: () => Effect.succeed(Option.none()),
         HttpClientError: () => Effect.succeed(Option.none()),
         SchemaError: () => Effect.succeed(Option.none())
       })

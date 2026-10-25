@@ -85,11 +85,12 @@ describe("permissions", () => {
     expect(all(host, configOf({ allowedUsers: [], hosts: ["view", "approve", "sandboxes.owner"] }))).toEqual(["view"])
   })
 
-  // Plain loopback is any process on the computer: it only views until the local login proves the user.
-  // That login proves the same user account, which the hub's own agents share, so it never approves or owns.
-  it("lets plain loopback only view, and a local session what local grants, never approve or own", () => {
+  // Plain loopback is any process on the computer: the hub is behind login, so it gets nothing until the local
+  // login proves the user. That login proves the same user account, which the hub's own agents share, so it
+  // never approves or owns.
+  it("gives plain loopback nothing, and a local session what local grants, never approve or own", () => {
     const config = configOf({ allowedUsers: [] })
-    expect(all({ _tag: "Local", session: false }, config)).toEqual(["view"])
+    expect(all({ _tag: "Local", session: false }, config)).toEqual([])
     expect(all({ _tag: "Local", session: true }, config)).toEqual(ownerSide)
     expect(all({ _tag: "Local", session: true }, configOf({ allowedUsers: [], local: ["view", "apps.restart"] })))
       .toEqual(["view", "apps.restart"])
@@ -97,8 +98,8 @@ describe("permissions", () => {
       .toEqual([])
   })
 
-  // Logging in is the person's deliberate act in a browser: without it a login only views, on any node.
-  it("lets a person without a session only view, on any node", () => {
+  // The hub is behind login: without a session a login sees nothing, on any node.
+  it("gives a person without a session nothing, on any node", () => {
     const config = configOf({ allowedUsers: ["owner@example.test"] })
     for (const nodeId of ["node-phone", "node-laptop", "node-build"]) {
       const unsignedIn: Principal = {
@@ -108,7 +109,7 @@ describe("permissions", () => {
         presence: "passkey",
         session: false
       }
-      expect(all(unsignedIn, config), nodeId).toEqual(["view"])
+      expect(all(unsignedIn, config), nodeId).toEqual([])
     }
   })
 
@@ -129,9 +130,14 @@ describe("permissions", () => {
     expect(can(config, { ...onMachine, nodeId: "node-laptop" }, "sandboxes.owner")).toBe(true)
   })
 
-  // The CLI token is any process of the user, so it restarts apps (nix activation does) and nothing else.
-  it("lets the CLI restart apps and nothing else", () => {
-    expect(all({ _tag: "Cli" }, configOf({ allowedUsers: ["owner@example.test"] }))).toEqual(["apps.restart"])
+  // The CLI token is any process of the user: agents and nix activation on the computer. It reads, submits
+  // jobs and restarts apps, and never approves or owns.
+  it("lets the CLI view, submit jobs and restart apps, and nothing else", () => {
+    expect(all({ _tag: "Cli" }, configOf({ allowedUsers: ["owner@example.test"] }))).toEqual([
+      "view",
+      "jobs.submit",
+      "apps.restart"
+    ])
   })
 
   it("gives a service and an anonymous caller nothing", () => {

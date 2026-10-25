@@ -5,7 +5,13 @@ import { Effect, FileSystem, Path, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { makeLocalLogin } from "../src/internal/local-login.js"
 import { csrfFor, makePersonSessions } from "../src/internal/person-sessions.js"
-import { readCookie, sessionCookieName, type SessionRequest, sessionRoute } from "../src/internal/session-routes.js"
+import {
+  localSessionCookieName,
+  readCookie,
+  sessionCookieName,
+  type SessionRequest,
+  sessionRoute
+} from "../src/internal/session-routes.js"
 
 const host = Schema.decodeUnknownSync(FleetHostName)("atlas")
 const config = { machines: [{ host, nodeId: "node-build" }] }
@@ -21,7 +27,6 @@ const fixture = Effect.gen(function*() {
   const route = (request: Partial<SessionRequest> & Pick<SessionRequest, "listener" | "method" | "pathname">) =>
     sessionRoute({ config, sessions, localLogin }, {
       cookieToken: undefined,
-      headerToken: undefined,
       csrf: undefined,
       cli: false,
       origin: undefined,
@@ -47,7 +52,9 @@ describe("session routes", () => {
           signedIn: false,
           kind: "tailscale",
           login: "owner@example.test",
-          device: "owner-phone"
+          device: "owner-phone",
+          fleetHost: false,
+          ended: false
         })
         const login = yield* route({ listener: "serve", method: "POST", pathname: "/v1/session/tailscale" })
         expect(login?.status).toBe(200)
@@ -58,6 +65,36 @@ describe("session routes", () => {
         const after = yield* route({ listener: "serve", method: "GET", pathname: "/v1/session", cookieToken: token })
         expect(after?.body).toMatchObject({ signedIn: true, kind: "tailscale", login: "owner@example.test" })
         expect(after?.body).toHaveProperty("csrf")
+      })))
+
+    // The login gate draws its state from the read: a session that ended, and a fleet machine, each say so.
+    it.effect("says when a session ended and when the caller is on a fleet machine", () =>
+      Effect.scoped(Effect.gen(function*() {
+        const { route } = yield* fixture
+        const login = yield* route({ listener: "serve", method: "POST", pathname: "/v1/session/tailscale" })
+        const token = cookieValue(login?.setCookie) ?? ""
+        yield* route({
+          listener: "serve",
+          method: "POST",
+          pathname: "/v1/session/logout",
+          cookieToken: token,
+          csrf: Redacted.value(yield* csrfFor(token))
+        })
+        expect((yield* route({ listener: "serve", method: "GET", pathname: "/v1/session", cookieToken: token }))?.body)
+          .toMatchObject({ signedIn: false, kind: "tailscale", ended: true })
+        expect(
+          (yield* route({ listener: "local", method: "GET", pathname: "/v1/session", cookieToken: "f".repeat(43) }))
+            ?.body
+        ).toEqual({ signedIn: false, kind: "local", ended: true })
+        expect((yield* route({ listener: "local", method: "GET", pathname: "/v1/session" }))?.body)
+          .toEqual({ signedIn: false, kind: "local", ended: false })
+        const onMachine = yield* route({
+          listener: "serve",
+          method: "GET",
+          pathname: "/v1/session",
+          identity: Effect.succeed({ login: "owner@example.test", nodeId: "node-build", device: "build" })
+        })
+        expect(onMachine?.body).toMatchObject({ signedIn: false, fleetHost: true, ended: false })
       })))
 
     // Only a session matched to the caller's login and node is renewed: a cookie replayed from another node
@@ -117,9 +154,9 @@ describe("session routes", () => {
         ).toBe(403)
       })))
 
-    // `herdr-hub login`: the CLI token mints a code; the page spends it for a session token it keeps in its
-    // own storage, never a cookie, since loopback cookies reach every local port.
-    it.effect("trades a CLI-minted code for a local session carried in a header, never a cookie", () =>
+    // `herdr-hub login`: the CLI token mints a code; the page spends it for a session in its own cookie. Every
+    // local server could see that cookie, but each is the user's own process, which could run the login too.
+    it.effect("trades a CLI-minted code for a local session in an HttpOnly cookie, never in the body", () =>
       Effect.scoped(Effect.gen(function*() {
         const { route } = yield* fixture
         expect((yield* route({ listener: "local", method: "POST", pathname: "/v1/session/local-code" }))?.status)
@@ -148,8 +185,14 @@ describe("session routes", () => {
           body: Effect.succeed({ code })
         })
         expect(spent?.status).toBe(200)
-        expect(spent?.setCookie).toBeUndefined()
-        const token = Schema.decodeUnknownSync(Schema.Struct({ token: Schema.String }))(spent?.body).token
+        expect(spent?.setCookie).toMatch(
+          new RegExp(
+            `^${localSessionCookieName}=[A-Za-z0-9_-]+; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800$`,
+            "u"
+          )
+        )
+        expect(spent?.body).not.toHaveProperty("token")
+        const token = cookieValue(spent?.setCookie) ?? ""
         expect(
           (yield* route({
             listener: "local",
@@ -158,8 +201,16 @@ describe("session routes", () => {
             body: Effect.succeed({ code })
           }))?.status
         ).toBe(401)
-        const read = yield* route({ listener: "local", method: "GET", pathname: "/v1/session", headerToken: token })
+        const read = yield* route({ listener: "local", method: "GET", pathname: "/v1/session", cookieToken: token })
         expect(read?.body).toMatchObject({ signedIn: true, kind: "local" })
+        const out = yield* route({
+          listener: "local",
+          method: "POST",
+          pathname: "/v1/session/logout",
+          cookieToken: token,
+          csrf: Redacted.value(yield* csrfFor(token))
+        })
+        expect(out?.setCookie).toBe(`${localSessionCookieName}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`)
       })))
 
     // Loopback naming a login is no one (any local process can set the header), so it neither gets nor

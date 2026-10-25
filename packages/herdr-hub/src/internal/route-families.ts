@@ -10,7 +10,7 @@
  * - **Requirements**: `Public` (static files), `Grant` (an app's per-request grant, checked by the app
  *   services route), a `Permission` from the fleet's closed list, `Host` (a fleet host acting as itself,
  *   for agents' reports), `Service` (the hub calling a peer's per-host route), or `Person` (a human write
- *   that no permission names yet; the flip settles it).
+ *   that no permission names: a person or the local user, logged in).
  *
  * @module
  */
@@ -128,6 +128,6 @@ export const meets = (
     case "Service":
       return principal._tag === "Service"
     case "Person":
-      return principal._tag === "Person" || (principal._tag === "Local" && principal.session)
+      return (principal._tag === "Person" || principal._tag === "Local") && principal.session
   }
 }

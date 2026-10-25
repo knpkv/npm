@@ -164,8 +164,9 @@ import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./error
 import { fleetFailures, fleetFailuresWindowMillis, type HostHistory } from "./fleet-failures.js"
 import { fontPreloadLink } from "./font-preload.js"
 import { makeHostResources } from "./host-resources.js"
+import { callerNeeded, GateCallerUnknown, type GateVerdict, gateVerdict } from "./internal/access-gate.js"
 import { attachTaskWorkReader } from "./internal/agent-task-work-source.js"
-import { dashboardPage } from "./internal/dashboard-page.js"
+import { dashboardPage, loginGatePage } from "./internal/dashboard-page.js"
 import { moduleCallerFor } from "./internal/hub-node.js"
 import {
   listenerAggregatesFleet,
@@ -179,14 +180,7 @@ import { principalFor } from "./internal/principal.js"
 import { decodeRelayPostRequest } from "./internal/relay-post-validation.js"
 import { decodeRelaySelfBody } from "./internal/relay-self-validation.js"
 import { routeFamily } from "./internal/route-families.js"
-import { csrfHeader, readCookie, sessionCookieName, sessionHeader, sessionRoute } from "./internal/session-routes.js"
-import {
-  csrfFinding,
-  makeRecentLookup,
-  makeShadowLog,
-  shadowCompares,
-  shadowFinding
-} from "./internal/shadow-access.js"
+import { csrfHeader, readCookie, sessionCookieOn, sessionRoute } from "./internal/session-routes.js"
 import { requireRemoteTerminalTakeover } from "./internal/terminal-capabilities.js"
 import { releaseTerminalScope } from "./internal/terminal-controller.js"
 import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
@@ -2204,40 +2198,22 @@ export const startHttpServer = async (
       )
     )
     const localLogin = await httpRuntime.runPromise(makeLocalLogin)
-    const shadowLog = makeShadowLog(config)
-    // Shadow WhoIs: one `tailscale whois` per address per 30 seconds, on top of whatever today's checks ran.
-    const shadowWhois = makeRecentLookup(
-      (address: string) =>
-        Effect.gen(function*() {
-          const tailscale = yield* Tailscale
-          return yield* tailscale.whois(address)
-        }),
-      { ttlMillis: 30_000, limit: 256 }
-    )
-    // The request's facts are read when it arrives: by the time the response finishes, its socket may be gone.
-    const shadowFacts = (request: IncomingMessage, mode: ListenerMode) => ({
+    // The request's facts the gate decides on, read when it arrives.
+    const gateFacts = (request: IncomingMessage, mode: ListenerMode) => ({
       method: request.method ?? "GET",
       remoteAddress: request.socket.remoteAddress,
       headerLogin: header(request, "tailscale-user-login"),
-      sessionToken: mode === "local"
-        ? header(request, sessionHeader)
-        : readCookie(header(request, "cookie"), sessionCookieName),
+      sessionToken: readCookie(header(request, "cookie"), sessionCookieOn(mode)),
       csrf: header(request, csrfHeader),
       cli: cliToken !== null && presentsCliToken(header(request, cliTokenHeader), cliToken)
     })
-    type ShadowFacts = ReturnType<typeof shadowFacts>
-    const shadowSession = (facts: ShadowFacts) =>
-      facts.sessionToken === undefined
-        ? Effect.succeed(null)
-        : personSessions.read(facts.sessionToken).pipe(
-          Effect.catchTag("PersonSessionsUnavailable", (error) =>
-            Effect.logDebug("identity shadow: session not read", error).pipe(Effect.as(null)))
-        )
-    // Who identity says a served request's caller is; null when it could not be read. On loopback this is
-    // read whatever today's loopback check decided, which is fine: only requests today served are compared.
-    const shadowPrincipal = Effect.fn("HostHttp.shadowPrincipal")(
-      function*(mode: ListenerMode, facts: ShadowFacts, serviceRoute: boolean) {
-        const session = yield* shadowSession(facts)
+    type GateFacts = ReturnType<typeof gateFacts>
+    const gateSession = (facts: GateFacts) =>
+      facts.sessionToken === undefined ? Effect.succeed(null) : personSessions.read(facts.sessionToken)
+    // Who the caller is, from the listener's own facts and the session the hub verified.
+    const gatePrincipal = Effect.fn("HostHttp.gatePrincipal")(
+      function*(mode: ListenerMode, facts: GateFacts, serviceRoute: boolean) {
+        const session = yield* gateSession(facts)
         if (mode === "local") {
           return principalFor(config, {
             _tag: "Loopback",
@@ -2247,8 +2223,10 @@ export const startHttpServer = async (
             session
           })
         }
-        if (facts.remoteAddress === undefined) return null
-        const identity = yield* shadowWhois(facts.remoteAddress)
+        if (facts.remoteAddress === undefined) return yield* new GateCallerUnknown()
+        // Asked per request: an address can change nodes, and an answer reused for another node would be wrong.
+        const tailscale = yield* Tailscale
+        const identity = yield* tailscale.whois(facts.remoteAddress)
         return principalFor(config, {
           _tag: "Tailnet",
           login: identity.UserProfile.LoginName,
@@ -2256,37 +2234,72 @@ export const startHttpServer = async (
           serviceRoute,
           session
         })
-      },
-      Effect.catch((error) => Effect.logDebug("identity shadow: caller not read", error).pipe(Effect.as(null)))
+      }
     )
-    // Shadow mode: once today's checks have answered `status`, log where identity would have answered
-    // differently, and a session's write that came without its CSRF token. It refuses nothing.
-    const shadowServed = (facts: ShadowFacts, mode: ListenerMode, pathname: string, status: number) => {
-      const method = facts.method
-      const family = routeFamily(method, pathname)
-      const principal = shadowCompares(family, status) && !shadowLog.settled(mode, family)
-        ? shadowPrincipal(mode, facts, family.id === "connect.service")
-        : Effect.succeed(null)
-      httpRuntime.runFork(
-        Effect.gen(function*() {
-          const caller = yield* principal
-          const finding = shadowFinding(config, { listener: mode, method, pathname, status, principal: caller })
-          if (finding !== null) yield* shadowLog.log(finding)
-          if (caller === null || family === null || facts.sessionToken === undefined) return
-          const csrfOk = yield* csrfMatches(facts.sessionToken, facts.csrf)
-          const unprotected = csrfFinding({ listener: mode, method, family, principal: caller, csrfOk })
-          if (unprotected !== null) yield* shadowLog.log(unprotected)
-        })
-      )
-    }
-    const observeShadow = (
+    /**
+     * The front door (`access-gate.ts`): its verdict for a request, and the caller it read. A caller the hub
+     * can't read (WhoIs or the session store unavailable) fails; the request is then refused. An admitted
+     * session is renewed, as the session read is.
+     */
+    const gate = Effect.fn("HostHttp.gate")(function*(facts: GateFacts, mode: ListenerMode, pathname: string) {
+      const family = routeFamily(facts.method, pathname)
+      if (!callerNeeded(family)) {
+        return gateVerdict(config, { method: facts.method, family, principal: { _tag: "Anonymous" }, csrfOk: false })
+      }
+      const principal = yield* gatePrincipal(mode, facts, family.id === "connect.service")
+      const token = facts.sessionToken
+      const csrfOk = token === undefined ? false : yield* csrfMatches(token, facts.csrf)
+      const verdict = gateVerdict(config, { method: facts.method, family, principal, csrfOk })
+      const sessioned = (principal._tag === "Person" || principal._tag === "Local") && principal.session
+      if (verdict._tag === "Pass" && sessioned && token !== undefined) {
+        yield* personSessions.touch(token).pipe(Effect.ignore({ log: true }))
+      }
+      if (verdict._tag !== "Pass") {
+        yield* Effect.logDebug("access gate: refused").pipe(
+          Effect.annotateLogs({ listener: mode, family: family.id, principal: principal._tag, verdict: verdict._tag })
+        )
+      }
+      return verdict
+    })
+    /** Runs the gate for an HTTP request; answers and returns false when it doesn't pass. */
+    const admit = async (
       request: IncomingMessage,
       response: ServerResponse,
       mode: ListenerMode,
       pathname: string
-    ) => {
-      const facts = shadowFacts(request, mode)
-      response.once("finish", () => shadowServed(facts, mode, pathname, response.statusCode))
+    ): Promise<boolean> => {
+      const result = await runRequest(Effect.result(gate(gateFacts(request, mode), mode, pathname)))
+      if (Result.isFailure(result)) {
+        json(response, 503, { error: "identity_unavailable" })
+        return false
+      }
+      switch (result.success._tag) {
+        case "Pass":
+          return true
+        case "LoginRequired":
+          // A page shows the login gate; anything else tells the page to.
+          if (routeFamily(request.method ?? "GET", pathname)?.id === "page") {
+            response.writeHead(200, {
+              "cache-control": "no-store",
+              "content-security-policy": "frame-ancestors 'none'",
+              "content-type": "text/html; charset=utf-8",
+              "x-frame-options": "DENY"
+            })
+            response.end(loginGatePage(fontPreload))
+          } else {
+            json(response, 401, { error: "login_required" })
+          }
+          return false
+        case "Forbidden":
+          json(response, 403, { error: "forbidden" })
+          return false
+        case "CsrfRequired":
+          json(response, 403, { error: "csrf_required" })
+          return false
+        case "Unknown":
+          json(response, 404, { error: "not_found" })
+          return false
+      }
     }
     const hueScope = await httpRuntime.runPromise(Scope.make())
     finalizers.unshift(() => httpRuntime.runPromise(Scope.close(hueScope, Exit.void)))
@@ -3151,7 +3164,8 @@ export const startHttpServer = async (
             json(response, 503, { error: "starting" })
             return
           }
-          if (mode !== "work" && mode !== "lan") observeShadow(request, response, mode, url.pathname)
+          // The hub's own listeners are behind login; per-host listeners keep their node checks.
+          if (listenerServesSuperapp(mode) && !(await admit(request, response, mode, url.pathname))) return
           // Agents report to the notification hub only; any super-app listener may read the posts back.
           const postsRead = request.method === "GET" && url.pathname === "/v1/connect/posts" &&
             listenerServesSuperapp(mode)
@@ -3507,8 +3521,7 @@ export const startHttpServer = async (
               listener: mode,
               method: request.method ?? "GET",
               pathname: url.pathname,
-              cookieToken: readCookie(header(request, "cookie"), sessionCookieName),
-              headerToken: header(request, sessionHeader),
+              cookieToken: readCookie(header(request, "cookie"), sessionCookieOn(mode)),
               csrf: header(request, csrfHeader),
               cli: cliToken !== null && presentsCliToken(header(request, cliTokenHeader), cliToken),
               origin: header(request, "origin"),
@@ -4692,11 +4705,22 @@ export const startHttpServer = async (
           rejectUpgrade(socket, 403)
           return
         }
+        // A browser's terminal is behind the same front door as the hub's pages; a peer's terminal route
+        // admits the hub's own node, as below.
+        const admitted = isServeTerminal
+          ? await runRequest(Effect.result(gate(gateFacts(request, mode), mode, url.pathname)))
+          : Result.succeed<GateVerdict>({ _tag: "Pass" })
+        if (Result.isFailure(admitted) || admitted.success._tag !== "Pass") {
+          rejectUpgrade(
+            socket,
+            Result.isFailure(admitted) ? 503 : admitted.success._tag === "LoginRequired" ? 401 : 403
+          )
+          return
+        }
         if (closed || !acceptingRequests) {
           rejectUpgrade(socket, 503)
           return
         }
-        shadowServed(shadowFacts(request, mode), mode, url.pathname, 101)
         webSocketServer.handleUpgrade(request, socket, head, (webSocket) => {
           watchSocket(webSocket)
           webSockets.add(webSocket)

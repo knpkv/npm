@@ -147,7 +147,11 @@ describe("hostd existing Work task producer", () => {
           Effect.promise(() => startHttpServer(configuration, fleet, assets)),
           (server) =>
             Effect.gen(function*() {
-              const response = yield* Effect.promise(() => fetch(`${server.url}/v1/status`))
+              // Agents read the hub on loopback with its CLI token.
+              const token = yield* fs.readFileString(paths.join(root, "hub-apps", "cli", "token"))
+              const response = yield* Effect.promise(() =>
+                fetch(`${server.url}/v1/status`, { headers: { "x-hub-cli-token": token.trim() } })
+              )
               expect(response.status).toBe(200)
               const body = Schema.decodeUnknownSync(HostStatus)(yield* Effect.promise(() => response.json()))
               expect(body.herdr.agents[0]?.taskKind).toBe("failing")

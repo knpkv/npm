@@ -41,7 +41,26 @@ layer(NodeServices.layer)("standalone hostd serving", (it) => {
         Effect.promise(() => startHttpServer(config, fleet, assets)),
         (running) => Effect.promise(running.close)
       )
-      const response = yield* Effect.promise(() => fetch(`${server.url}/`))
+      // Without a session the page is the login gate, with no dashboard data in it.
+      const gate = yield* Effect.promise(() => fetch(`${server.url}/`).then((response) => response.text()))
+      expect(gate).toContain("data-login-gate")
+      expect(gate).not.toContain("fleet-dashboard-data")
+      // `herdr-hub login`: the CLI token mints a code, the page spends it for the local session cookie.
+      const token = (yield* fileSystem.readFileString(path.join(config.stateDirectory, "hub-apps", "cli", "token")))
+        .trim()
+      const minted = yield* Effect.promise(() =>
+        fetch(`${server.url}/v1/session/local-code`, { headers: { "x-hub-cli-token": token }, method: "POST" })
+          .then((response) => response.json())
+      )
+      const spent = yield* Effect.promise(() =>
+        fetch(`${server.url}/v1/session/local`, {
+          body: JSON.stringify(minted),
+          headers: { "content-type": "application/json", origin: server.url },
+          method: "POST"
+        })
+      )
+      const cookie = spent.headers.get("set-cookie")?.split(";", 1)[0] ?? ""
+      const response = yield* Effect.promise(() => fetch(`${server.url}/`, { headers: { cookie } }))
       const body = yield* Effect.promise(() => response.text())
       expect(response.status, body.slice(0, 300)).toBe(200)
       expect(body).toContain("fleet-dashboard-data")

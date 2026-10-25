@@ -111,7 +111,7 @@ const allowed = (principal: Principal, method: string, pathname: string) =>
 
 describe("meets", () => {
   // What the flip will enforce: hosts read, submit and report as themselves; people act; only the hub
-  // calls a peer's service routes; plain loopback only reads.
+  // calls a peer's service routes; plain loopback gets nothing, the CLI reads and submits.
   it("says which principal each family admits", () => {
     expect(allowed(fleetHost, "POST", "/v1/connect/posts")).toBe(true)
     expect(allowed(person("node-phone"), "POST", "/v1/connect/posts")).toBe(false)
@@ -125,8 +125,10 @@ describe("meets", () => {
     expect(allowed(fleetHost, "POST", "/v1/work/pull-request-link")).toBe(false)
     expect(allowed(service, "GET", "/v1/connect/agents/local")).toBe(true)
     expect(allowed(fleetHost, "GET", "/v1/connect/agents/local")).toBe(false)
-    expect(allowed(plainLoopback, "GET", "/v1/dashboard")).toBe(true)
+    expect(allowed(plainLoopback, "GET", "/v1/dashboard")).toBe(false)
     expect(allowed(plainLoopback, "POST", "/v1/jobs")).toBe(false)
+    expect(allowed({ _tag: "Cli" }, "GET", "/v1/dashboard")).toBe(true)
+    expect(allowed({ _tag: "Cli" }, "POST", "/v1/jobs")).toBe(true)
     expect(allowed({ _tag: "Anonymous" }, "GET", "/assets/index.css")).toBe(true)
     expect(allowed({ _tag: "Anonymous" }, "GET", "/v1/dashboard")).toBe(false)
   })
