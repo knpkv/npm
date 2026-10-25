@@ -7579,6 +7579,72 @@ esac
     }).pipe(Effect.scoped, provideNodeServices)
   })
 
+  /** The body a Needs-you dismiss or retry sends. */
+  interface FailureAction {
+    readonly host: string
+    readonly jobId: string
+    readonly apply?: "same" | "main"
+  }
+
+  it.effect("Try again submits as the caller would: asked again from serve, queued from loopback", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-needs-you-retry-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const now = Date.now()
+      const failedApply = (index: number): JobRecord => ({
+        ...pendingRecord("SER8", index),
+        approvalNonce: null,
+        createdAt: now - 3_000 + index,
+        updatedAt: now - 1_000 + index,
+        payload: { kind: "nix.apply", ref: "4f1c2e9" },
+        status: "failed",
+        error: "command exited with code 1: fleet-apply: checkout is not on main"
+      })
+      const hub = yield* startHub(
+        root,
+        join(root, "relay"),
+        scriptedBackends("Nothing waits."),
+        (store) => Effect.forEach([1, 2, 3].map(failedApply), (record) => store.put(record), { discard: true })
+      )
+      const fromServe = (route: string, body: FailureAction) =>
+        Effect.promise(() =>
+          hubRequest(`${hub.serveUrl}/v1/modules/fleet/failures/${route}`, {
+            method: "POST",
+            headers: { ...hub.headers, "content-type": "application/json", origin: hub.origin },
+            body: JSON.stringify(body)
+          })
+        )
+      const local = new URL(hub.server.url).origin
+      const fromLoopback = (route: string, body: FailureAction) =>
+        Effect.promise(() =>
+          fetch(`${local}/v1/modules/fleet/failures/${route}`, {
+            method: "POST",
+            headers: { "content-type": "application/json", origin: local },
+            body: JSON.stringify(body)
+          }).then(async (response) => ({ status: response.status, body: await response.text() }))
+        )
+      const served = yield* fromServe("retry", { host: "SER8", jobId: "ser8-job-01", apply: "same" })
+      expect(served.status, served.body).toBe(200)
+      const retried = JSON.parse(served.body)
+      expect(retried).toMatchObject({ _tag: "Retried", host: "SER8", status: "pending_approval" })
+      const again = yield* fromServe("retry", { host: "SER8", jobId: "ser8-job-01", apply: "same" })
+      expect(JSON.parse(again.body)).toEqual({ _tag: "AlreadyRetried", retryJobId: retried.jobId })
+      // Loopback is a verified local submission, exactly as POST /v1/jobs treats it there.
+      const looped = yield* fromLoopback("retry", { host: "SER8", jobId: "ser8-job-02", apply: "main" })
+      expect(looped.status, looped.body).toBe(200)
+      expect(JSON.parse(looped.body)).toMatchObject({ _tag: "Retried", status: "queued" })
+      const dismissed = yield* fromServe("dismiss", { host: "SER8", jobId: "ser8-job-03" })
+      expect(dismissed.status, dismissed.body).toBe(200)
+      const inbox = yield* Effect.promise(() =>
+        hubRequest(`${hub.serveUrl}/v1/modules/connect/needs-you`, { headers: hub.headers })
+      )
+      const failures: ReadonlyArray<{ readonly jobId: string }> = JSON.parse(inbox.body).failures ?? []
+      expect(failures.map(({ jobId }) => jobId)).not.toContain("ser8-job-01")
+      expect(failures.map(({ jobId }) => jobId)).not.toContain("ser8-job-02")
+      expect(failures.map(({ jobId }) => jobId)).not.toContain("ser8-job-03")
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
   /** The production mount uses whois authority, never a browser-supplied login header or query. */
   it.effect("keeps Code local, read-only and caller identity sourced from authenticated whois", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-code-auth-"))

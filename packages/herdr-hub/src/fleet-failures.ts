@@ -8,7 +8,8 @@
  *   tailnet login), so no actor filter is applied. `approved` says whether a person approved it, and a page claims
  *   "after you approved" only then.
  * - **A later success settles a failure.** When the same host ran a job with the same payload hash later and it
- *   succeeded, the failure was retried outside the inbox and drops out.
+ *   succeeded, the failure was retried outside the inbox and drops out. A failure a person dismissed, or retried
+ *   from the inbox, drops out too.
  * - **Bounded.** Each host contributes its window (newest first, a few pages); the merged list keeps the newest
  *   {@link fleetFailuresMax} and says `truncated` past that. A host whose history can't be read is named in `hosts`.
  *
@@ -17,6 +18,7 @@
 import { jobOutcome } from "@knpkv/herdr-fleet/job-outcome"
 import type { JobRecord } from "@knpkv/herdr-fleet/model"
 import type { NeedsYouFailureCandidate, NeedsYouFailureReason } from "./module-needs-you.js"
+import { type FleetJobKey, fleetJobKey } from "./needs-you-store.js"
 
 export const fleetFailuresWindowMillis = 7 * 24 * 60 * 60 * 1_000
 export const fleetFailuresMax = 20
@@ -33,14 +35,30 @@ export interface FleetFailures {
   readonly lastDecisionAt: number | null
 }
 
-const hostFailures = (host: string, records: ReadonlyArray<JobRecord>): ReadonlyArray<NeedsYouFailureCandidate> =>
+const isFailure = (record: JobRecord) => record.status === "failed" || record.status === "interrupted"
+
+/** Every failed or interrupted job in the histories, as store keys; the caller asks which a person settled. */
+export const failedJobKeys = (histories: ReadonlyArray<HostHistory>): ReadonlyArray<FleetJobKey> =>
+  histories.flatMap((history) =>
+    history._tag === "Read"
+      ? history.records.filter(isFailure).map((record) => ({ host: history.host, jobId: record.id }))
+      : []
+  )
+
+const hostFailures = (
+  host: string,
+  records: ReadonlyArray<JobRecord>,
+  dismissedOrRetried: ReadonlySet<string>
+): ReadonlyArray<NeedsYouFailureCandidate> =>
   records.flatMap((record) => {
     const outcome = jobOutcome(record)
     if (outcome._tag !== "Failed" && outcome._tag !== "FailedAfterApproval") return []
-    const settled = records.some((later) =>
-      later.hash === record.hash && later.status === "succeeded" && later.createdAt > record.createdAt
-    )
-    return settled ? [] : [{
+    const settled = dismissedOrRetried.has(fleetJobKey({ host, jobId: record.id })) ||
+      records.some((later) =>
+        later.hash === record.hash && later.status === "succeeded" && later.createdAt > record.createdAt
+      )
+    if (settled) return []
+    const failure: NeedsYouFailureCandidate = {
       sourceKey: `failed:${host.toLowerCase()}:${record.id}`,
       host,
       jobId: record.id,
@@ -50,14 +68,22 @@ const hostFailures = (host: string, records: ReadonlyArray<JobRecord>): Readonly
       failedAt: record.updatedAt,
       reason: outcome.reason,
       approved: outcome._tag === "FailedAfterApproval"
-    }]
+    }
+    return [record.payload.kind === "nix.apply" ? { ...failure, applyRef: record.payload.ref } : failure]
   })
 
 const decisionsOf = (record: JobRecord): ReadonlyArray<number> =>
   [record.approvedAt, record.rejectedAt].flatMap((at) => at === undefined || at === null ? [] : [at])
 
-/** `since` bounds both the failures and the last decision; records older than it are ignored. */
-export const fleetFailures = (histories: ReadonlyArray<HostHistory>, since: number): FleetFailures => {
+/**
+ * `since` bounds both the failures and the last decision; records older than it are ignored. `dismissedOrRetried`
+ * holds {@link fleetJobKey}s a person dismissed or retried from the inbox.
+ */
+export const fleetFailures = (
+  histories: ReadonlyArray<HostHistory>,
+  since: number,
+  dismissedOrRetried: ReadonlySet<string> = new Set()
+): FleetFailures => {
   const hosts: Array<{ readonly host: string; readonly reason: typeof NeedsYouFailureReason.Type }> = []
   const failures: Array<NeedsYouFailureCandidate> = []
   let lastDecisionAt: number | null = null
@@ -67,7 +93,7 @@ export const fleetFailures = (histories: ReadonlyArray<HostHistory>, since: numb
       continue
     }
     const recent = history.records.filter((record) => record.createdAt >= since)
-    for (const failure of hostFailures(history.host, recent)) failures.push(failure)
+    for (const failure of hostFailures(history.host, recent, dismissedOrRetried)) failures.push(failure)
     for (const at of recent.flatMap(decisionsOf)) {
       if (at >= since && (lastDecisionAt === null || at > lastDecisionAt)) lastDecisionAt = at
     }

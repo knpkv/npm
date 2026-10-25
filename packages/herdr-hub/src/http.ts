@@ -74,7 +74,7 @@ import {
   PeerPendingUnavailableError,
   PendingApprovalCursor
 } from "@knpkv/herdr-fleet"
-import { type FleetHostName, JobHistoryPage, JobPayload } from "@knpkv/herdr-fleet/model"
+import { type FleetHostName, JobHistoryPage, JobPayload, JobRecord as JobRecordSchema } from "@knpkv/herdr-fleet/model"
 import type { TailscaleAuthorizationError } from "@knpkv/herdr-tailscale"
 import { authorizeWhois, discoverFleetPeers, layer as tailscaleLayer, Tailscale } from "@knpkv/herdr-tailscale"
 import { readHostLimits, readHostUsage, staleWhileRevalidate, usageCache } from "@knpkv/herdr-usage/host"
@@ -122,7 +122,8 @@ import {
 } from "effect"
 import type { Redacted } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
-import type * as Path from "effect/Path"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as Path from "effect/Path"
 import { ChildProcessSpawner } from "effect/process"
 import type * as SemaphoreModule from "effect/Semaphore"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
@@ -161,7 +162,8 @@ import {
 } from "./dashboard-model.js"
 import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
-import { fleetFailures, fleetFailuresWindowMillis, type HostHistory } from "./fleet-failures.js"
+import { fleetFailureRoutes, type FleetJobReadFailure } from "./fleet-failure-routes.js"
+import { failedJobKeys, fleetFailures, fleetFailuresWindowMillis, type HostHistory } from "./fleet-failures.js"
 import { fontPreloadLink } from "./font-preload.js"
 import { makeHostResources } from "./host-resources.js"
 import { attachTaskWorkReader } from "./internal/agent-task-work-source.js"
@@ -227,6 +229,7 @@ import { connectModule, fleetHubModule, resourcesModule } from "./module-contrac
 import type { NeedsYouCandidate, NeedsYouIssue, NeedsYouProviderResult } from "./module-needs-you.js"
 import * as ModuleServer from "./module-server.js"
 import { ModuleRouteFailure, type ServerModule } from "./module-server.js"
+import { type FleetJobKey, makeNeedsYouStore, type NeedsYouStore } from "./needs-you-store.js"
 import { generateVapidKeys, makePushSender } from "./push-sender.js"
 import { validatePushEndpoint } from "./push-subscription.js"
 import { type ApprovalNotificationBatch, makePushWorker } from "./push-worker.js"
@@ -452,6 +455,7 @@ type PeerTarget = {
   readonly approvalUrl: string | null
   readonly pendingUrl: string | null
   readonly historyUrl: string | null
+  readonly jobsUrl: string | null
   readonly connectAgentsUrl: string | null
   readonly limitsUrl: string | null
   readonly usageUrl: string | null
@@ -879,6 +883,9 @@ const fleetPeers = Effect.fn("HostHttp.fleetPeers")(function*(
       historyUrl: address === undefined
         ? null
         : `http://${address}:${config.port}/v1/history`,
+      jobsUrl: address === undefined
+        ? null
+        : `http://${address}:${config.port}/v1/jobs`,
       connectAgentsUrl: address === undefined
         ? null
         : `http://${address}:${config.port}/v1/connect/agents/local`,
@@ -1210,6 +1217,65 @@ const readHistoryWindow = Effect.fn("HostHttp.readHistoryWindow")(function*<E, R
   return records
 })
 
+/** A job read from the host that ran it: this hub's store, or the peer's tailnet `GET /v1/jobs/:id`. */
+const readFleetJob = Effect.fn("HostHttp.readFleetJob")(function*(
+  config: HostConfiguration,
+  service: FleetService,
+  key: FleetJobKey
+): Effect.fn.Return<JobRecord, FleetJobReadFailure, HttpClient.HttpClient | Tailscale> {
+  if (key.host.toLowerCase() === config.host.toLowerCase()) {
+    return yield* service.get(key.jobId).pipe(
+      Effect.mapError((error): FleetJobReadFailure =>
+        error._tag === "FleetJobNotFoundError" ? "not_found" : "unavailable"
+      )
+    )
+  }
+  const peers = yield* fleetPeers(config).pipe(Effect.mapError((): FleetJobReadFailure => "unavailable"))
+  const peer = peers.find(({ host }) => host.toLowerCase() === key.host.toLowerCase())
+  if (peer === undefined) return yield* Effect.fail<FleetJobReadFailure>("not_found")
+  if (peer.jobsUrl === null || !peer.online) return yield* Effect.fail<FleetJobReadFailure>("unavailable")
+  const client = yield* HttpClient.HttpClient
+  const response = yield* client.get(`${peer.jobsUrl}/${encodeURIComponent(key.jobId)}`).pipe(
+    Effect.timeout(peerPendingTimeoutMs),
+    Effect.mapError((): FleetJobReadFailure => "unavailable")
+  )
+  if (response.status === 404) return yield* Effect.fail<FleetJobReadFailure>("not_found")
+  if (response.status < 200 || response.status >= 300) return yield* Effect.fail<FleetJobReadFailure>("unavailable")
+  return yield* decodeBoundedResponseJson(response, JobRecordSchema).pipe(
+    Effect.mapError((): FleetJobReadFailure => "unavailable")
+  )
+})
+
+/**
+ * Submit to a peer's tailnet `POST /v1/jobs` as this hub's tailnet identity. The peer sees a remote submission, so a
+ * kind that needs an approval asks for one there.
+ */
+const submitPeerJob = Effect.fn("HostHttp.submitPeerJob")(function*(
+  config: HostConfiguration,
+  host: string,
+  payload: JobPayload
+) {
+  const unavailable = () => new ModuleRouteFailure({ status: 503, code: "unavailable" })
+  const peers = yield* fleetPeers(config).pipe(Effect.mapError(unavailable))
+  const peer = peers.find((candidate) => candidate.host.toLowerCase() === host.toLowerCase())
+  if (peer === undefined) return yield* new ModuleRouteFailure({ status: 404, code: "not_found" })
+  if (peer.jobsUrl === null || !peer.online) return yield* unavailable()
+  const client = yield* HttpClient.HttpClient
+  const response = yield* client.execute(
+    HttpClientRequest.post(peer.jobsUrl).pipe(HttpClientRequest.bodyJsonUnsafe({ payload }))
+  ).pipe(Effect.timeout(peerPendingTimeoutMs), Effect.mapError(unavailable))
+  if (response.status === 409 || response.status === 400) {
+    return yield* new ModuleRouteFailure({ status: 409, code: "rejected" })
+  }
+  // The peer refused this hub: not a reason to try later.
+  if (response.status === 401 || response.status === 403) {
+    return yield* new ModuleRouteFailure({ status: 409, code: "refused" })
+  }
+  if (response.status < 200 || response.status >= 300) return yield* unavailable()
+  const record = yield* decodeBoundedResponseJson(response, JobRecordSchema).pipe(Effect.mapError(unavailable))
+  return { jobId: record.id, status: record.status }
+})
+
 /**
  * Each peer's history window, re-read at most every 30 seconds: Needs-you is polled by every open page, and history is
  * pages of whole job records over the tailnet. A failed read is remembered for the same 30 seconds.
@@ -1356,7 +1422,8 @@ const readFleetPendingJobs = Effect.fn("HostHttp.readFleetPendingJobs")(function
 const readFleetNeedsYou = Effect.fn("HostHttp.readFleetNeedsYou")(function*(
   config: HostConfiguration,
   service: FleetService,
-  peerHistory: (peer: PeerTarget, since: number) => Effect.Effect<HostHistory, never, HttpClient.HttpClient>
+  peerHistory: (peer: PeerTarget, since: number) => Effect.Effect<HostHistory, never, HttpClient.HttpClient>,
+  store: NeedsYouStore
 ): Effect.fn.Return<NeedsYouProviderResult, never, HttpClient.HttpClient | Tailscale> {
   const pending = yield* readFleetPendingJobs(config, service, relayPendingPagesPerHost)
   const since = (yield* Clock.currentTimeMillis) - fleetFailuresWindowMillis
@@ -1372,7 +1439,13 @@ const readFleetNeedsYou = Effect.fn("HostHttp.readFleetNeedsYou")(function*(
       ? yield* Effect.forEach(pending.peers.success, (peer) => peerHistory(peer, since), { concurrency: 4 })
       : [])
   ]
-  const failed = fleetFailures(histories, since)
+  // Dismissed or retried failures leave the inbox; when the hub can't say which, every failure shows.
+  const settled = yield* store.settled(failedJobKeys(histories)).pipe(
+    Effect.catch((cause) =>
+      Effect.logWarning("Needs-you dismissals could not be read", cause).pipe(Effect.as(new Set<string>()))
+    )
+  )
+  const failed = fleetFailures(histories, since, settled)
   const jobs: Array<FleetPendingJob> = []
   const issues: Array<NeedsYouIssue> = []
   const hosts: Array<Extract<NeedsYouIssue, { readonly state: "hosts" }>["hosts"][number]> = []
@@ -2069,9 +2142,28 @@ export const startHttpServer = async (
           Effect.gen(function*() {
             const context = yield* Effect.context<HttpClient.HttpClient | Tailscale>()
             const peerHistory = yield* makePeerHistoryMemo()
+            const path = yield* Path.Path
+            const store = yield* makeNeedsYouStore(path.join(config.stateDirectory, "needs-you.sqlite"))
+            const routes = fleetFailureRoutes({
+              store,
+              readJob: (key) => readFleetJob(config, service, key).pipe(Effect.provideContext(context)),
+              submit: (host, payload, caller) =>
+                host.toLowerCase() === config.host.toLowerCase()
+                  ? service.submit({ payload }, caller.login, caller.provenance).pipe(
+                    Effect.tap((record) => record.status === "queued" ? enqueueJob(record.id) : Effect.void),
+                    Effect.map((record) => ({ jobId: record.id, status: record.status })),
+                    Effect.mapError((error) =>
+                      new ModuleRouteFailure({
+                        status: error._tag === "FleetValidationError" ? 409 : 503,
+                        code: error._tag === "FleetValidationError" ? "rejected" : "unavailable"
+                      })
+                    )
+                  )
+                  : submitPeerJob(config, host, payload).pipe(Effect.provideContext(context))
+            })
             return {
-              routes: [],
-              needsYou: readFleetNeedsYou(config, service, peerHistory).pipe(Effect.provideContext(context))
+              routes,
+              needsYou: readFleetNeedsYou(config, service, peerHistory, store).pipe(Effect.provideContext(context))
             }
           })
         )

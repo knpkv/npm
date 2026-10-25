@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { JobRecord } from "@knpkv/herdr-fleet/model"
-import { fleetFailures, fleetFailuresMax, type HostHistory } from "../src/fleet-failures.js"
+import { failedJobKeys, fleetFailures, fleetFailuresMax, type HostHistory } from "../src/fleet-failures.js"
+import { fleetJobKey } from "../src/needs-you-store.js"
 
 const since = 1_000_000
 
@@ -110,5 +111,25 @@ describe("fleet failures for Needs you", () => {
       ])
     ], since)
     expect(result.lastDecisionAt).toBe(since + 50)
+  })
+  it("leaves out a failure a person dismissed or retried, and lists the keys to ask about", () => {
+    const histories = [read("SER8", [job("kept"), job("dismissed"), job("fine", { status: "succeeded" })])]
+    expect(failedJobKeys(histories)).toEqual([
+      { host: "SER8", jobId: "kept" },
+      { host: "SER8", jobId: "dismissed" }
+    ])
+    const { failures } = fleetFailures(histories, since, new Set([fleetJobKey({ host: "ser8", jobId: "dismissed" })]))
+    expect(failures.map(({ jobId }) => jobId)).toEqual(["kept"])
+  })
+
+  it("gives a nix.apply failure its ref, and other kinds none", () => {
+    const { failures } = fleetFailures([
+      read("SER8", [
+        job("apply", { payload: { kind: "nix.apply", ref: "4f1c2e9" }, updatedAt: since + 30 }),
+        job("check")
+      ])
+    ], since)
+    expect(failures[0]).toMatchObject({ jobId: "apply", applyRef: "4f1c2e9" })
+    expect(failures[1]).not.toHaveProperty("applyRef")
   })
 })
