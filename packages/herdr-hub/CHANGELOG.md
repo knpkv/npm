@@ -2,6 +2,12 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.66.0
+
+### Minor Changes
+
+- [#1143](https://github.com/knpkv/npm/pull/1143) [`9d226d8`](https://github.com/knpkv/npm/commit/9d226d8a03eaaa6b8be04502953b973677a7ec5c) Thanks [@konopkov](https://github.com/konopkov)! - A failed fleet job in the Needs-you list can be dismissed or tried again. `POST /v1/modules/fleet/failures/dismiss` takes `{ host, jobId }` and hides a failed, interrupted or expired job from the list. `POST /v1/modules/fleet/failures/retry` takes `{ host, jobId, apply: "same" | "main" }` and submits the same request again, or `nix.apply main` for "Apply main instead", to the host that ran it. It submits as the person pressing it, exactly as `POST /v1/jobs` would: from the hub's tailnet page a request that needs an approval asks for one again. Only `nix.check`, `nix.apply`, `agent.delegate` and `agent.message` retry. A second press answers with the first retry's job and submits nothing. A `nix.apply` failure now carries `applyRef`, the ref it applied. Dismissals and retries are kept on the hub in `needs-you.sqlite`.
+
 ## 0.65.0
 
 ### Minor Changes
