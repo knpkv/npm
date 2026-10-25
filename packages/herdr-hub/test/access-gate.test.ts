@@ -2,8 +2,9 @@ import { describe, expect, it } from "@effect/vitest"
 import type { Principal } from "@knpkv/herdr-fleet"
 import { FleetHostName } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
-import { callerNeeded, gateVerdict } from "../src/internal/access-gate.js"
+import { callerNeeded, gateVerdict, isDocument } from "../src/internal/access-gate.js"
 import { routeFamily } from "../src/internal/route-families.js"
+import { servedRoutes } from "./fixtures/served-routes.js"
 
 const host = Schema.decodeUnknownSync(FleetHostName)("hub")
 const config = {
@@ -18,8 +19,26 @@ const person = (session: boolean): Principal => ({
   presence: "none",
   session
 })
-const verdict = (principal: Principal, method: string, pathname: string, csrfOk = true) =>
-  gateVerdict(config, { method, family: routeFamily(method, pathname), principal, csrfOk })._tag
+/** The same caller logged in, as `principalAfterLogin` reads it: a person or the local user gains a session. */
+const loggedIn = (principal: Principal): Principal | null =>
+  principal._tag === "Person" || principal._tag === "Local" ? { ...principal, session: true } : null
+const verdict = (
+  principal: Principal,
+  method: string,
+  pathname: string,
+  csrfOk = true,
+  options: { readonly afterLogin?: Principal | null; readonly document?: boolean } = {}
+) => {
+  const family = routeFamily(method, pathname)
+  return gateVerdict(config, {
+    method,
+    family,
+    principal,
+    afterLogin: options.afterLogin === undefined ? loggedIn(principal) : options.afterLogin,
+    document: options.document ?? isDocument(family, method, { fetchDest: undefined, accept: undefined }),
+    csrfOk
+  })._tag
+}
 
 describe("access gate", () => {
   // The hub is behind login: a browser without a session reaches only the session routes and static files.
@@ -37,6 +56,22 @@ describe("access gate", () => {
     }
   })
 
+  // Every family but the session routes, static files and an app's per-request grant refuses a browser
+  // without a session, so a new family can't serve one by forgetting the gate.
+  it("refuses a person and the local user without a session on every family that checks its caller", () => {
+    const opens = new Set(["static", "session", "app-services"])
+    for (const [method, pathname, id] of servedRoutes) {
+      for (const principal of [person(false), { _tag: "Local", session: false } satisfies Principal]) {
+        const answer = verdict(principal, method, pathname, false)
+        expect([id, principal._tag, answer]).toEqual([
+          id,
+          principal._tag,
+          opens.has(id) ? "Pass" : expect.not.stringMatching(/^Pass$/u)
+        ])
+      }
+    }
+  })
+
   // Agents and hosts keep their own credentials: the CLI token on loopback, the host's node on the tailnet.
   it("lets the CLI and fleet hosts on with their own credentials", () => {
     expect(verdict({ _tag: "Cli" }, "POST", "/v1/jobs")).toBe("Pass")
@@ -44,6 +79,50 @@ describe("access gate", () => {
     expect(verdict({ _tag: "Cli" }, "POST", "/v1/apps/notes/restart")).toBe("Pass")
     expect(verdict({ _tag: "Host", nodeId: "node-hub" }, "POST", "/v1/jobs")).toBe("Pass")
     expect(verdict({ _tag: "Host", nodeId: "node-hub" }, "POST", "/v1/connect/posts")).toBe("Pass")
+  })
+
+  // A browser on a fleet host is the host's agents until someone logs in there: the host reads JSON as
+  // itself, but a page (or an app's page, navigated to) shows only after the login, and a person's write asks
+  // for one rather than refusing.
+  it("asks a browser on a fleet host to log in for a page, and for what only a person holds", () => {
+    const fleetHost: Principal = { _tag: "Host", nodeId: "node-hub" }
+    const there: Principal = {
+      _tag: "Person",
+      login: "owner@example.test",
+      nodeId: "node-hub",
+      presence: "none",
+      session: true
+    }
+    const atHost = (method: string, pathname: string, document?: boolean) =>
+      verdict(
+        fleetHost,
+        method,
+        pathname,
+        false,
+        document === undefined ? { afterLogin: there } : { afterLogin: there, document }
+      )
+    expect(atHost("GET", "/")).toBe("LoginRequired")
+    expect(atHost("GET", "/fleet")).toBe("LoginRequired")
+    expect(atHost("GET", "/apps/notes/", true)).toBe("LoginRequired")
+    expect(atHost("POST", "/v1/push/subscriptions")).toBe("LoginRequired")
+    expect(atHost("GET", "/v1/dashboard")).toBe("Pass")
+    expect(atHost("GET", "/apps/notes/", false)).toBe("Pass")
+    expect(atHost("POST", "/v1/jobs")).toBe("Pass")
+    // A login no one there may hold doesn't help.
+    expect(verdict(fleetHost, "GET", "/", false, { afterLogin: fleetHost })).toBe("Forbidden")
+  })
+
+  // An app's page a browser navigates to shows the login gate; its scripts' fetches get the JSON 401.
+  it("counts an app's page as a document only when a browser navigates to it", () => {
+    const apps = routeFamily("GET", "/apps/notes/")
+    expect(isDocument(apps, "GET", { fetchDest: "document", accept: undefined })).toBe(true)
+    expect(isDocument(apps, "GET", { fetchDest: undefined, accept: "text/html,application/xhtml+xml" })).toBe(true)
+    expect(isDocument(apps, "GET", { fetchDest: "empty", accept: "application/json" })).toBe(false)
+    expect(isDocument(routeFamily("POST", "/apps/notes/save"), "POST", { fetchDest: "document", accept: "text/html" }))
+      .toBe(false)
+    expect(isDocument(routeFamily("GET", "/"), "GET", { fetchDest: undefined, accept: undefined })).toBe(true)
+    expect(isDocument(routeFamily("GET", "/v1/dashboard"), "GET", { fetchDest: "document", accept: "text/html" }))
+      .toBe(false)
   })
 
   // Logging in doesn't help someone who isn't allowed, or a credential that can't hold the permission.

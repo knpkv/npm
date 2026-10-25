@@ -145,12 +145,21 @@ test("spends a #login code after taking it out of the address, keeping no token"
       body: JSON.stringify({ signedIn: true, kind: "local", expiresAt: signedIn.expiresAt, csrf })
     })
   })
-  const reloaded = page.waitForEvent("load")
+  // Once logged in the hub serves itself, not the gate; the fixture's gate would reload forever.
+  await page.route("**/__fixture/login-gate", (route) =>
+    spent.length === 0
+      ? route.continue()
+      : route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>Hub</title>" }))
+  // The first load is the link itself; the page then reloads into the hub once the code is spent.
+  let loads = 0
+  page.on("load", () => {
+    loads += 1
+  })
   await page.goto(`/__fixture/login-gate#login=${code}`)
   await expect.poll(() => spent.length).toBe(1)
   expect(spent[0]?.body).toBe(JSON.stringify({ code }))
   expect(spent[0]?.hash.includes(code)).toBe(false)
-  await reloaded
+  await expect.poll(() => loads).toBe(2)
   expect(await page.evaluate(() => window.location.href)).not.toContain(code)
   expect(reads.every((headers) => headers["x-herdr-session"] === undefined)).toBe(true)
   expect(await page.evaluate(() => Object.keys(window.sessionStorage))).toEqual([])

@@ -59,7 +59,7 @@ describe("session routes", () => {
         const login = yield* route({ listener: "serve", method: "POST", pathname: "/v1/session/tailscale" })
         expect(login?.status).toBe(200)
         expect(login?.setCookie).toMatch(
-          new RegExp(`^${sessionCookieName}=[0-9a-f]{64}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=604800$`)
+          new RegExp(`^${sessionCookieName}=[0-9a-f]{64}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=691200$`)
         )
         const token = cookieValue(login?.setCookie)
         const after = yield* route({ listener: "serve", method: "GET", pathname: "/v1/session", cookieToken: token })
@@ -119,17 +119,47 @@ describe("session routes", () => {
         expect((yield* sessions.read(token))?.expiresAt).toBeGreaterThan(opened ?? 0)
       })))
 
-    // On a fleet machine the session is fixed at 8 hours; a person's own device slides up to 7 days.
-    it.effect("sets an 8-hour cookie on a fleet machine", () =>
+    // On a fleet machine and on loopback the session is fixed at 8 hours; a person's own device slides up to
+    // 7 days. The cookie outlives every one of them, so once the session ends the browser still sends it and
+    // the page can say "Your session ended." rather than draw a first login.
+    it.effect("keeps the cookie past a fixed session's end, so the read says the session ended", () =>
       Effect.scoped(Effect.gen(function*() {
-        const { route } = yield* fixture
-        const login = yield* route({
+        const { localLogin, route } = yield* fixture
+        const maxAgeSeconds = (setCookie: string | undefined) => Number(/Max-Age=(\d+)$/u.exec(setCookie ?? "")?.[1])
+        const machine = yield* route({
           listener: "serve",
           method: "POST",
           pathname: "/v1/session/tailscale",
           identity: Effect.succeed({ login: "owner@example.test", nodeId: "node-build", device: undefined })
         })
-        expect(login?.setCookie).toContain("Max-Age=28800")
+        const local = yield* route({
+          listener: "local",
+          method: "POST",
+          pathname: "/v1/session/local",
+          body: Effect.succeed({ code: Redacted.value(yield* localLogin.mint) })
+        })
+        const sevenDays = 7 * 24 * 60 * 60
+        expect(maxAgeSeconds(machine?.setCookie)).toBeGreaterThan(sevenDays)
+        expect(maxAgeSeconds(local?.setCookie)).toBeGreaterThan(sevenDays)
+        yield* TestClock.adjust("8 hours")
+        yield* TestClock.adjust("1 minute")
+        expect(
+          (yield* route({
+            listener: "serve",
+            method: "GET",
+            pathname: "/v1/session",
+            cookieToken: cookieValue(machine?.setCookie),
+            identity: Effect.succeed({ login: "owner@example.test", nodeId: "node-build", device: undefined })
+          }))?.body
+        ).toMatchObject({ signedIn: false, fleetHost: true, ended: true })
+        expect(
+          (yield* route({
+            listener: "local",
+            method: "GET",
+            pathname: "/v1/session",
+            cookieToken: cookieValue(local?.setCookie)
+          }))?.body
+        ).toEqual({ signedIn: false, kind: "local", ended: true })
       })))
 
     // A page from another origin can't log anyone in; WhoIs refusing the caller refuses too.
@@ -187,7 +217,7 @@ describe("session routes", () => {
         expect(spent?.status).toBe(200)
         expect(spent?.setCookie).toMatch(
           new RegExp(
-            `^${localSessionCookieName}=[A-Za-z0-9_-]+; Path=/; HttpOnly; SameSite=Strict; Max-Age=28800$`,
+            `^${localSessionCookieName}=[A-Za-z0-9_-]+; Path=/; HttpOnly; SameSite=Strict; Max-Age=691200$`,
             "u"
           )
         )

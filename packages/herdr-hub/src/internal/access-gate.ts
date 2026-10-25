@@ -4,11 +4,13 @@
  * **Mental model**
  *
  * - **The hub is behind login.** A browser without a session reaches only the session routes and static
- *   files. A person or the local user without one is asked to log in when logging in would let them through;
+ *   files. A caller is asked to log in when the same caller logged in (`afterLogin`) would get through;
  *   anyone a login wouldn't help (no one, a credential that can't hold the permission, a person approving
  *   from a node that can't approve) is forbidden.
  * - **Agents and hosts keep their own credentials.** The CLI token on loopback and a fleet host's node on the
  *   tailnet decide by what {@link meets} grants them, never by a session.
+ * - **A browser document is a person's, never a host's.** Agents on a fleet host read the hub's JSON as the
+ *   host; a page there (or an app's page, navigated to) shows only after someone logs in in that browser.
  * - **A session's writes carry its CSRF token.** Reads and the families that check no caller don't.
  * - **A route no family names is refused,** so a new route can't slip past the gate.
  *
@@ -25,7 +27,8 @@ export class GateCallerUnknown extends Schema.TaggedError<GateCallerUnknown>()("
 
 export type GateVerdict =
   | { readonly _tag: "Pass" }
-  | { readonly _tag: "LoginRequired" }
+  /** `document`: a browser navigation, answered with the login gate's page rather than JSON. */
+  | { readonly _tag: "LoginRequired"; readonly document: boolean }
   | { readonly _tag: "Forbidden" }
   | { readonly _tag: "CsrfRequired" }
   | { readonly _tag: "Unknown" }
@@ -38,11 +41,18 @@ export const callerNeeded = (family: RouteFamily | null): family is RouteFamily 
 const sessioned = (principal: Principal) =>
   (principal._tag === "Person" || principal._tag === "Local") && principal.session
 
-/** The same caller once logged in, when it could log in at all. */
-const loggedIn = (principal: Principal): Principal | null =>
-  (principal._tag === "Person" || principal._tag === "Local") && !principal.session
-    ? { ...principal, session: true }
-    : null
+/**
+ * Whether a request to `family` is a browser document: a hub page, or an app's page a browser navigated to
+ * (`Sec-Fetch-Dest: document`, or an `Accept` that asks for HTML).
+ */
+export const isDocument = (
+  family: RouteFamily | null,
+  method: string,
+  headers: { readonly fetchDest: string | undefined; readonly accept: string | undefined }
+): boolean =>
+  family?.id === "page" ||
+  (family?.id === "apps.read" && (method === "GET" || method === "HEAD") &&
+    (headers.fetchDest === "document" || (headers.accept ?? "").includes("text/html")))
 
 /** The gate's answer for a `method` request to `family` from `principal`, under `config`. */
 export const gateVerdict = (
@@ -51,17 +61,19 @@ export const gateVerdict = (
     readonly method: string
     readonly family: RouteFamily | null
     readonly principal: Principal
+    /** The same caller once logged in on this listener; null when no login could change who it is. */
+    readonly afterLogin: Principal | null
+    readonly document: boolean
     readonly csrfOk: boolean
   }
 ): GateVerdict => {
-  const { family, principal } = request
+  const { afterLogin, document, family, principal } = request
   if (family === null) return { _tag: "Unknown" }
   if (open(family)) return { _tag: "Pass" }
-  if (!meets(config, principal, family.requirement)) {
-    const afterLogin = loggedIn(principal)
-    return afterLogin !== null && meets(config, afterLogin, family.requirement)
-      ? { _tag: "LoginRequired" }
-      : { _tag: "Forbidden" }
+  const admits = (caller: Principal) =>
+    meets(config, caller, family.requirement) && !(document && caller._tag === "Host")
+  if (!admits(principal)) {
+    return afterLogin !== null && admits(afterLogin) ? { _tag: "LoginRequired", document } : { _tag: "Forbidden" }
   }
   const read = request.method === "GET" || request.method === "HEAD"
   return sessioned(principal) && !read && !request.csrfOk ? { _tag: "CsrfRequired" } : { _tag: "Pass" }

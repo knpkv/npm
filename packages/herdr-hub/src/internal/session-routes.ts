@@ -47,8 +47,11 @@ export const readCookie = (cookieHeader: string | undefined, name: string): stri
   return values.length === 1 ? values[0] : undefined
 }
 
-const fixedCookieSeconds = 8 * 60 * 60
-const slidingCookieSeconds = 7 * 24 * 60 * 60
+/**
+ * Every session cookie outlives its session: a day past the 7-day cap no session reaches. The browser still
+ * sends it once the session ended, so `GET /v1/session` can say so and the page shows "Your session ended."
+ */
+const cookieSeconds = 8 * 24 * 60 * 60
 
 /** The WhoIs facts a tailnet listener established; `device` is display only. */
 export interface TailnetIdentity {
@@ -174,7 +177,7 @@ export const sessionRoute = Effect.fn("SessionRoutes.route")(function*<R>(
       return answer(
         200,
         { signedIn: true, kind: "tailscale", expiresAt: minted.expiresAt, csrf: Redacted.value(minted.csrf) },
-        sessionCookie(Redacted.value(minted.token), onMachine ? fixedCookieSeconds : slidingCookieSeconds)
+        sessionCookie(Redacted.value(minted.token), cookieSeconds)
       )
     }
     case "POST /v1/session/local-code": {
@@ -194,7 +197,7 @@ export const sessionRoute = Effect.fn("SessionRoutes.route")(function*<R>(
       return answer(
         200,
         { signedIn: true, kind: "local", expiresAt: minted.expiresAt, csrf: Redacted.value(minted.csrf) },
-        localCookie(Redacted.value(minted.token), fixedCookieSeconds)
+        localCookie(Redacted.value(minted.token), cookieSeconds)
       )
     }
     case "POST /v1/session/logout": {

@@ -6614,7 +6614,7 @@ esac
     }).pipe(Effect.scoped, provideNodeServices))
 
   // A terminal session is a WebSocket upgrade, outside the request handler, yet behind the same gate: the
-  // hub's own node without a session is a fleet host, which never opens a person's terminal.
+  // hub's own node without a session is a fleet host, which never opens a person's terminal: it must log in.
   it.effect("refuses a terminal session from a fleet-host node without a session", () =>
     Effect.gen(function*() {
       const peer = yield* terminalRelayFixture("supported")
@@ -6629,7 +6629,7 @@ esac
           socket.once("error", () => resolve(-1))
         })
       )
-      expect(refused).toBe(403)
+      expect(refused).toBe(401)
       expect(peer.upgrades).toEqual([])
     }).pipe(Effect.scoped, provideNodeServices))
 
@@ -7409,7 +7409,9 @@ describe("Relay in the hub", () => {
 case "$1" in
   ip) printf '%s\\n' '127.0.0.1' ;;
   whois)
-    if [ "$(cat '${identityMode}')" = allowed ]; then
+    if [ "$(cat '${identityMode}')" = unavailable ]; then
+      exit 1
+    elif [ "$(cat '${identityMode}')" = allowed ]; then
       printf '{"Node":{"StableID":"%s"},"UserProfile":{"LoginName":"owner@example.com"}}\\n' "$(cat '${whoisNodeFile}')"
     else
       printf '{"Node":{"StableID":"%s"},"UserProfile":{"LoginName":"mallory@example.com"}}\\n' "$(cat '${whoisNodeFile}')"
@@ -7466,6 +7468,8 @@ esac
         statusFile,
         deny: () => writeFileSync(identityMode, "denied"),
         allow: () => writeFileSync(identityMode, "allowed"),
+        /** WhoIs fails for every caller, as when tailscaled is down. */
+        whoisUnavailable: () => writeFileSync(identityMode, "unavailable"),
         /** The tailnet node WhoIs reports for every caller; the hub itself is `node-ser8`. */
         whoisNode: (stableId: string) => writeFileSync(whoisNodeFile, stableId)
       }
@@ -7799,6 +7803,126 @@ esac
       expect(failures.map(({ jobId }) => jobId)).not.toContain("ser8-job-01")
       expect(failures.map(({ jobId }) => jobId)).not.toContain("ser8-job-02")
       expect(failures.map(({ jobId }) => jobId)).not.toContain("ser8-job-03")
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
+  // The front door on the real listeners: what a browser without a session, a session's write without its
+  // CSRF token, a route no family names and an unreadable caller each get, over Tailscale and on loopback.
+  it.effect("refuses at the front door on both listeners", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-front-door-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const hub = yield* startHub(root, join(root, "relay"), scriptedBackends("Nothing waits."))
+      const local = new URL(hub.server.url).origin
+      const host = hub.headers.host
+      const serve = (path: string, headers: Record<string, string>, method = "GET") =>
+        Effect.promise(() => hubRequest(`${hub.serveUrl}${path}`, { method, headers: { host, ...headers } }))
+      const loopback = (path: string, headers: Record<string, string>, method = "GET") =>
+        Effect.promise(() =>
+          fetch(`${local}${path}`, { method, headers }).then(async (response) => ({
+            status: response.status,
+            body: await response.text()
+          }))
+        )
+      const loginRequired = { error: "login_required" }
+
+      // No session: the API says log in, a page is the login gate with no dashboard data in it.
+      for (const answer of [yield* serve("/v1/dashboard", {}), yield* loopback("/v1/dashboard", {})]) {
+        expect(answer.status, answer.body).toBe(401)
+        expect(JSON.parse(answer.body)).toEqual(loginRequired)
+      }
+      for (const page of [yield* serve("/", {}), yield* loopback("/", {})]) {
+        expect(page.status).toBe(200)
+        expect(page.body).toContain("data-login-gate")
+        expect(page.body).not.toContain("fleet-dashboard-data")
+      }
+      // An app's page a browser navigates to is the login gate too; its scripts' fetches get the JSON.
+      const navigated = yield* loopback("/apps/notes/", { "sec-fetch-dest": "document", accept: "text/html" })
+      expect(navigated.status).toBe(200)
+      expect(navigated.body).toContain("data-login-gate")
+      const fetched = yield* loopback("/apps/notes/", { "sec-fetch-dest": "empty", accept: "application/json" })
+      expect(fetched.status).toBe(401)
+      expect(JSON.parse(fetched.body)).toEqual(loginRequired)
+
+      // A session's write without its CSRF token is refused, over Tailscale and with the loopback cookie.
+      const tailnetWrite = yield* serve(
+        "/v1/push/subscriptions",
+        { cookie: hub.headers.cookie, origin: hub.origin, "content-type": "application/json" },
+        "POST"
+      )
+      expect(tailnetWrite.status, tailnetWrite.body).toBe(403)
+      expect(JSON.parse(tailnetWrite.body)).toEqual({ error: "csrf_required" })
+      const localCookie = (yield* Effect.promise(() => localSession(local, join(root, "hub-apps")))).cookie ?? ""
+      const loopbackWrite = yield* loopback(
+        "/v1/push/subscriptions",
+        { cookie: localCookie, origin: local, "content-type": "application/json" },
+        "POST"
+      )
+      expect(loopbackWrite.status, loopbackWrite.body).toBe(403)
+      expect(JSON.parse(loopbackWrite.body)).toEqual({ error: "csrf_required" })
+
+      // A route no family names is not found, even logged in: an unknown path, a method, a trailing slash.
+      const unknownRoutes: ReadonlyArray<readonly [string, string]> = [
+        ["GET", "/v2/anything"],
+        ["OPTIONS", "/v1/dashboard"],
+        ["GET", "/v1/dashboard/"]
+      ]
+      for (const [method, path] of unknownRoutes) {
+        expect((yield* serve(path, hub.headers, method)).status, `${method} ${path}`).toBe(404)
+        expect((yield* loopback(path, { cookie: localCookie }, method)).status, `${method} ${path}`).toBe(404)
+      }
+
+      // A browser on a fleet host (the hub's own node) without a session sees the login gate, never the
+      // dashboard, and a person's write asks for the login; its agents still read the hub's JSON as the host.
+      hub.whoisNode("node-ser8")
+      const fleetHostPage = yield* serve("/", {})
+      expect(fleetHostPage.body).toContain("data-login-gate")
+      expect(fleetHostPage.body).not.toContain("fleet-dashboard-data")
+      const fleetHostPush = yield* serve(
+        "/v1/push/subscriptions",
+        { origin: hub.origin, "content-type": "application/json" },
+        "POST"
+      )
+      expect(fleetHostPush.status, fleetHostPush.body).toBe(401)
+      expect(JSON.parse(fleetHostPush.body)).toEqual(loginRequired)
+      expect((yield* serve("/v1/dashboard", {})).status).toBe(200)
+      hub.whoisNode("node-phone")
+
+      // WhoIs down: the caller can't be read, so the request is refused, and the log says why.
+      const warnings = vi.spyOn(Logger.defaultLogger, "log")
+      yield* Effect.addFinalizer(() => Effect.sync(() => warnings.mockRestore()))
+      hub.whoisUnavailable()
+      const unreadable = yield* serve("/v1/dashboard", hub.headers)
+      hub.allow()
+      expect(unreadable.status).toBe(503)
+      expect(JSON.parse(unreadable.body)).toEqual({ error: "identity_unavailable" })
+      const gateWarnings = warnings.mock.calls.map(([entry]) => entry).filter((entry) =>
+        entry.logLevel === "Warn" && JSON.stringify(entry.message).includes("access gate")
+      )
+      expect(gateWarnings).toHaveLength(1)
+
+      // The terminal WebSocket on loopback needs the local session's cookie like any page.
+      const terminal = new URL("/v1/connect/session", local)
+      terminal.protocol = "ws:"
+      for (const [key, value] of Object.entries({ agent: "agent-1", cols: "100", host: "SER8", rows: "30" })) {
+        terminal.searchParams.set(key, value)
+      }
+      const upgrade = yield* Effect.promise(() =>
+        new Promise<string>((resolve) => {
+          const socket = new WebSocketClient(terminal, { headers: { origin: local } })
+          socket.once("open", () => {
+            socket.terminate()
+            resolve("open")
+          })
+          socket.once("unexpected-response", (_request, response) => {
+            response.resume()
+            socket.terminate()
+            resolve(`status:${response.statusCode}`)
+          })
+          socket.once("error", (error) => resolve(`error:${String(error)}`))
+        })
+      )
+      expect(upgrade).toBe("status:401")
     }).pipe(Effect.scoped, provideNodeServices)
   })
 

@@ -166,7 +166,7 @@ import { fleetFailureRoutes, type FleetJobReadFailure } from "./fleet-failure-ro
 import { failedJobKeys, fleetFailures, fleetFailuresWindowMillis, type HostHistory } from "./fleet-failures.js"
 import { fontPreloadLink } from "./font-preload.js"
 import { makeHostResources } from "./host-resources.js"
-import { callerNeeded, GateCallerUnknown, type GateVerdict, gateVerdict } from "./internal/access-gate.js"
+import { callerNeeded, GateCallerUnknown, type GateVerdict, gateVerdict, isDocument } from "./internal/access-gate.js"
 import { attachTaskWorkReader } from "./internal/agent-task-work-source.js"
 import { dashboardPage, loginGatePage } from "./internal/dashboard-page.js"
 import { moduleCallerFor } from "./internal/hub-node.js"
@@ -178,7 +178,7 @@ import {
 } from "./internal/listener.js"
 import { makeLocalLogin } from "./internal/local-login.js"
 import { csrfMatches, makePersonSessions } from "./internal/person-sessions.js"
-import { principalFor } from "./internal/principal.js"
+import { principalAfterLogin, principalFor, type PrincipalInput } from "./internal/principal.js"
 import { decodeRelayPostRequest } from "./internal/relay-post-validation.js"
 import { decodeRelaySelfBody } from "./internal/relay-self-validation.js"
 import { routeFamily } from "./internal/route-families.js"
@@ -2297,35 +2297,39 @@ export const startHttpServer = async (
       headerLogin: header(request, "tailscale-user-login"),
       sessionToken: readCookie(header(request, "cookie"), sessionCookieOn(mode)),
       csrf: header(request, csrfHeader),
-      cli: cliToken !== null && presentsCliToken(header(request, cliTokenHeader), cliToken)
+      cli: cliToken !== null && presentsCliToken(header(request, cliTokenHeader), cliToken),
+      fetchDest: header(request, "sec-fetch-dest"),
+      accept: header(request, "accept")
     })
     type GateFacts = ReturnType<typeof gateFacts>
     const gateSession = (facts: GateFacts) =>
       facts.sessionToken === undefined ? Effect.succeed(null) : personSessions.read(facts.sessionToken)
-    // Who the caller is, from the listener's own facts and the session the hub verified.
-    const gatePrincipal = Effect.fn("HostHttp.gatePrincipal")(
+    // What the listener's own facts and the session the hub verified say about the caller.
+    const gateInput = Effect.fn("HostHttp.gateInput")(
       function*(mode: ListenerMode, facts: GateFacts, serviceRoute: boolean) {
         const session = yield* gateSession(facts)
         if (mode === "local") {
-          return principalFor(config, {
+          const input: PrincipalInput = {
             _tag: "Loopback",
             remoteAddress: facts.remoteAddress ?? "",
             headerLogin: facts.headerLogin,
             cli: facts.cli,
             session
-          })
+          }
+          return input
         }
         if (facts.remoteAddress === undefined) return yield* new GateCallerUnknown()
         // Asked per request: an address can change nodes, and an answer reused for another node would be wrong.
         const tailscale = yield* Tailscale
         const identity = yield* tailscale.whois(facts.remoteAddress)
-        return principalFor(config, {
+        const input: PrincipalInput = {
           _tag: "Tailnet",
           login: identity.UserProfile.LoginName,
           nodeId: identity.Node.StableID,
           serviceRoute,
           session
-        })
+        }
+        return input
       }
     )
     /**
@@ -2335,13 +2339,36 @@ export const startHttpServer = async (
      */
     const gate = Effect.fn("HostHttp.gate")(function*(facts: GateFacts, mode: ListenerMode, pathname: string) {
       const family = routeFamily(facts.method, pathname)
+      const document = isDocument(family, facts.method, facts)
       if (!callerNeeded(family)) {
-        return gateVerdict(config, { method: facts.method, family, principal: { _tag: "Anonymous" }, csrfOk: false })
+        return gateVerdict(config, {
+          method: facts.method,
+          family,
+          principal: { _tag: "Anonymous" },
+          afterLogin: null,
+          document,
+          csrfOk: false
+        })
       }
-      const principal = yield* gatePrincipal(mode, facts, family.id === "connect.service")
+      const input = yield* gateInput(mode, facts, family.id === "connect.service").pipe(
+        // The request is refused as identity_unavailable; the cause is only in the log.
+        Effect.tapError((error) =>
+          Effect.logWarning("access gate: couldn't read the caller", error).pipe(
+            Effect.annotateLogs({ listener: mode, family: family.id, reason: error._tag })
+          )
+        )
+      )
+      const principal = principalFor(config, input)
       const token = facts.sessionToken
       const csrfOk = token === undefined ? false : yield* csrfMatches(token, facts.csrf)
-      const verdict = gateVerdict(config, { method: facts.method, family, principal, csrfOk })
+      const verdict = gateVerdict(config, {
+        method: facts.method,
+        family,
+        principal,
+        afterLogin: principalAfterLogin(config, input),
+        document,
+        csrfOk
+      })
       const sessioned = (principal._tag === "Person" || principal._tag === "Local") && principal.session
       if (verdict._tag === "Pass" && sessioned && token !== undefined) {
         yield* personSessions.touch(token).pipe(Effect.ignore({ log: true }))
@@ -2369,8 +2396,8 @@ export const startHttpServer = async (
         case "Pass":
           return true
         case "LoginRequired":
-          // A page shows the login gate; anything else tells the page to.
-          if (routeFamily(request.method ?? "GET", pathname)?.id === "page") {
+          // A browser document shows the login gate; anything else tells the page to.
+          if (result.success.document) {
             response.writeHead(200, {
               "cache-control": "no-store",
               "content-security-policy": "frame-ancestors 'none'",
@@ -4800,8 +4827,13 @@ export const startHttpServer = async (
         // A browser's terminal is behind the same front door as the hub's pages; a peer's terminal route
         // admits the hub's own node, as below.
         const admitted = isServeTerminal
-          ? await runRequest(Effect.result(gate(gateFacts(request, mode), mode, url.pathname)))
+          ? await runRequest(Effect.result(gate(gateFacts(request, mode), mode, url.pathname))).catch(() => null)
           : Result.succeed<GateVerdict>({ _tag: "Pass" })
+        // Shutdown aborted the gate, or it died: nothing can answer this socket any more.
+        if (admitted === null) {
+          socket.destroy()
+          return
+        }
         if (Result.isFailure(admitted) || admitted.success._tag !== "Pass") {
           rejectUpgrade(
             socket,

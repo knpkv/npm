@@ -67,12 +67,12 @@ Who a request is:
 
 What the gate answers:
 
-- **A person or the local user without a session** gets the login gate on a page (design page 22) and `401 {"error":"login_required"}` from the API, wherever logging in would let them through. The session routes and static files stay open.
-- **Agents and hosts keep their own credentials.** On loopback agents, `fleetctl` and `herdr-hub apps` present the CLI token (`x-hub-cli-token`, read from `<hubState>/cli/token`): it views, submits jobs and restarts apps. A fleet host's node views, submits jobs and reports as itself.
+- **A caller without a session** gets the login gate on a page (design page 22) and `401 {"error":"login_required"}` from the API, wherever logging in would let them through. A page is a hub page, or an app's page a browser navigates to (`Sec-Fetch-Dest: document`, or an `Accept` asking for HTML); an app's other requests get the JSON. The session routes and static files stay open.
+- **Agents and hosts keep their own credentials.** On loopback agents, `fleetctl` and `herdr-hub apps` present the CLI token (`x-hub-cli-token`, read from `<hubState>/cli/token`): it views, submits jobs and restarts apps. Since it submits jobs, it may also try again any failed job from Needs you (`POST /v1/modules/fleet/failures/retry`), a `nix.apply` included; dismissing one is a person's call. A fleet host's node views, submits jobs and reports as itself, but a browser there is a person's: it sees a page, and makes a person's writes, only after logging in there.
 - **Anyone a login wouldn't help** gets `403 {"error":"forbidden"}`: no one, a credential that can't hold the permission, or a person approving from a node that can't approve.
 - **A session's write without its CSRF token** (`x-herdr-csrf`) gets `403 {"error":"csrf_required"}`.
 - **A route no family names** gets `404`, so a new route can't slip past the gate.
-- **A caller the hub can't read** (WhoIs unavailable) gets `503 {"error":"identity_unavailable"}`.
+- **A caller the hub can't read** (WhoIs or the session store unavailable) gets `503 {"error":"identity_unavailable"}`; the hub logs the cause as a warning.
 - The browser terminal's WebSocket upgrade passes the same gate.
 
 An admitted session request renews a sliding session, at most once a minute.
@@ -83,9 +83,10 @@ People log in at `/v1/session`. The hub stores only each session token's SHA-256
   - The token goes in a `__Host-herdr_session` cookie (Secure, HttpOnly, SameSite=Strict, `Path=/`).
   - A session counts only on the node and login it was opened for.
   - On a person's own device it renews on use: it ends after 8 idle hours, or 7 days after logging in. On a fleet machine it ends 8 hours after logging in.
+  - The cookie lasts 8 days, past any session's end, so the browser still sends it once the session ended and the page says so.
 - **Local user (loopback).** `herdr-hub login` trades the CLI token for a one-time code (60 seconds, single use, dropped after 5 wrong guesses) at `POST /v1/session/local-code`. It then prints and opens `http://127.0.0.1:<port>/#login=<code>`.
   - The page takes the code out of the address, then spends it at `POST /v1/session/local`.
-  - The hub sets a `herdr_local_session` cookie (HttpOnly, SameSite=Strict, `Path=/`, 8 hours). Plain http can't set a `__Host-` cookie. Cookies don't separate ports, so every local server sees it, but each of those is the user's own process, which could run `herdr-hub login` itself.
+  - The hub sets a `herdr_local_session` cookie (HttpOnly, SameSite=Strict, `Path=/`, 8 days, past the 8-hour session). Plain http can't set a `__Host-` cookie. Cookies don't separate ports, so every local server sees it, but each of those is the user's own process, which could run `herdr-hub login` itself.
 - **Session reads and logout.** `GET /v1/session` says who the caller is, and gives the session's CSRF token when they are logged in. Logged out, it says whether the request carried a session that has ended (`ended`), and over Tailscale whether the caller is on a fleet machine (`fleetHost`). `POST /v1/session/logout` needs the CSRF token in `x-herdr-csrf` and clears the cookie.
 - **What a session proves.** Before passkeys a session shows intent, not presence: anything on the same node can press the same button. Every process of the user can read the CLI token, so the `Cli` adds intent, not isolation. A person logged in on a fleet machine never owns Sandboxes.
 
