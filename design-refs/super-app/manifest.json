@@ -14,7 +14,7 @@
     }
   },
   "files": {
-    "fixture.json": "a619ade14f620c536cbd1e13fd24e7c79fdc1c68ac146d0dfea4853bdf6f5771",
+    "fixture.json": "2ba0c4ca949fd79168bb0e1839da2db29ae84c58073c1e0ba647668936da8e8a",
     "screens/usage-limits.html": "4a27c45b504692104b955120335bfb34faa0151ac133b018f4be301f749839f9",
     "screens/rly.css": "35e7a411e4fb4a422ebdaa33ef63e6d3a1480a5e8d30389d2b035025e636b1c6",
     "screens/chrome.css": "eb7b1c209644c22cc21536d063d54e747aa8a3cd19dc6e245df0811ca8b6febc",
@@ -22,7 +22,9 @@
     "screens/relay-creature-states.js": "808e8412c89fbe773d45e6fb544608932d69431b6cffdedc14cc253405cb5ac6",
     "screens/relay-screen-art.js": "c960ceaeda73bbc64e5fa429a38cbfa34f0cfb0010cb236f5a827b3fd9c518ac",
     "screens/fonts/geist-variable.woff2": "19f9c92546aa300c312235e3125af1b81394d8db9a4bc4a425cd5b641d2d54e1",
-    "screens/fonts/geist-mono-variable.woff2": "684ad5b531f81d43c1e8c7038262d5db7cdc1f68006e04d6c7769efa8d33c8cc"
+    "screens/fonts/geist-mono-variable.woff2": "684ad5b531f81d43c1e8c7038262d5db7cdc1f68006e04d6c7769efa8d33c8cc",
+    "screens/identity.html": "bd5057c5873b4266b6e0e4106058e7f7f293c46400c4b175c7cb58f8a471c44b",
+    "screens/relay-screen-art-identity.js": "1cf249020877889dd660402646e615a18531373ad70cd91affe5a436c0e8b65b"
   },
   "states": [
     {
@@ -123,6 +125,105 @@
       "regions": ["notice"],
       "source": "html",
       "ref": "screens/usage-limits.html"
+    },
+    {
+      "screen": "identity",
+      "state": "tailscale-continue",
+      "route": "/#fleet/approvals",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["nav", "session", "header", "notice", "card", "list", "detail", "action"],
+      "source": "html",
+      "ref": "screens/identity.html"
+    },
+    {
+      "screen": "identity",
+      "state": "signed-in-person",
+      "route": "/#fleet/approvals",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["nav", "session", "header", "popover", "list", "detail", "action"],
+      "source": "html",
+      "ref": "screens/identity.html"
+    },
+    {
+      "screen": "identity",
+      "state": "fleet-host-before-login",
+      "route": "/#fleet/approvals",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["nav", "session", "header", "notice", "card", "list", "detail", "action"],
+      "source": "html",
+      "ref": "screens/identity.html"
+    },
+    {
+      "screen": "identity",
+      "state": "this-computer-view-only",
+      "route": "/#fleet/approvals",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["nav", "session", "header", "card", "list", "detail", "action"],
+      "source": "html",
+      "ref": "screens/identity.html"
+    },
+    {
+      "screen": "identity",
+      "state": "passkey-register",
+      "route": "/#fleet/approvals",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["nav", "session", "header", "popover", "list", "detail", "action"],
+      "source": "html",
+      "ref": "screens/identity.html"
+    },
+    {
+      "screen": "identity",
+      "state": "approve-passkey",
+      "route": "/#fleet/approvals",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["nav", "session", "header", "list", "detail", "action", "sheet"],
+      "source": "html",
+      "ref": "screens/identity.html"
+    },
+    {
+      "screen": "identity",
+      "state": "passkey-failed",
+      "route": "/#fleet/approvals",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["nav", "session", "header", "list", "detail", "action", "sheet", "notice"],
+      "source": "html",
+      "ref": "screens/identity.html"
+    },
+    {
+      "screen": "identity",
+      "state": "session-expired",
+      "route": "/#fleet/approvals",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["nav", "session", "header", "notice", "action", "list", "detail"],
+      "source": "html",
+      "ref": "screens/identity.html"
+    },
+    {
+      "screen": "identity",
+      "state": "peer-waiting-hub-down",
+      "route": "/#fleet/approvals",
+      "viewports": [390, 1280],
+      "themes": ["light", "dark"],
+      "status": "designed",
+      "regions": ["nav", "session", "header", "list", "detail", "notice", "action"],
+      "source": "html",
+      "ref": "screens/identity.html"
     }
   ]
 }
