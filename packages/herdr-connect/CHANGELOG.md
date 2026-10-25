@@ -1,5 +1,14 @@
 # @knpkv/herdr-connect
 
+## 0.31.5
+
+### Patch Changes
+
+- [#1138](https://github.com/knpkv/npm/pull/1138) [`5018c55`](https://github.com/knpkv/npm/commit/5018c55e103f52e2fab1343a6a0ace7dcec27324) Thanks [@konopkov](https://github.com/konopkov)! - Two Connect clients reading the agent directory at the same moment no longer delay the archive. The read that finds the other one writing the same host's observation now skips that host quietly. It used to log "Connect archive observation failed" and reset the host's absence count, so with several clients open, closed agents reached Archived late. A read blocked by anything else still fails and resets as before.
+- Updated dependencies [[`8553d5a`](https://github.com/knpkv/npm/commit/8553d5a55e06eb733135f5347b4535036a9f7653), [`38c3bc2`](https://github.com/knpkv/npm/commit/38c3bc2e4c91bc411bab592f73066ddf142b9e86)]:
+  - @knpkv/herdr-work@0.13.0
+  - @knpkv/herdr-fleet@0.23.0
+
 ## 0.31.4
 
 ### Patch Changes

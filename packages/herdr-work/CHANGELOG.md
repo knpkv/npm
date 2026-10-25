@@ -1,5 +1,16 @@
 # @knpkv/herdr-work
 
+## 0.13.0
+
+### Minor Changes
+
+- [#1140](https://github.com/knpkv/npm/pull/1140) [`8553d5a`](https://github.com/knpkv/npm/commit/8553d5a55e06eb733135f5347b4535036a9f7653) Thanks [@konopkov](https://github.com/konopkov)! - Work's triage gains a Stuck group: a goal in review or blocked with no update for three days (`workTriageStuckAfterMs`) is listed right after the goals that need you, oldest first, and the summary sentence names the count ("Nothing needs you, 2 stuck").
+
+### Patch Changes
+
+- Updated dependencies [[`38c3bc2`](https://github.com/knpkv/npm/commit/38c3bc2e4c91bc411bab592f73066ddf142b9e86)]:
+  - @knpkv/herdr-fleet@0.23.0
+
 ## 0.12.16
 
 ### Patch Changes
