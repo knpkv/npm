@@ -74,7 +74,7 @@ import {
   PeerPendingUnavailableError,
   PendingApprovalCursor
 } from "@knpkv/herdr-fleet"
-import { type FleetHostName, JobPayload } from "@knpkv/herdr-fleet/model"
+import { type FleetHostName, JobHistoryPage, JobPayload } from "@knpkv/herdr-fleet/model"
 import type { TailscaleAuthorizationError } from "@knpkv/herdr-tailscale"
 import { authorizeWhois, discoverFleetPeers, layer as tailscaleLayer, Tailscale } from "@knpkv/herdr-tailscale"
 import { readHostLimits, readHostUsage, staleWhileRevalidate, usageCache } from "@knpkv/herdr-usage/host"
@@ -113,6 +113,7 @@ import {
   Layer,
   ManagedRuntime,
   Queue,
+  Ref,
   Result,
   Schema,
   Scope,
@@ -160,6 +161,7 @@ import {
 } from "./dashboard-model.js"
 import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
+import { fleetFailures, fleetFailuresWindowMillis, type HostHistory } from "./fleet-failures.js"
 import { fontPreloadLink } from "./font-preload.js"
 import { makeHostResources } from "./host-resources.js"
 import { attachTaskWorkReader } from "./internal/agent-task-work-source.js"
@@ -449,6 +451,7 @@ type PeerTarget = {
   readonly online: boolean
   readonly approvalUrl: string | null
   readonly pendingUrl: string | null
+  readonly historyUrl: string | null
   readonly connectAgentsUrl: string | null
   readonly limitsUrl: string | null
   readonly usageUrl: string | null
@@ -873,6 +876,9 @@ const fleetPeers = Effect.fn("HostHttp.fleetPeers")(function*(
       pendingUrl: address === undefined
         ? null
         : `http://${address}:${config.port}/v1/pending-approvals`,
+      historyUrl: address === undefined
+        ? null
+        : `http://${address}:${config.port}/v1/history`,
       connectAgentsUrl: address === undefined
         ? null
         : `http://${address}:${config.port}/v1/connect/agents/local`,
@@ -1151,6 +1157,81 @@ const fetchPeerPending = Effect.fn("HostHttp.fetchPeerPending")(
     )
 )
 
+/** One page of a peer's job history over its tailnet listener, newest first; the same auth as its pending read. */
+const fetchPeerHistory = Effect.fn("HostHttp.fetchPeerHistory")(
+  function*(peer: PeerTarget, cursor: typeof PendingApprovalCursor.Type | null) {
+    if (peer.historyUrl === null) {
+      return yield* new PeerPendingUnavailableError({ host: peer.host, reason: "unavailable" })
+    }
+    if (!peer.online) return yield* new PeerPendingUnavailableError({ host: peer.host, reason: "offline" })
+    const client = yield* HttpClient.HttpClient
+    const pageUrl = new URL(peer.historyUrl)
+    pageUrl.searchParams.set("limit", String(fleetHistoryPageRecords))
+    if (cursor !== null) {
+      pageUrl.searchParams.set("cursorCreatedAt", String(cursor.createdAt))
+      pageUrl.searchParams.set("cursorId", cursor.id)
+    }
+    const response = yield* client.get(pageUrl.toString()).pipe(
+      Effect.mapError((cause) => new PeerPendingTransportError({ host: peer.host, detail: String(cause), cause }))
+    )
+    if (response.status < 200 || response.status >= 300) {
+      return yield* new PeerPendingStatusError({ host: peer.host, status: response.status })
+    }
+    return yield* decodeBoundedResponseJson(response, JobHistoryPage).pipe(
+      Effect.mapError((cause) => new PeerPendingDecodeError({ host: peer.host, detail: String(cause), cause }))
+    )
+  },
+  (effect, peer) =>
+    effect.pipe(
+      Effect.timeoutOrElse({
+        duration: peerPendingTimeoutMs,
+        orElse: () => Effect.fail(new PeerPendingTimeoutError({ host: peer.host, timeoutMs: peerPendingTimeoutMs }))
+      })
+    )
+)
+
+const fleetHistoryPageRecords = 50
+const fleetHistoryPagesPerHost = 3
+
+/** Pages newest first until a page reaches past `since`, at most {@link fleetHistoryPagesPerHost} pages. */
+const readHistoryWindow = Effect.fn("HostHttp.readHistoryWindow")(function*<E, R>(
+  page: (cursor: typeof PendingApprovalCursor.Type | null) => Effect.Effect<JobHistoryPage, E, R>,
+  since: number
+) {
+  const records: Array<JobRecord> = []
+  let cursor: typeof PendingApprovalCursor.Type | null = null
+  for (let read = 0; read < fleetHistoryPagesPerHost; read++) {
+    const next: JobHistoryPage = yield* page(cursor)
+    for (const record of next.records) records.push(record)
+    const oldest = next.records.at(-1)
+    if (next.nextCursor === null || oldest === undefined || oldest.createdAt < since) break
+    cursor = next.nextCursor
+  }
+  return records
+})
+
+/**
+ * Each peer's history window, re-read at most every 30 seconds: Needs-you is polled by every open page, and history is
+ * pages of whole job records over the tailnet. A failed read is remembered for the same 30 seconds.
+ */
+const makePeerHistoryMemo = Effect.fn("HostHttp.makePeerHistoryMemo")(function*() {
+  const readings = yield* Ref.make<ReadonlyMap<string, { readonly readAt: number; readonly history: HostHistory }>>(
+    new Map()
+  )
+  return Effect.fn("HostHttp.peerHistory")(function*(peer: PeerTarget, since: number) {
+    const now = yield* Clock.currentTimeMillis
+    const key = peer.host.toLowerCase()
+    const memo = (yield* Ref.get(readings)).get(key)
+    if (memo !== undefined && now - memo.readAt < 30_000) return memo.history
+    const read = yield* Effect.result(readHistoryWindow((cursor) => fetchPeerHistory(peer, cursor), since))
+    const history: HostHistory = Result.isSuccess(read)
+      ? { _tag: "Read", host: peer.host, records: read.success }
+      : { _tag: "Unreadable", host: peer.host, reason: pendingFailureReason(read.failure) }
+    yield* Ref.update(readings, (current) => new Map(current).set(key, { readAt: now, history }))
+    return history
+  })
+})
+
 const fetchAllPeerPending = Effect.fn("HostHttp.fetchAllPeerPending")(
   function*(peer: PeerTarget) {
     const approvals: Array<PendingApproval> = []
@@ -1268,15 +1349,33 @@ const readFleetPendingJobs = Effect.fn("HostHttp.readFleetPendingJobs")(function
   return { local, peers, remote }
 })
 
-/** Read current peer availability on every poll; this path issues no approval proofs. */
+/**
+ * Read current peer availability on every poll; this path issues no approval proofs. Failed jobs come from each
+ * host's last week of history (peers through `peerHistory`, memoized) and travel in `failures`, beside `items`.
+ */
 const readFleetNeedsYou = Effect.fn("HostHttp.readFleetNeedsYou")(function*(
   config: HostConfiguration,
-  service: FleetService
+  service: FleetService,
+  peerHistory: (peer: PeerTarget, since: number) => Effect.Effect<HostHistory, never, HttpClient.HttpClient>
 ): Effect.fn.Return<NeedsYouProviderResult, never, HttpClient.HttpClient | Tailscale> {
   const pending = yield* readFleetPendingJobs(config, service, relayPendingPagesPerHost)
+  const since = (yield* Clock.currentTimeMillis) - fleetFailuresWindowMillis
+  const local = yield* Effect.result(
+    readHistoryWindow((cursor) => service.historyPage(cursor, fleetHistoryPageRecords), since)
+  )
+  if (Result.isFailure(local)) yield* Effect.logWarning("Needs-you local history failed", local.failure)
+  const histories: ReadonlyArray<HostHistory> = [
+    Result.isSuccess(local)
+      ? { _tag: "Read", host: config.host, records: local.success }
+      : { _tag: "Unreadable", host: config.host, reason: "request_failed" },
+    ...(Result.isSuccess(pending.peers)
+      ? yield* Effect.forEach(pending.peers.success, (peer) => peerHistory(peer, since), { concurrency: 4 })
+      : [])
+  ]
+  const failed = fleetFailures(histories, since)
   const jobs: Array<FleetPendingJob> = []
   const issues: Array<NeedsYouIssue> = []
-  const hosts: Array<{ readonly host: string; readonly reason: PendingApprovalFailure["reason"] }> = []
+  const hosts: Array<Extract<NeedsYouIssue, { readonly state: "hosts" }>["hosts"][number]> = []
   if (Result.isSuccess(pending.local)) {
     for (const job of pending.local.success.items) jobs.push(job)
     if (pending.local.success.more) issues.push({ state: "truncated" })
@@ -1298,8 +1397,14 @@ const readFleetNeedsYou = Effect.fn("HostHttp.readFleetNeedsYou")(function*(
       hosts.push({ host: remote.peer.host, reason: pendingFailureReason(remote.result.failure) })
     }
   }
+  for (const unreadable of failed.hosts) {
+    if (!hosts.some(({ host }) => host.toLowerCase() === unreadable.host.toLowerCase())) hosts.push(unreadable)
+  }
+  if (failed.truncated && !issues.some((issue) => issue.state === "truncated")) issues.push({ state: "truncated" })
   if (hosts.length > 0) issues.push({ state: "hosts", hosts })
   return {
+    failures: failed.failures,
+    lastDecisionAt: failed.lastDecisionAt,
     items: jobs.map((job): NeedsYouCandidate => ({
       sourceKey: `${job.host.toLowerCase()}:${job.jobId}`,
       destination: { _tag: "FleetApproval", module: "fleet", host: job.host, jobId: job.jobId },
@@ -1963,7 +2068,11 @@ export const startHttpServer = async (
           ModuleServer.ModuleHandlers,
           Effect.gen(function*() {
             const context = yield* Effect.context<HttpClient.HttpClient | Tailscale>()
-            return { routes: [], needsYou: readFleetNeedsYou(config, service).pipe(Effect.provideContext(context)) }
+            const peerHistory = yield* makePeerHistoryMemo()
+            return {
+              routes: [],
+              needsYou: readFleetNeedsYou(config, service, peerHistory).pipe(Effect.provideContext(context))
+            }
           })
         )
       },

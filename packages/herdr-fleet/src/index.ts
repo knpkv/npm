@@ -1,6 +1,7 @@
 export * from "./config.js"
 export * from "./errors.js"
 export * from "./hash.js"
+export * from "./job-outcome.js"
 export * from "./model.js"
 export * from "./paths.js"
 export * from "./permissions.js"

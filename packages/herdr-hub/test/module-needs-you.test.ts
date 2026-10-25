@@ -266,3 +266,71 @@ it.effect("refuses unknown operation kinds before rendering a provider reading",
       })
     }
   }))
+
+const failingFleet = {
+  descriptor: fleetModule,
+  handlers: Layer.succeed(ModuleHandlers, {
+    routes: [],
+    needsYou: Effect.succeed(NeedsYouProviderResult.make({
+      items: reading.items,
+      issues: [],
+      asOf: null,
+      failures: [{
+        sourceKey: "failed:cedar:job-2",
+        host: "cedar",
+        jobId: "job-2",
+        kind: "nix.apply",
+        actor: "local",
+        createdAt: 20,
+        failedAt: 30,
+        reason: "not_on_main",
+        approved: false
+      }],
+      lastDecisionAt: 25
+    }))
+  })
+}
+
+it.effect("carries a provider's failures and last decision beside its items", () =>
+  Effect.gen(function*() {
+    const response = yield* readApprovals([failingFleet])
+    expect(response).toMatchObject({ status: 200 })
+    expect(response?.body).toMatchObject({
+      _tag: "Complete",
+      items: [{ key: "fleet:cedar:job-1" }],
+      contributions: [{ provider: "fleet", asOf: null, lastDecisionAt: 25 }],
+      failures: [{ key: "fleet:failed:cedar:job-2", provider: "fleet", reason: "not_on_main", approved: false }]
+    })
+  }))
+
+it.effect("an older page, which knows no failures, still decodes the response", () =>
+  Effect.gen(function*() {
+    // The result schema as pages built before failures existed have it.
+    const OlderItem = Schema.Struct({
+      key: Schema.String,
+      provider: Schema.String,
+      destination: Schema.Union([
+        Schema.TaggedStruct("FleetApproval", {
+          module: Schema.Literal("fleet"),
+          host: Schema.String,
+          jobId: Schema.String
+        }),
+        Schema.TaggedStruct("ModulePage", {
+          module: Schema.String,
+          page: Schema.String,
+          query: Schema.Record(Schema.String, Schema.String)
+        })
+      ]),
+      kind: Schema.String,
+      actor: Schema.String,
+      createdAt: Schema.Number,
+      expiresAt: Schema.NullOr(Schema.Number)
+    })
+    const OlderResult = Schema.TaggedStruct("Complete", {
+      items: Schema.Array(OlderItem),
+      contributions: Schema.Array(Schema.Struct({ provider: Schema.String, asOf: Schema.NullOr(Schema.Number) }))
+    })
+    const response = yield* readApprovals([failingFleet])
+    const decoded = Schema.decodeUnknownSync(OlderResult)(JSON.parse(JSON.stringify(response?.body)))
+    expect(decoded.items.map(({ key }) => key)).toEqual(["fleet:cedar:job-1"])
+  }))
