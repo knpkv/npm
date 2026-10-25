@@ -718,15 +718,16 @@ const DashboardApp = ({
   const hostCount = current.directory === null ? 1 : current.directory.links.length + 1
   const gesture = { onTouchStart, onTouchMove, onTouchEnd, onTouchCancel: resetPull }
   const fleet = makeFleetHubModuleViews({
-    approvals:
-      hubSession.view === null ? (
-        dashboardView
-      ) : (
-        <>
+    // One stable tree whether or not the session is known yet: switching shape would remount the dashboard and
+    // drop the focus an approval link put on its request.
+    approvals: (
+      <>
+        {hubSession.view === null ? null : (
           <TailscaleLoginCard view={hubSession.view} busy={hubSession.busy} onLogIn={hubSession.logIn} />
-          {dashboardView}
-        </>
-      ),
+        )}
+        {dashboardView}
+      </>
+    ),
     connect: null,
     hostCount,
     notice: refreshNotice,
