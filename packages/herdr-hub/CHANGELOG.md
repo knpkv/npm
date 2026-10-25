@@ -2,6 +2,23 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.64.0
+
+### Minor Changes
+
+- [#1133](https://github.com/knpkv/npm/pull/1133) [`e14854e`](https://github.com/knpkv/npm/commit/e14854ecb0e8e5555dacf9009b1b8b4ba171184c) Thanks [@konopkov](https://github.com/konopkov)! - `makeHostdProgram` now requires `node`, the Node binary installed apps run on. An embedding that left it out ran no apps, and said so only in each app's own log; it now fails to typecheck. herdr-hub's own `hostd` already passes `process.execPath`. A hub started without a Node path also logs one warning when `apps.json` lists apps it can't start, naming them and what to pass.
+
+  App services (`/v1/app-services/*`) answer `503 unavailable`, not `403 undeclared`, until the hub has read the calling app's manifest. An app calling a service while it is still starting is told the hub isn't ready, not that it never declared the service. hub-app's docs now say: call shell services from route handlers, never while building the handler layer.
+
+- [#1111](https://github.com/knpkv/npm/pull/1111) [`bde9e01`](https://github.com/knpkv/npm/commit/bde9e01719b1aae9220ac4b1b715e9a23d0124b3) Thanks [@konopkov](https://github.com/konopkov)! - An expected aws-nuke listing failure is judged only by its own top-level fields: a line that names `owner`, `resource_type` or `error` twice, or only inside unquoted brackets, still counts as an incomplete scan. hostd logs at start when it runs a sandbox pool but `RELAY_SANDBOXES_HOST` doesn't name its host, so the hub would serve no Sandboxes pages (`sandboxesHostWarning`).
+
+### Patch Changes
+
+- Updated dependencies [[`e14854e`](https://github.com/knpkv/npm/commit/e14854ecb0e8e5555dacf9009b1b8b4ba171184c), [`bde9e01`](https://github.com/knpkv/npm/commit/bde9e01719b1aae9220ac4b1b715e9a23d0124b3), [`e14854e`](https://github.com/knpkv/npm/commit/e14854ecb0e8e5555dacf9009b1b8b4ba171184c)]:
+  - @knpkv/hub-app@0.5.1
+  - @knpkv/sandbox-pool@0.11.1
+  - @knpkv/herdr-usage@0.2.1
+
 ## 0.63.0
 
 ### Minor Changes

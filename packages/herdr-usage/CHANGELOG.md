@@ -1,5 +1,13 @@
 # @knpkv/herdr-usage
 
+## 0.2.1
+
+### Patch Changes
+
+- [#1133](https://github.com/knpkv/npm/pull/1133) [`e14854e`](https://github.com/knpkv/npm/commit/e14854ecb0e8e5555dacf9009b1b8b4ba171184c) Thanks [@konopkov](https://github.com/konopkov)! - The Usage app starts when the hub runs it. It used to ask the hub for this machine's name while building its routes, before it listened. The hub answers an app only once it has read that app's manifest, so every start failed and the hub left Usage off as crashlooping. It now reads the machine's name only when a standalone run first reads this machine's usage.
+- Updated dependencies [[`e14854e`](https://github.com/knpkv/npm/commit/e14854ecb0e8e5555dacf9009b1b8b4ba171184c)]:
+  - @knpkv/hub-app@0.5.1
+
 ## 0.2.0
 
 ### Minor Changes

@@ -1,5 +1,11 @@
 # @knpkv/sandbox-pool
 
+## 0.11.1
+
+### Patch Changes
+
+- [#1111](https://github.com/knpkv/npm/pull/1111) [`bde9e01`](https://github.com/knpkv/npm/commit/bde9e01719b1aae9220ac4b1b715e9a23d0124b3) Thanks [@konopkov](https://github.com/konopkov)! - An expected aws-nuke listing failure is judged only by its own top-level fields: a line that names `owner`, `resource_type` or `error` twice, or only inside unquoted brackets, still counts as an incomplete scan. hostd logs at start when it runs a sandbox pool but `RELAY_SANDBOXES_HOST` doesn't name its host, so the hub would serve no Sandboxes pages (`sandboxesHostWarning`).
+
 ## 0.11.0
 
 ### Minor Changes
