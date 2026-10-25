@@ -17,7 +17,7 @@ const config = (root: string): HostConfiguration => ({
   applyCommand: null,
   applyMachines: ["ALPHA"],
   approvalHub: { host: "ALPHA", nodeId: "node-alpha", url: "https://alpha.example.test:4779/" },
-  approvalNodes: ["node-alpha"],
+  approvalNodes: ["node-phone"],
   approvalPort: 4779,
   approvalTls: null,
   browserMcpRecoverCommand: null,

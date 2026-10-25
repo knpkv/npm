@@ -28,6 +28,8 @@ The persisted payload is the decoded job payload; the hash is computed over that
 
 `users`, `hosts` and `local` are optional configuration keys. A permission name this package does not know still decodes (a plain dotted lower-case word, up to 64 characters). It grants nothing, and `unknownPermissions(config)` lists it for the startup log, so one configuration can reach a hub that is older than the configuration. A hub older than these keys refuses a configuration that has them (excess keys fail the decode), so write them only once every host understands them.
 
+A node can't be both a fleet machine (`machines`) and an approval node (`approvalNodes`). The configuration is refused, because agents run on fleet machines under the owner's login, so a machine is a `Host` and never approves.
+
 ## Agent task signals
 
 `AgentSummary.taskKind` is an additive, optional wire field with nine values:

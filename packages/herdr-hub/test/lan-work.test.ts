@@ -31,7 +31,7 @@ const config = (stateDirectory: string): HostConfiguration => ({
   browserMcpRecoverCommand: null,
   applyMachines: ["SER8"],
   approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:4779/" },
-  approvalNodes: ["node-ser8"],
+  approvalNodes: ["node-phone"],
   approvalPort: 4779,
   checkCommand: ["nix", "flake", "check"],
   coordinatorCommand: ["coordinator"],

@@ -3609,6 +3609,7 @@ esac
     const hostConfig: HostConfiguration = {
       ...config(root),
       approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:0/" },
+      approvalNodes: ["node-phone"],
       approvalPort: 0,
       approvalTls: directTls,
       applyMachines: ["SER8"],
@@ -3885,7 +3886,7 @@ esac
     return Effect.gen(function*() {
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
       // Both listeners bind port 0; fleetctl gets the ports hostd actually bound.
-      const hostConfig = { ...config(root), localPort: 0, port: 0 }
+      const hostConfig = { ...config(root), approvalNodes: ["node-phone"], localPort: 0, port: 0 }
       const workStore = yield* WorkStore.open(join(root, "approval-app.sqlite"))
       yield* Effect.addFinalizer(() => Effect.sync(() => workStore.close()))
       const work = yield* makeWorkService(workStore)
@@ -6459,6 +6460,32 @@ esac
       })
       expect(yield* Effect.promise(() => client.ready)).toBe(4_503)
       expect(peer.upgrades).toEqual([])
+    }).pipe(Effect.scoped, provideNodeServices))
+
+  // A terminal session is a WebSocket upgrade, outside the request handler: shadow mode still sees it once
+  // today's checks accept it. The fixture's WhoIs answers the hub's own node, a fleet host.
+  it.effect("shadows an accepted terminal session from a fleet-host node as a refused host terminal", () =>
+    Effect.gen(function*() {
+      const logged = vi.spyOn(Logger.defaultLogger, "log")
+      yield* Effect.addFinalizer(() => Effect.sync(() => logged.mockRestore()))
+      const peer = yield* terminalRelayFixture("supported")
+      const client = yield* controllerClient(peer.url, true, {
+        rejectUnauthorized: false,
+        headers: { origin: peer.origin }
+      })
+      expect(yield* Effect.promise(() => client.ready)).toBe("ready")
+      const shadowLines = () =>
+        logged.mock.calls.flatMap(([entry]) =>
+          [entry.message].flat().filter(Schema.is(Schema.String.check(Schema.isPattern(/^identity shadow:/u))))
+        )
+      for (
+        let attempt = 0;
+        attempt < 100 && !shadowLines().includes("identity shadow: refused serve Host connect.terminal");
+        attempt++
+      ) {
+        yield* Effect.sleep("20 millis")
+      }
+      expect(shadowLines()).toContain("identity shadow: refused serve Host connect.terminal")
     }).pipe(Effect.scoped, provideNodeServices))
 
   it.effect("probes takeover freshly and relays intent and the typed close through a capable host", () =>

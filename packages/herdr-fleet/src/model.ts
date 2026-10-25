@@ -782,6 +782,11 @@ export const HostConfiguration = Schema.Struct({
       expected:
         "valid fleet targets, distinct listeners, and an approval hub URL whose effective port matches the TLS listener"
     }
+  ),
+  // Agents run on fleet machines under the owner's login, so a machine is a host and never approves.
+  Schema.makeFilter(
+    ({ approvalNodes, machines }) => !machines.some(({ nodeId }) => approvalNodes.includes(nodeId)),
+    { expected: "no node that is both a fleet machine and an approval node" }
   )
 )
 export type HostConfiguration = typeof HostConfiguration.Type
