@@ -483,7 +483,10 @@ test("preflight padding revert stays inside Usage views", async ({ page }) => {
   await expect(readAgain).toHaveCSS("padding-top", "0px")
   await expect(readAgain).toHaveCSS("padding-bottom", "0px")
 
-  await page.route(/\/v1\/connect\/limits(\?|$)/, (request) => request.fulfill({ status: 503, body: "unavailable" }))
+  await page.route(
+    /\/apps\/usage\/v1\/modules\/usage\/limits(\?|$)/,
+    (request) => request.fulfill({ status: 503, body: "unavailable" })
+  )
   await page.goto("/?range=7d&timeZone=UTC#usage/limits")
   const retry = page.locator("[data-module=\"usage\"]").getByRole("button", { name: "Retry", exact: true })
   await expect(retry).toBeVisible()

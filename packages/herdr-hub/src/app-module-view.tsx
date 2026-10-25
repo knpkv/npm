@@ -48,6 +48,11 @@ export interface AppModuleOptions {
   readonly host: string
   /** The login the hub authenticated for this page. */
   readonly viewer: string
+  /**
+   * Nav glyphs the shell draws for apps it knows, by app id. A manifest carries no icon yet, so this is how Usage keeps
+   * the chart it had as a hub module; any other app gets the generic module glyph.
+   */
+  readonly icons?: Readonly<Record<string, ReactNode>>
   /** Each app's badge, as its client last set it. */
   readonly badges: Readonly<Record<string, ShellBadge>>
   readonly setBadge: (id: string, badge: ShellBadge | null) => void
@@ -67,7 +72,8 @@ export class AppClientFailed extends Schema.TaggedError<AppClientFailed>()("AppC
 
 type AppClientModule = typeof AppClientModule.Type
 
-const decodeClientModule = Schema.decodeUnknownPromise(AppClientModule)
+/** Checks an imported module default-exports a client; rejects otherwise. */
+export const decodeClientModule = Schema.decodeUnknownPromise(AppClientModule)
 
 /** The module at `url`, checked to default-export a client; a module that isn't one rejects like a failed import. */
 const importClient = (url: string): Promise<AppClientModule> =>
@@ -178,6 +184,8 @@ const AppMount = ({
         }
         try {
           mounted.current = loaded.default.mount(target, context(lent))
+          // The shell's arrival focus ran before this page existed; let it land on the page's link now.
+          latest.current.header?.settleArrivalFocus(id)
         } catch (cause) {
           fail(new AppClientFailed({ id, stage: "mount", cause }))
         }
@@ -201,6 +209,10 @@ const AppMount = ({
     }
   }, [])
 
+  // Only when what the client sees changes. The shell re-renders for its own reasons (an app's own header request
+  // among them); answering each with an update would loop with an app that re-asks on every update.
+  const searchKey = search.toString()
+  const outlet = header?.outlet ?? null
   useEffect(() => {
     const current = mounted.current
     const lent = portalRoot.current
@@ -211,7 +223,7 @@ const AppMount = ({
       mounted.current = null
       fail(new AppClientFailed({ id, stage: "update", cause }))
     }
-  })
+  }, [page, searchKey, mount.active, outlet, options.viewer, options.host])
 
   return (
     <>
@@ -277,6 +289,8 @@ export const makeAppModuleViews = (
         ])
       )
     }
+    const icon = options.icons?.[descriptor.id]
     const badge = options.badges[descriptor.id]
-    return [badge === undefined ? view : { ...view, navigationBadge: badge }]
+    const drawn = icon === undefined ? view : { ...view, navigationIcon: icon }
+    return [badge === undefined ? drawn : { ...drawn, navigationBadge: badge }]
   })

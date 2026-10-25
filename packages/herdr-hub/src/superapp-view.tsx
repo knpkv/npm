@@ -225,10 +225,43 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
   const [headerModes, setHeaderModes] = useState<Readonly<Record<string, ModuleHeaderMode>>>({})
   const [announcementOutlet, setAnnouncementOutlet] = useState<HTMLElement | null>(null)
   const [groupedHeaderOutlet, setGroupedHeaderOutlet] = useState<HTMLElement | null>(null)
+  // The last page arrival's focus request, for a module whose page arrives later (see settleArrivalFocus).
+  const pendingArrival = useRef<{ readonly module: string; readonly page: string; readonly ring: boolean } | null>(null)
+  const cancelLocationFocus = useRef<(() => void) | null>(null)
   const shellHeader = useMemo(
     () => ({
       host,
       outlet: groupedHeaderOutlet,
+      settleArrivalFocus: (module: string) => {
+        const arrival = pendingArrival.current
+        if (arrival === null || arrival.module !== module) return
+        pendingArrival.current = null
+        cancelLocationFocus.current?.()
+        // The client renders on its own schedule, so wait (up to about a second) for the page's link to exist; give
+        // up as soon as focus has moved off the shell's fallback.
+        let frame = 0
+        let frames = 0
+        let cancelFocus: (() => void) | undefined
+        const attempt = (): void => {
+          const active = document.activeElement
+          if (active !== null && active !== document.body && active.id !== "main") return
+          const link = document.querySelector(
+            `[data-module="${arrival.module}"] [data-module-page="${arrival.page}"], ` +
+              `[data-module-owner="${arrival.module}"] [data-module-page="${arrival.page}"]`
+          )
+          if (link === null) {
+            frames += 1
+            if (frames < 60) frame = window.requestAnimationFrame(attempt)
+            return
+          }
+          cancelFocus = focusModulePage(arrival.module, arrival.page, false, active, arrival.ring)
+        }
+        attempt()
+        cancelLocationFocus.current = () => {
+          window.cancelAnimationFrame(frame)
+          cancelFocus?.()
+        }
+      },
       setMode: (module: string, mode: Partial<ModuleHeaderMode>) =>
         setHeaderModes((current) => {
           const previous = current[module] ?? { grouped: false, empty: false }
@@ -321,7 +354,6 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     }
     navigate(parentHref, "replace", null)
   }
-  const cancelLocationFocus = useRef<(() => void) | null>(null)
   const previousFocusDestination = useRef(location.destination)
   // The page's own load is no keyboard navigation: its arrival focus paints no ring.
   const coldLoad = useRef(true)
@@ -339,6 +371,10 @@ export const SuperappShell = <const Views extends ReadonlyArray<ModuleViews<Modu
     if (location.focus === "search") {
       cancelLocationFocus.current = focusWhenShown("connect-agent-search")
     }
+    pendingArrival.current =
+      location.focus === "page" || location.focus === "history"
+        ? { module: location.destination.module, page: location.destination.page, ring }
+        : null
     if (location.focus === "page" || location.focus === "history")
       cancelLocationFocus.current = focusModulePage(
         location.destination.module,

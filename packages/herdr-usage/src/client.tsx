@@ -7,7 +7,14 @@
  *
  * @module
  */
-import { FleetLimits, FleetReadLoadError, FleetUsage, type Received, type UsageQuery } from "@knpkv/herdr-connect/usage"
+import {
+  FleetLimits,
+  FleetReadLoadError,
+  FleetUsage,
+  onLoopback,
+  type Received,
+  type UsageQuery
+} from "@knpkv/herdr-connect/usage"
 import { defineAppClient, type ShellContext } from "@knpkv/hub-app"
 import { Icon } from "@knpkv/rly/foundations"
 import { Clock, Effect, Exit, ManagedRuntime, Option, Schema } from "effect"
@@ -87,7 +94,8 @@ const UsageApp = ({ context }: { readonly context: ShellContext }): ReactElement
         reads,
         viewerTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         now: Date.now(),
-        onHubMachine: false
+        // On this machine's loopback the page links to the local agent-usage dashboard, as the hub's own Usage did.
+        onHubMachine: onLoopback()
       }}
       shell={shell}
       page={page}

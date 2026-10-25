@@ -59,6 +59,7 @@ import { TodayReadFailed } from "./today-module-view.js"
 import { makeResourcesModuleViews } from "./resources-module-view.js"
 import { loadHostResources } from "./resources-client.js"
 import { makeAppModuleViews } from "./app-module-view.js"
+import { ShellIcon } from "./internal/shell-icon.js"
 import { UsageMovedPanel } from "./internal/usage-moved.js"
 import { makeCodeModuleViews } from "./code-module-view.js"
 import { loadStack, loadStackPlan, loadStacksOverview, type StacksModuleReads } from "./stacks-client.js"
@@ -438,6 +439,9 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
 
 type DashboardAtoms = ReturnType<typeof makeDashboardAtoms>
 
+/** The shell's own glyph for apps it knows (see AppModuleOptions.icons). */
+const appIcons = { usage: <ShellIcon name="usage" /> }
+
 const appStateId = (state: AppState): string => (state._tag === "Ready" ? state.manifest.id : state.id)
 
 const DashboardApp = ({
@@ -736,7 +740,8 @@ const DashboardApp = ({
     host: current.host,
     viewer: current.apps.viewer,
     badges: appBadges,
-    setBadge: setAppBadge
+    setBadge: setAppBadge,
+    icons: appIcons
   })
   const resources = makeResourcesModuleViews({ host: current.host, read: resourcesRead })
   const code = makeCodeModuleViews({ reads: codeReads })
@@ -772,7 +777,7 @@ const DashboardApp = ({
       <DashboardWorkPollOwner atom={atoms.work} poll={atoms.workPoll} />
       {superapp ? (
         <SuperappShell
-          modules={installed.filter((view) => layout.modules.includes(view.descriptor.id))}
+          modules={layout.modules.flatMap((id) => installed.filter((view) => view.descriptor.id === id))}
           mobileModules={layout.mobileModules}
           primaryModules={layout.primaryModules}
           landing={{ module: "connect", page: "overview" }}

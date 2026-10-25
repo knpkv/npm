@@ -15,6 +15,12 @@ export interface ShellHeader {
   readonly host: string
   readonly outlet: HTMLElement | null
   readonly setMode: (module: string, mode: Partial<ModuleHeaderMode>) => void
+  /**
+   * A module whose page arrives after the shell's arrival focus ran (an app's client loads asynchronously) calls this
+   * once its page is in the document: if focus still rests on the shell's fallback (`<main>` or the body), the shell
+   * focuses that page's link or tab as it meant to.
+   */
+  readonly settleArrivalFocus: (module: string) => void
 }
 
 export const ShellHeaderContext = createContext<ShellHeader | null>(null)

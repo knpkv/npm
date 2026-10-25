@@ -17,7 +17,7 @@ import {
 import { act, type ReactNode } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { type AppModuleOptions, makeAppModuleViews } from "../src/app-module-view.js"
+import { type AppModuleOptions, decodeClientModule, makeAppModuleViews } from "../src/app-module-view.js"
 import { UsageMovedPanel } from "../src/internal/usage-moved.js"
 import { connectModule, type ModuleViews, type ModuleDescriptor } from "../src/modules.js"
 import { SuperappShell } from "../src/superapp-view.js"
@@ -203,6 +203,70 @@ describe("installed apps in the shell", () => {
     expect(events).toEqual(["one:mount:detail"])
   })
 
+  // An app may re-ask for its header on every update (Usage's page hands the shell a new setter each time). The shell
+  // must not answer that with another update, or the two re-render each other forever.
+  it("updates the client only when what it sees changes, not on every shell render", async () => {
+    window.history.replaceState(null, "", "/#fixture/overview")
+    let updates = 0
+    const regrouping = defineAppClient({
+      contract: 1,
+      mount: (_root, context) => {
+        context.setHeaderMode?.("grouped")
+        return {
+          update: (next) => {
+            updates += 1
+            if (updates > 50) return
+            next.setHeaderMode?.("shell")
+            next.setHeaderMode?.("grouped")
+          },
+          unmount: () => {}
+        }
+      }
+    })
+    await renderShell([ready()], () => Promise.resolve({ default: regrouping }))
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    })
+    expect(updates).toBeLessThanOrEqual(2)
+    await go("#fixture/detail")
+    expect(updates).toBeLessThanOrEqual(4)
+  })
+
+  // The shell's arrival focus runs a frame after the route paints, before an app's client has loaded; once the client
+  // mounts, focus moves from the shell's fallback to the page's own link.
+  it("lands arrival focus on the app's page link once its client mounts", async () => {
+    window.history.replaceState(null, "", "/#fixture/detail")
+    let arrive: (module: AppClientModuleType) => void = () => {}
+    await renderShell(
+      [ready()],
+      () =>
+        new Promise((resolve) => {
+          arrive = resolve
+        })
+    )
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+    })
+    expect(document.activeElement?.id).toBe("main")
+    const linking = defineAppClient({
+      contract: 1,
+      mount: (root, context) => {
+        const link = document.createElement("a")
+        link.href = context.href?.(context.page) ?? ""
+        link.dataset.modulePage = context.page
+        link.textContent = "Detail"
+        root.append(link)
+        return { update: () => {}, unmount: () => {} }
+      }
+    })
+    await act(async () => {
+      arrive({ default: linking })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
+    })
+    expect(document.activeElement?.getAttribute("data-module-page")).toBe("detail")
+  })
+
   // (b) A new entry is a new client: the old one unmounts and loses its CSS before the new one mounts.
   it("swaps the client and its stylesheet when the app's entry changes", async () => {
     window.history.replaceState(null, "", "/#fixture/overview")
@@ -283,6 +347,15 @@ describe("installed apps in the shell", () => {
     expect(section()?.textContent).toContain("Fixture couldn't be shown.")
   })
 
+  // The default loader runs every imported module through this before the shell may call its mount.
+  it("refuses an imported module that doesn't default-export a client", async () => {
+    const { client } = recorder()
+    await expect(decodeClientModule({ default: { contract: 1 } })).rejects.toBeDefined()
+    await expect(decodeClientModule({})).rejects.toBeDefined()
+    const decoded = await decodeClientModule({ default: client("one") })
+    expect(decoded.default.contract).toBe(1)
+  })
+
   it("leaves an app whose id a core module holds out of the navigation", async () => {
     await renderShell(
       [
@@ -311,6 +384,12 @@ describe("installed apps in the shell", () => {
     expect(document.querySelector('.superapp-shell[data-module-empty="true"]')).not.toBeNull()
     await go("#connect/overview")
     expect(document.querySelector(".superapp-grouped-header-outlet")).toBeNull()
+  })
+
+  // A manifest carries no icon yet; the shell lends its own drawing to apps it knows, so Usage keeps its glyph.
+  it("draws the icon the shell lends an app on its nav item", async () => {
+    await renderShell([ready()], unusedLoad, { icons: { fixture: <svg data-testid="fixture-icon" /> } })
+    expect(document.querySelector('nav[aria-label="Modules"] [data-testid="fixture-icon"]')).not.toBeNull()
   })
 
   it("shows the badge an app sets on its nav item", async () => {
