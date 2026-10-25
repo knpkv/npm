@@ -3,18 +3,25 @@
  *
  * **Mental model**
  *
- * - **A principal is who the hub decided the request is.** A `Person` signed in in a browser, a fleet
+ * - **A principal is who the hub decided the request is.** A `Person` (a login on a tailnet node), a fleet
  *   `Host` (agents run there under the owner's login, so a host is never a person), the `Local` user on
- *   the hub's own computer, another hub node calling as a `Service`, or no one (`Anonymous`). Deciding
- *   which one a request is belongs to the listener; this module only answers what each may do.
+ *   the hub's own computer, the `Cli` (a command holding the hub's CLI token), another hub node calling as
+ *   a `Service`, or no one (`Anonymous`). Deciding which one a request is belongs to the listener; this
+ *   module only answers what each may do.
+ * - **A person acts only once logged in.** Logging in is a deliberate press in a browser, so a person
+ *   without a session only views, on any node. Before passkeys a session shows intent, not presence: an
+ *   agent on the same node could press it too.
  * - **Grants come from the fleet configuration.** `users` maps a login to its permissions, `hosts` is what
  *   any fleet host may do, `local` what a signed-in local user may do. While `users` is absent, every login
  *   in `allowedUsers` holds every permission, as before permissions existed. A `users` entry for a login
  *   outside `allowedUsers` grants nothing: Tailscale never admits that login.
  * - **Owner permissions need a person.** `approve` and `sandboxes.owner` act for the owner. Agents run on
  *   fleet hosts under the owner's login and on the hub's own computer under its user account, so neither a
- *   host nor the local user ever holds them, whatever `hosts` or `local` says. Plain loopback without the
- *   local sign-in only views.
+ *   host nor the local user ever holds them, whatever `hosts` or `local` says. A person logged in on a fleet
+ *   machine never owns Sandboxes either: there the session can't tell them from the agents beside them.
+ *   Plain loopback without the local sign-in only views.
+ * - **The CLI only restarts apps.** Every process of the user can read the CLI token, agents included, so
+ *   it adds intent, not isolation: it holds `apps.restart`, which nix activation uses, and nothing else.
  * - **Approving needs the approval node or a passkey.** A person approves from a node in `approvalNodes`,
  *   as before identities existed, or from any node once a passkey proved them present for that decision.
  * - **A service is checked by its node, not here.** Hub-to-peer calls are admitted by the hub's node id
@@ -61,13 +68,21 @@ const ownerOnly: ReadonlySet<Permission> = new Set<Permission>(["approve", "sand
 export type Presence = "none" | "passkey"
 
 export type Principal =
-  | { readonly _tag: "Person"; readonly login: string; readonly nodeId: string; readonly presence: Presence }
+  | {
+    readonly _tag: "Person"
+    readonly login: string
+    readonly nodeId: string
+    readonly presence: Presence
+    /** Whether this person logged in in a browser on this node. */
+    readonly session: boolean
+  }
   | { readonly _tag: "Host"; readonly nodeId: string }
   | { readonly _tag: "Local"; readonly session: boolean }
+  | { readonly _tag: "Cli" }
   | { readonly _tag: "Service"; readonly nodeId: string }
   | { readonly _tag: "Anonymous" }
 
-type Grants = Pick<HostConfiguration, "allowedUsers" | "approvalNodes" | "users" | "hosts" | "local">
+type Grants = Pick<HostConfiguration, "allowedUsers" | "approvalNodes" | "users" | "hosts" | "local" | "machines">
 
 const isPermission = Schema.is(Permission)
 
@@ -89,8 +104,13 @@ const personGrants = (config: Grants, login: string): ReadonlyArray<Permission> 
 const grantedTo = (config: Grants, principal: Principal): ReadonlyArray<Permission> => {
   switch (principal._tag) {
     case "Person": {
+      const granted = personGrants(config, principal.login)
+      if (!principal.session) return granted.filter((permission) => permission === "view")
       const present = principal.presence === "passkey" || config.approvalNodes.includes(principal.nodeId)
-      return personGrants(config, principal.login).filter((permission) => permission !== "approve" || present)
+      const onMachine = config.machines.some(({ nodeId }) => nodeId === principal.nodeId)
+      return granted.filter((permission) =>
+        (permission !== "approve" || present) && (permission !== "sandboxes.owner" || !onMachine)
+      )
     }
     case "Host":
       return withoutOwnerOnly(config.hosts === undefined ? defaultHostPermissions : grantsOf(config.hosts))
@@ -98,6 +118,8 @@ const grantedTo = (config: Grants, principal: Principal): ReadonlyArray<Permissi
       return principal.session
         ? withoutOwnerOnly(config.local === undefined ? permissions : grantsOf(config.local))
         : ["view"]
+    case "Cli":
+      return ["apps.restart"]
     case "Service":
     case "Anonymous":
       return []

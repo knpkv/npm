@@ -39,7 +39,9 @@ describe("route families", () => {
       family("GET", "/v1/app-services/fleet/read"),
       family("POST", "/v1/relay/decisions"),
       family("GET", "/v1/relay/events"),
-      family("POST", "/v1/relay/messages")
+      family("POST", "/v1/relay/messages"),
+      family("GET", "/v1/session"),
+      family("POST", "/v1/session/tailscale")
     ]).toEqual([
       "static",
       "static",
@@ -70,7 +72,9 @@ describe("route families", () => {
       "app-services",
       "relay.decide",
       "relay.read",
-      "relay.write"
+      "relay.write",
+      "session",
+      "session"
     ])
   })
 
@@ -91,7 +95,8 @@ const person = (nodeId: string): Principal => ({
   _tag: "Person",
   login: "owner@example.test",
   nodeId,
-  presence: "none"
+  presence: "none",
+  session: true
 })
 const fleetHost: Principal = { _tag: "Host", nodeId: "node-hub" }
 const service: Principal = { _tag: "Service", nodeId: "node-hub" }

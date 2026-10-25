@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// `herdr-hub apps …`: builds the CLI's environment from this machine (paths, the hub's loopback port, this process)
+// `herdr-hub apps …` and `herdr-hub login`: builds the CLI's environment from this machine (paths, the hub's loopback port, this process)
 // and runs the command. Everything it decides is in `cli.ts`.
 import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node"
+import { BrowserOpener } from "@knpkv/browser-pairing/launch"
 import { HubPaths, loadConfiguration } from "@knpkv/herdr-fleet"
 import type { Crypto } from "effect"
 import { Console, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
@@ -11,7 +12,7 @@ import { hostname } from "node:os"
 import process from "node:process"
 import manifest from "../../package.json" with { type: "json" }
 import { builtInModuleIds } from "../module-contract.js"
-import { AppsCli, appsCommand, explainFailures, makeHubClient, waitStopped } from "./cli.js"
+import { AppsCli, appsCommand, explainFailures, loginCommand, makeHubClient, waitStopped } from "./cli.js"
 import { makeInstaller } from "./installer.js"
 import { findNpmCli, makeNpm } from "./npm.js"
 import { makeAppsStore } from "./store.js"
@@ -94,10 +95,14 @@ const environment = Layer.effect(
   })
 )
 
-const platform = Layer.mergeAll(Layer.provideMerge(HubPaths.layer, NodeServices.layer), NodeHttpClient.layerNodeHttp)
+const platform = Layer.mergeAll(
+  Layer.provideMerge(HubPaths.layer, NodeServices.layer),
+  NodeHttpClient.layerNodeHttp,
+  BrowserOpener.layer.pipe(Layer.provide(NodeServices.layer))
+)
 
 Command.make("herdr-hub").pipe(
-  Command.withSubcommands([appsCommand]),
+  Command.withSubcommands([appsCommand, loginCommand]),
   Command.run({ version: manifest.version }),
   explainFailures,
   Effect.provide(Layer.provideMerge(environment, platform)),

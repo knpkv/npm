@@ -1,5 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
+import { BrowserOpener } from "@knpkv/browser-pairing/launch"
 import { AppId, type AppManifest, type AppState, type InstalledApp } from "@knpkv/hub-app"
 import { Console, Duration, Effect, type Exit, FileSystem, Option, Schema } from "effect"
 import { Command } from "effect/cli"
@@ -12,6 +13,7 @@ import {
   failureLine,
   type HubClient,
   HubNotRunning,
+  loginCommand,
   splitSpec
 } from "../src/apps/cli.js"
 import { AppIdConflict, type AppInstaller, AppNotInstalled, type InstallerOptions } from "../src/apps/installer.js"
@@ -49,7 +51,8 @@ const manifest = (version: string): AppManifest => ({
 
 const hubDown: HubClient = {
   states: Effect.succeed(Option.none()),
-  restart: () => Effect.die("restart is not expected")
+  restart: () => Effect.die("restart is not expected"),
+  loginUrl: Effect.die("login is not expected")
 }
 
 /** An installer that asks `confirm` once for add and update, as the real one does, then reports `updated`. */
@@ -167,6 +170,51 @@ describe("apps CLI", () => {
         expect(printed.output).toBe("older\nnewer")
         const none = yield* run(["logs", "other"], { root })
         expect(none.output).toBe("No log for other yet.")
+      }).pipe(Effect.scoped))
+
+    // `herdr-hub login` prints the one-time link and opens it; the code rides in the fragment only.
+    it.effect("prints and opens the hub's one-time login link, or says the hub isn't running", () =>
+      Effect.gen(function*() {
+        const root = yield* tempRoot
+        const opened: Array<string> = []
+        const login = (hub: HubClient) =>
+          Effect.gen(function*() {
+            const lines: Array<string> = []
+            const original = yield* Console.Console
+            const cli = Command.runWith(Command.make("herdr-hub").pipe(Command.withSubcommands([loginCommand])), {
+              version: "0.0.0-test"
+            })
+            const store = yield* makeAppsStore({
+              configPath: `${root}/config/apps.json`,
+              lockPath: `${root}/data/hub-apps/.lock`,
+              self: { pid: 1, host: "test" },
+              processAlive: () => Effect.succeed(true)
+            })
+            const exit = yield* cli(["login"]).pipe(
+              Effect.provideService(AppsCli, {
+                store,
+                installer: stubInstaller(null),
+                hub,
+                logsDirectory: `${root}/logs`,
+                interactive: false
+              }),
+              Effect.provideService(
+                BrowserOpener,
+                BrowserOpener.of({
+                  open: (url) => Effect.sync(() => opened.push(url))
+                })
+              ),
+              Effect.provideService(Console.Console, { ...original, log: (...parts) => lines.push(parts.join(" ")) }),
+              Effect.exit
+            )
+            return { exit, output: lines.join("\n") }
+          })
+        const link = "http://127.0.0.1:4778/#login=" + "c".repeat(64)
+        const up = yield* login({ ...hubDown, loginUrl: Effect.succeed(link) })
+        expect(up.output).toBe(link)
+        expect(opened).toEqual([link])
+        const down = yield* login({ ...hubDown, loginUrl: Effect.fail(new HubNotRunning()) })
+        expect(failure(down.exit)).toContain("HubNotRunning")
       }).pipe(Effect.scoped))
 
     it.effect("says the hub isn't running when restart can't reach it", () =>

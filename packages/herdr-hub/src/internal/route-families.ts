@@ -58,6 +58,8 @@ export const routeFamily = (method: string, pathname: string): RouteFamily | nul
     return read ? family("static", publicFiles) : null
   }
   if (pages.has(pathname) || pathname.startsWith("/fleet/")) return read ? family("page", permission("view")) : null
+  // Logging in and out authenticates itself: WhoIs, the CLI token, a one-time code or the session's CSRF token.
+  if (pathname === "/v1/session" || pathname.startsWith("/v1/session/")) return family("session", publicFiles)
   if (dashboardReads.has(pathname)) return read ? family("dashboard", permission("view")) : null
   if (pathname === "/v1/jobs") return write ? family("jobs.submit", permission("jobs.submit")) : null
   if (/^\/v1\/jobs\/[^/]+\/(?:approve|reject)$/u.test(pathname)) {

@@ -111,6 +111,17 @@ exit ${exitCode}
       expect(yield* validClient.whois("100.64.0.1")).toMatchObject({
         Node: { StableID: "node-a" }
       })
+      // The device's display name, when tailscale reports it; never identity.
+      expect((yield* validClient.whois("100.64.0.1")).Node.ComputedName).toBeUndefined()
+      writeFileSync(
+        command,
+        `#!/bin/sh
+printf '%s\n' '{"Node":{"StableID":"node-a","ComputedName":"owner-laptop"},"UserProfile":{"LoginName":"owner@example.com"}}'
+`,
+        { mode: 0o700 }
+      )
+      const namedClient = yield* make(command)
+      expect((yield* namedClient.whois("100.64.0.1")).Node.ComputedName).toBe("owner-laptop")
     }).pipe(
       Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
       provideNodeServices

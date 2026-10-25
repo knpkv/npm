@@ -12,6 +12,7 @@
  *
  * @since 0.1.0
  */
+import { openBrowser } from "@knpkv/browser-pairing/launch"
 import { AppId, type AppsConfigInvalid, type AppState, AppStates } from "@knpkv/hub-app"
 import {
   Clock,
@@ -65,6 +66,8 @@ export interface HubClient {
   readonly states: Effect.Effect<Option.Option<ReadonlyArray<AppState>>>
   /** Restarts `id`: true when the hub restarted it, false when it runs no such app. */
   readonly restart: (id: AppId) => Effect.Effect<boolean, HubNotRunning>
+  /** A one-time link that opens the hub's page logged in as the local user (`herdr-hub login`). */
+  readonly loginUrl: Effect.Effect<string, HubNotRunning>
 }
 
 /** Everything a command needs; `main.ts` builds it, tests stub it. */
@@ -85,6 +88,8 @@ export class AppsCli extends Context.Service<AppsCli, AppsCliEnvironment>()("@kn
 
 const appState = (states: ReadonlyArray<AppState>, id: AppId) =>
   states.find((state) => (state._tag === "Ready" ? state.manifest.id : state.id) === id)
+
+const LoginCode = Schema.Struct({ code: Schema.String.check(Schema.isMaxLength(128)) })
 
 /** The hub over HTTP on its loopback port; `url` null when no port is configured. */
 export const makeHubClient = Effect.fn("AppsCli.hubClient")(function*(options: {
@@ -126,7 +131,30 @@ export const makeHubClient = Effect.fn("AppsCli.hubClient")(function*(options: {
     if (response.status === 404) return false
     return yield* new HubNotRunning()
   })
-  return { states, restart } satisfies HubClient
+  // The code rides in the fragment, which the browser never sends: no server log, history request or Referer
+  // sees it. The CLI token itself never enters a URL.
+  const loginUrl = Effect.gen(function*() {
+    if (options.url === null) return yield* new HubNotRunning()
+    const token = yield* readCliToken(options.tokenDirectory).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+      Effect.mapError(() => new HubNotRunning())
+    )
+    const response = yield* HttpClientRequest.post(new URL("v1/session/local-code", options.url).href).pipe(
+      HttpClientRequest.setHeader(cliTokenHeader, Redacted.value(token)),
+      http.execute,
+      Effect.mapError(() => new HubNotRunning())
+    )
+    if (response.status !== 200) return yield* new HubNotRunning()
+    const answer = yield* response.json.pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(LoginCode)),
+      Effect.mapError(() => new HubNotRunning())
+    )
+    const page = new URL(options.url)
+    page.hash = `login=${answer.code}`
+    return page.href
+  })
+  return { states, restart, loginUrl } satisfies HubClient
 })
 
 /** Polls `done` against the hub's states every 250 ms until it holds or `timeout` passes; none when the hub is down. */
@@ -314,6 +342,18 @@ const restart = Command.make("restart", { id: appIdArgument }, (input) =>
     const restarted = yield* cli.hub.restart(input.id)
     yield* Console.log(restarted ? `Restarting ${input.id}.` : `The hub runs no app called ${input.id}.`)
   }))
+
+/**
+ * `herdr-hub login`: prints a one-time link that opens the hub's page on this computer logged in as the local
+ * user, and opens it. The hub mints the code only for this user's CLI token, and the page spends it once.
+ */
+export const loginCommand = Command.make("login", {}, () =>
+  Effect.gen(function*() {
+    const cli = yield* AppsCli
+    const url = yield* cli.hub.loginUrl
+    yield* Console.log(url)
+    yield* openBrowser(url)
+  })).pipe(Command.withDescription("Open the hub's page on this computer, logged in as the local user"))
 
 /** Prints the app's log (the previous file first); with `--follow`, keeps printing what is appended. */
 const logs = Command.make(
