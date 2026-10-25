@@ -2,6 +2,34 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.63.0
+
+### Minor Changes
+
+- [#1127](https://github.com/knpkv/npm/pull/1127) [`1367495`](https://github.com/knpkv/npm/commit/136749537d39d4b8cdfdc18ae78f816760c375b0) Thanks [@konopkov](https://github.com/konopkov)! - An installed app outside the `@knpkv` scope opens its page only on the hub's loopback listener for now. On every other listener `/v1/apps` lists it as Unavailable with the new reason `local_only` ("<label> opens only on this machine for now."), and its routes answer 503. An app's page runs with the hub page's authority, which on the hub's tailnet listener includes approving jobs, so until apps get their own origin only first-party pages open on every device. First-party is the package name the installer verified, never what the app reports. `herdr-hub apps add` says which applies before it installs.
+
+- [#1132](https://github.com/knpkv/npm/pull/1132) [`9bad0f1`](https://github.com/knpkv/npm/commit/9bad0f1312266acc6f166d91a8b756199f7610ad) Thanks [@konopkov](https://github.com/konopkov)! - Add browser sessions and `herdr-hub login`:
+
+  - `/v1/session` logs a Tailscale person in with a `__Host-` cookie, bound to their login and node.
+  - `herdr-hub login` opens the hub's page logged in as the local user. The page trades a one-time code for a token it sends as a header, never a cookie.
+  - Only token digests are stored. Sessions survive restarts and last 8 hours (a person's own device renews on use, for up to 7 days).
+  - Shadow mode now sees session, CLI and local-session callers, and logs a session's write that comes without its CSRF token.
+
+  Nothing is enforced yet.
+
+- [#1127](https://github.com/knpkv/npm/pull/1127) [`1367495`](https://github.com/knpkv/npm/commit/136749537d39d4b8cdfdc18ae78f816760c375b0) Thanks [@konopkov](https://github.com/konopkov)! - The hub's shell mounts installed apps, and Usage moves out of the hub into the `@knpkv/herdr-usage` app. Install it with `herdr-hub apps add @knpkv/herdr-usage`; it appears where the hub's own Usage was, and its routes and bookmarks are unchanged. A hub without it says so on any Usage link. The dashboard snapshot gains `apps` (the registry's states for that listener and the authenticated login), `usageModule` is no longer one of `builtInModuleIds`, and `makeUsageModuleViews` is removed. `ShellContext` gains the optional `href` and `host`, and `AppClientModule` checks a loaded client module before a shell mounts it.
+
+### Patch Changes
+
+- Updated dependencies [[`9bad0f1`](https://github.com/knpkv/npm/commit/9bad0f1312266acc6f166d91a8b756199f7610ad), [`1367495`](https://github.com/knpkv/npm/commit/136749537d39d4b8cdfdc18ae78f816760c375b0), [`1367495`](https://github.com/knpkv/npm/commit/136749537d39d4b8cdfdc18ae78f816760c375b0), [`9bad0f1`](https://github.com/knpkv/npm/commit/9bad0f1312266acc6f166d91a8b756199f7610ad), [`1367495`](https://github.com/knpkv/npm/commit/136749537d39d4b8cdfdc18ae78f816760c375b0)]:
+  - @knpkv/herdr-fleet@0.22.0
+  - @knpkv/hub-app@0.5.0
+  - @knpkv/herdr-tailscale@0.4.0
+  - @knpkv/herdr-usage@0.2.0
+  - @knpkv/herdr-connect@0.31.4
+  - @knpkv/herdr-coordinator@0.4.14
+  - @knpkv/herdr-work@0.12.16
+
 ## 0.62.2
 
 ### Patch Changes

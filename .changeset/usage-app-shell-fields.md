@@ -1,5 +1,0 @@
----
-"@knpkv/herdr-usage": minor
----
-
-The Usage app groups its Limits header in the hub as the hub's own Usage did: it asks for the grouped header before the hub has lent an outlet, draws its title and tabs inline until then, names the hub's machine rather than the viewer, links its pages through the shell's `href` when the shell provides one, and, opened on the hub's own machine, links to the local agent-usage dashboard as the hub's Usage did.
