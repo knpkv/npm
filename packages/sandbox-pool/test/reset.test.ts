@@ -590,6 +590,27 @@ describe("aws-nuke scan coverage", () => {
     expect(discoveryFailures(spoofed)).toEqual([spoofed])
   })
 
+  it("a field named twice, or only inside brackets, never makes a failure expected", () => {
+    // A second error= after the real one: last-wins would read the expected cause.
+    const doubled = `${listingFailedIn("eu-central-1", "QBusinessIndex", "AccessDeniedException")} error="${noHost}"`
+    expect(discoveryFailures(doubled)).toEqual([doubled])
+    for (const key of ["owner=us-east-1", "resource_type=S3Bucket"]) {
+      const repeated = `${listingFailedIn("eu-central-1", "QBusinessIndex", noHost)} ${key}`
+      expect(discoveryFailures(repeated)).toEqual([repeated])
+    }
+    // Bracketed text is not a field of the line, so fields only there are none at all.
+    const bracketed =
+      `time="t" level=error msg=listing [owner=eu-central-1 resource_type=QBusinessIndex error="${noHost}"]`
+    expect(discoveryFailures(bracketed)).toEqual([bracketed])
+    // A bracket inside a bracket: the whole outer segment is skipped, so its fields stay out of the line's.
+    const nested =
+      "level=error msg=listing [context=[retry] owner=eu-central-1 resource_type=BedrockModelCustomizationJob error=UnknownOperationException]"
+    expect(discoveryFailures(nested)).toEqual([nested])
+    // A quoted value keeps its brackets: the real fields still read, and the gap stays expected.
+    const quoted = listingFailedIn("eu-central-1", "QBusinessIndex", `[retry 3] ${noHost}`)
+    expect(discoveryFailures(quoted)).toEqual([])
+  })
+
   it("Shield protections are scanned, and only a missing subscription is not an incomplete scan", () => {
     for (const type of ["ShieldProtection", "ShieldProtectionGroup"]) {
       expect(discoveryFailures(listingFailedIn("us-east-1", type, noSubscription))).toEqual([])
