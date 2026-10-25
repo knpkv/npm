@@ -84,6 +84,8 @@ export const routeFamily = (method: string, pathname: string): RouteFamily | nul
   if (pathname === "/v1/modules" || pathname.startsWith("/v1/modules/")) {
     return read
       ? family("modules.read", permission("view"))
+      // Every Sandboxes write acts for the owner: jobs (lease, extend, release, retry, lift), AWS sign-in
+      // and sign-out. Its routes answer 403 owner_only to anyone else today.
       : pathname.startsWith("/v1/modules/sandboxes/")
       ? family("modules.sandboxes", permission("sandboxes.owner"))
       : family("modules.write", person)

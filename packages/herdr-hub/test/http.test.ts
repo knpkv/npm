@@ -6462,6 +6462,32 @@ esac
       expect(peer.upgrades).toEqual([])
     }).pipe(Effect.scoped, provideNodeServices))
 
+  // A terminal session is a WebSocket upgrade, outside the request handler: shadow mode still sees it once
+  // today's checks accept it. The fixture's WhoIs answers the hub's own node, a fleet host.
+  it.effect("shadows an accepted terminal session from a fleet-host node as a refused host terminal", () =>
+    Effect.gen(function*() {
+      const logged = vi.spyOn(Logger.defaultLogger, "log")
+      yield* Effect.addFinalizer(() => Effect.sync(() => logged.mockRestore()))
+      const peer = yield* terminalRelayFixture("supported")
+      const client = yield* controllerClient(peer.url, true, {
+        rejectUnauthorized: false,
+        headers: { origin: peer.origin }
+      })
+      expect(yield* Effect.promise(() => client.ready)).toBe("ready")
+      const shadowLines = () =>
+        logged.mock.calls.flatMap(([entry]) =>
+          [entry.message].flat().filter(Schema.is(Schema.String.check(Schema.isPattern(/^identity shadow:/u))))
+        )
+      for (
+        let attempt = 0;
+        attempt < 100 && !shadowLines().includes("identity shadow: refused serve Host connect.terminal");
+        attempt++
+      ) {
+        yield* Effect.sleep("20 millis")
+      }
+      expect(shadowLines()).toContain("identity shadow: refused serve Host connect.terminal")
+    }).pipe(Effect.scoped, provideNodeServices))
+
   it.effect("probes takeover freshly and relays intent and the typed close through a capable host", () =>
     Effect.gen(function*() {
       const peer = yield* terminalRelayFixture("supported")
