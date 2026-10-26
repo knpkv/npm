@@ -1,5 +1,11 @@
 # @knpkv/agent-skills
 
+## 0.3.7
+
+### Patch Changes
+
+- [#1100](https://github.com/knpkv/npm/pull/1100) [`1aaf862`](https://github.com/knpkv/npm/commit/1aaf8623940a3e5c0c3db3595ec4e3c17b2eb478) Thanks [@konopkov](https://github.com/konopkov)! - The jcf skill documents the `jiraUnseen` list in `jcf sync reconcile --agent --json`.
+
 ## 0.3.6
 
 ### Patch Changes

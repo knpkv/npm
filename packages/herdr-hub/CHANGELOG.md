@@ -2,6 +2,27 @@
 
 Released as `@knpkv/herdr-approvals` up to 0.18.0; the headings below are that package's history.
 
+## 0.67.0
+
+### Minor Changes
+
+- [#1146](https://github.com/knpkv/npm/pull/1146) [`f6b820d`](https://github.com/knpkv/npm/commit/f6b820d78609a228a61021e587def9476c9bf77b) Thanks [@konopkov](https://github.com/konopkov)! - Put the hub behind login.
+
+  - herdr-fleet `can()`: a person or the local user without a browser session holds nothing; the CLI token holds `view`, `jobs.submit` and `apps.restart`.
+  - herdr-hub: the tailnet hub and loopback listeners decide every request by who the caller is. A browser without a session gets the page 22 login gate and `401 login_required`, a browser on a fleet host included; agents and hosts keep their own credentials (the CLI token on loopback, the host's node on the tailnet); a session's writes need its CSRF token, which the super-app's browser clients now send with every write to the hub; an app's writes need the hub's own `Origin` instead, and are refused without one; a route no family names gets 404; the browser terminal passes the same gate. The CLI token may try again any failed job from Needs you.
+  - The loopback session moves to an HttpOnly `herdr_local_session` cookie; the page keeps no token of its own.
+  - `GET /v1/session` says whether a session ended and whether the caller is on a fleet machine. Session cookies last 8 days, past every session's end, so an ended session is reported as ended.
+  - `fleetctl` and `herdr-hub apps` send the CLI token on loopback.
+
+### Patch Changes
+
+- Updated dependencies [[`f6b820d`](https://github.com/knpkv/npm/commit/f6b820d78609a228a61021e587def9476c9bf77b)]:
+  - @knpkv/herdr-fleet@0.24.0
+  - @knpkv/herdr-connect@0.31.6
+  - @knpkv/herdr-coordinator@0.4.16
+  - @knpkv/herdr-usage@0.2.3
+  - @knpkv/herdr-work@0.13.1
+
 ## 0.66.0
 
 ### Minor Changes
