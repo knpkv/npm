@@ -13,6 +13,7 @@ import {
   isOwnedByMe,
   MINIMUM_WRITE_SECONDS,
   type OwnershipInput,
+  planPeriod,
   proposeWrite,
   reconcileConsumption,
   rowId,
@@ -384,6 +385,59 @@ describe("buildWeekPlan", () => {
       unattributed: [{ cwds: ["/dev/docs/releases"], day: "2025-06-19", seconds: 5400, sessionCount: 2 }]
     })
     expect(held.plan.unattributed[0]!.cwds).toEqual(["/dev/docs/releases"])
+  })
+
+  it("builds a day run with one column and only that day's rows", () => {
+    const held = buildWeekPlan({
+      createdAtMillis: 0,
+      day: "2025-06-18",
+      monday,
+      planId: "p",
+      report: report({
+        proposals: [
+          proposal({ day: "2025-06-18", ticketKey: "PROJ-4" }),
+          proposal({ day: "2025-06-19", ticketKey: "PROJ-4" })
+        ]
+      }),
+      scope: "both"
+    })
+    expect(held.plan).toMatchObject({ day: "2025-06-18", days: ["2025-06-18"], monday: "2025-06-16" })
+    expect(held.plan.rows.map((row) => row.day)).toEqual(["2025-06-18"])
+  })
+
+  it("keeps a day run a day run when a saved entry is removed", () => {
+    const held = buildWeekPlan({
+      createdAtMillis: 0,
+      day: "2025-06-18",
+      monday,
+      planId: "p",
+      report: report({ recorded: [recorded({ clockifySeconds: 600, day: "2025-06-18", ticketKey: "PROJ-5" })] }),
+      scope: "both"
+    })
+    const rebuilt = removeSavedEntry(held, { source: "clockify", id: "absent" })
+    expect(rebuilt.plan).toMatchObject({ day: "2025-06-18", days: ["2025-06-18"] })
+  })
+
+  it("covers a day run's own day and a week plan's whole week", () => {
+    expect(planPeriod({ monday: "2025-06-16", day: "2025-06-18" })).toEqual({
+      from: new Date(2025, 5, 18),
+      to: new Date(2025, 5, 19)
+    })
+    expect(planPeriod({ monday: "2025-06-16" })).toMatchObject({
+      from: new Date(2025, 5, 16),
+      to: new Date(2025, 5, 23)
+    })
+  })
+
+  it("shows hours on tickets Jira cannot see, only for this week", () => {
+    const held = build({
+      jiraUnseen: [
+        { day: "2025-06-18", seconds: 579, ticketKey: "PROJ-7" },
+        { day: "2025-06-23", seconds: 600, ticketKey: "PROJ-8" }
+      ]
+    })
+    expect(held.plan.jiraUnseen).toEqual([{ day: "2025-06-18", seconds: 579, ticketKey: "PROJ-7" }])
+    expect(held.plan.rows).toEqual([])
   })
 })
 

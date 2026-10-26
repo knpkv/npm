@@ -388,6 +388,7 @@ export const agentReportJson = (options: {
     proposals: options.report.proposals.map(withSummary),
     withheld: options.report.withheld.map(withSummary),
     ownershipWithheld: options.ownershipWithheld.map(withSummary),
+    jiraUnseen: options.report.jiraUnseen ?? [],
     unattributed: options.report.unattributed,
     ignored: options.report.ignored,
     ignoredTickets: options.report.ignoredTickets,

@@ -16,7 +16,7 @@ import {
 } from "@knpkv/jira-clockify"
 import { Effect, Option, Semaphore } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
-import type { ConfirmBatchItemResponse, ReadProgress, WeekScopeName } from "../shared/contracts.js"
+import type { ConfirmBatchItemResponse, ReadProgress } from "../shared/contracts.js"
 import { ApiError, JcfWebApi, PlanExpiredError, ProposalRejectedError } from "./Api.js"
 import {
   type BatchConfirmOutcome,
@@ -26,7 +26,14 @@ import {
   MINIMUM_WRITE_SECONDS
 } from "./Confirm.js"
 import { WeekPlans } from "./WeekPlans.js"
-import { readRecordedWeekPlan, readWeekPlan, refreshWeekPlan, savedWeekPlan, streamWeekRead } from "./WeekRead.js"
+import {
+  readRecordedWeekPlan,
+  readWeekPlan,
+  refreshWeekPlan,
+  savedWeekPlan,
+  streamWeekRead,
+  type WeekQuery
+} from "./WeekRead.js"
 
 const failed = (message: string) => new ApiError({ message })
 
@@ -38,7 +45,7 @@ export const WeekLive = HttpApiBuilder.group(JcfWebApi, "week", (handlers) =>
     const plans = yield* WeekPlans
 
     const read = (
-      query: { readonly monday?: string | undefined; readonly only?: WeekScopeName | undefined },
+      query: WeekQuery,
       report: (progress: ReadProgress) => Effect.Effect<void>
     ) => readWeekPlan({ query, report, reconcile, issues, config, plans })
 

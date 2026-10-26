@@ -54,21 +54,28 @@ export class OwnerSessionAuth extends HttpApiMiddleware.Service<OwnerSessionAuth
   }
 ) {}
 
+/** Which week to read; `day` narrows the read to that one day, which must fall in the week. */
+const WeekQuery = Schema.Struct({
+  monday: Schema.optional(Day),
+  day: Schema.optional(Day),
+  only: Schema.optional(WeekScope)
+})
+
 export class WeekGroup extends HttpApiGroup.make("week")
   .add(HttpApiEndpoint.get("saved", "/saved", {
-    query: Schema.Struct({ monday: Schema.optional(Day), only: Schema.optional(WeekScope) }),
+    query: WeekQuery,
     success: SavedWeek
   }))
   .add(
     HttpApiEndpoint.get("read", "/", {
       error: [ApiError, PlanExpiredError],
-      query: Schema.Struct({ monday: Schema.optional(Day), only: Schema.optional(WeekScope) }),
+      query: WeekQuery,
       success: WeekPlan
     })
   )
   .add(HttpApiEndpoint.get("stream", "/stream", {
     error: [ApiError, PlanExpiredError],
-    query: Schema.Struct({ monday: Schema.optional(Day), only: Schema.optional(WeekScope) }),
+    query: WeekQuery,
     success: HttpApiSchema.StreamUint8Array({ contentType: "application/x-ndjson" })
   }))
   .add(HttpApiEndpoint.get("recorded", "/recorded", {
@@ -78,7 +85,7 @@ export class WeekGroup extends HttpApiGroup.make("week")
   }))
   .add(HttpApiEndpoint.get("recordedOnly", "/recorded-only", {
     error: [ApiError, PlanExpiredError],
-    query: Schema.Struct({ monday: Schema.optional(Day), only: Schema.optional(WeekScope) }),
+    query: WeekQuery,
     success: HttpApiSchema.StreamUint8Array({ contentType: "application/x-ndjson" })
   }))
   .prefix("/api/week")

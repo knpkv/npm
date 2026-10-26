@@ -300,6 +300,16 @@ export const NotMineRow = Schema.Struct({
   ticketTitle: Schema.NullOr(Schema.String)
 })
 
+/**
+ * Session hours on a ticket Jira answered 404 for: deleted, or in a project this account cannot read.
+ * Reported rather than offered, because Jira would refuse the write.
+ */
+export const JiraUnseenRow = Schema.Struct({
+  day: Day,
+  seconds: Schema.Number,
+  ticketKey: Schema.String
+})
+
 /** A day withheld from proposals, with the reason, so it never reads as "nothing to log". */
 export const ExcludedDay = Schema.Struct({
   day: Day,
@@ -325,6 +335,8 @@ export const WeekPlan = Schema.Struct({
   monday: Day,
   /** Names the server-held evidence a confirmation refers to. */
   planId: Schema.String,
+  /** Set when this plan covers only that day of the week; `days` then holds just it. */
+  day: Schema.optional(Day),
   rows: Schema.Array(WeekRow),
   /** Closed Clockify entries without a ticket, excluded from ticket reconciliation. */
   unlinkedClockify: Schema.Array(Schema.Struct({
@@ -344,6 +356,8 @@ export const WeekPlan = Schema.Struct({
   sessionRootCount: Schema.Number,
   /** Hours on tickets assigned to somebody else. Empty when ownership is not being enforced. */
   notMine: Schema.Array(NotMineRow),
+  /** Hours on tickets Jira cannot see. Omitted by older servers and saved plans. */
+  jiraUnseen: Schema.optional(Schema.Array(JiraUnseenRow)),
   /** Time on tickets you ignored. Not offered; other tickets took their share of parallel work. */
   ignored: Schema.Array(IgnoredRow),
   /** Every ignored ticket, in every week — so each can be restored even with no time this week. */
@@ -362,7 +376,12 @@ export const WeekPlan = Schema.Struct({
 })
 
 /** Authenticated cached view. Missing evidence allows provider-only reads; suggestions require an explicit scan. */
-export const SavedWeek = Schema.Struct({ monday: Day, scope: WeekScope, plan: Schema.NullOr(WeekPlan) })
+export const SavedWeek = Schema.Struct({
+  monday: Day,
+  day: Schema.optional(Day),
+  scope: WeekScope,
+  plan: Schema.NullOr(WeekPlan)
+})
 
 /** What one side of a write did. Mirrors `SideOutcome` in the engine. */
 export const SideOutcome = Schema.Union([

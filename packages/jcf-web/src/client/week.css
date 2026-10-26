@@ -150,6 +150,10 @@
   color: var(--rly-color-text-2);
 }
 
+.jcf-column-head .jcf-run-day {
+  margin-inline-start: auto;
+}
+
 .jcf-gutter {
   display: flex;
   flex-direction: column;

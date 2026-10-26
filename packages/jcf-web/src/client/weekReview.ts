@@ -30,6 +30,8 @@ export interface AgentActivity {
 type ReadMode = "restore" | "full" | "recorded"
 interface ReadRequest {
   readonly week: string | undefined
+  /** A day run: read only this day of the week. */
+  readonly day?: string | undefined
   readonly scope: WeekScopeName
   readonly mode: ReadMode
   readonly planId?: string | undefined
@@ -67,6 +69,8 @@ export interface WeekPreferences {
 interface ReviewStatus {
   readonly layers: CalendarLayers
   readonly monday: string | undefined
+  /** The day of a day run, or undefined for the whole week. */
+  readonly day: string | undefined
   readonly scope: WeekScopeName
   readonly loading: boolean
   readonly failure: string | null
@@ -106,6 +110,7 @@ export const makeWeekReview = (
   const status = Atom.make<ReviewStatus>({
     layers: defaultCalendarLayers,
     monday: preferences.week,
+    day: undefined,
     scope: preferences.scope,
     loading: true,
     failure: null,
@@ -135,7 +140,7 @@ export const makeWeekReview = (
     }
     const queueUnavailable = current.busy || current.loading || !current.fresh ||
       (!writeTargets.jira && !writeTargets.clockify) || view.plan === null ||
-      view.plan.scope !== current.scope || view.plan.monday !== current.monday
+      view.plan.scope !== current.scope || view.plan.monday !== current.monday || view.plan.day !== current.day
     return {
       writeTargets,
       ...current,
@@ -165,7 +170,7 @@ export const makeWeekReview = (
 
   const load = async (request: ReadRequest) => {
     if (readLocked()) return
-    const { mode, week } = request
+    const { day, mode, week } = request
     let scope = request.scope
     lastRead = request
     active?.abort()
@@ -174,6 +179,7 @@ export const makeWeekReview = (
     const isCurrent = () => active === controller && !controller.signal.aborted
     update({
       monday: week,
+      day,
       scope,
       loading: true,
       failure: null,
@@ -241,14 +247,14 @@ export const makeWeekReview = (
       }
       let retainedId = request.planId
       if (mode === "restore") {
-        const saved = await transport.readSavedWeek(week, scope, controller.signal)
+        const saved = await transport.readSavedWeek(week, scope, controller.signal, day)
         if (!isCurrent()) return
         setPlan(saved.plan)
         update({ monday: saved.monday })
         preferences.rememberWeek(saved.monday)
         if (saved.plan === null) {
           update({ missingPlan: true })
-          const recorded = await transport.readRecordedWeek(saved.monday, scope, controller.signal, onProgress)
+          const recorded = await transport.readRecordedWeek(saved.monday, scope, controller.signal, onProgress, day)
           if (!isCurrent()) return
           setPlan(recorded)
           update({ monday: recorded.monday, fresh: true, missingPlan: recorded.sessionScanAvailable === false })
@@ -257,7 +263,7 @@ export const makeWeekReview = (
         retainedId = saved.plan.planId
       }
       let next: WeekPlanResponse
-      if (mode === "full") next = await transport.readWeek(week, scope, controller.signal, onProgress)
+      if (mode === "full") next = await transport.readWeek(week, scope, controller.signal, onProgress, day)
       else {
         if (retainedId === undefined) {
           throw new Api.RequestFailure({ status: 409, message: "No saved plan is available. Choose Rescan sessions." })
@@ -279,8 +285,14 @@ export const makeWeekReview = (
   const refreshRecorded = () => {
     const current = registry.get(state)
     return current.plan === null
-      ? load({ week: current.monday, scope: current.scope, mode: "restore" })
-      : load({ week: current.plan.monday, scope: current.plan.scope, mode: "recorded", planId: current.plan.planId })
+      ? load({ week: current.monday, day: current.day, scope: current.scope, mode: "restore" })
+      : load({
+        week: current.plan.monday,
+        day: current.plan.day,
+        scope: current.plan.scope,
+        mode: "recorded",
+        planId: current.plan.planId
+      })
   }
 
   /** The lock ends when the mutation settles; the following totals read remains replaceable by navigation. */
@@ -324,8 +336,10 @@ export const makeWeekReview = (
     void refreshRecorded()
   }
 
+  /** Append a queue failure once: a batch that fails the same way for every row reports one line. */
   const recordQueueFailure = (message: string) => {
     const previous = registry.get(status).actionFailure
+    if (previous !== null && previous.split("\n").includes(message)) return
     update({ actionFailure: previous === null ? message : `${previous}\n${message}` })
   }
 
@@ -495,7 +509,7 @@ export const makeWeekReview = (
       disposed = false
       if (!dispatching) queueNeedsRefresh = false
       const current = registry.get(status)
-      return load({ week: current.monday, scope: current.scope, mode: "restore" })
+      return load({ week: current.monday, day: current.day, scope: current.scope, mode: "restore" })
     },
     dispose: () => {
       disposed = true
@@ -506,21 +520,23 @@ export const makeWeekReview = (
       registry.update(atoms.queued, (items) => items.filter((item) => item.status === "saving"))
       update({ fresh: false })
     },
-    navigate: (week: string | undefined, scope: WeekScopeName) => {
+    /** Open a week, or with `day` a day run of it; a day names its own week. */
+    navigate: (week: string | undefined, scope: WeekScopeName, day?: string | undefined) => {
       if (readLocked()) return Promise.resolve()
       update({ actionFailure: null, written: null })
-      return load({ week, scope, mode: "restore" })
+      return load({ week, day, scope, mode: "restore" })
     },
     chooseScope: (scope: WeekScopeName) => {
       if (readLocked()) return Promise.resolve()
       preferences.rememberScope(scope)
-      return load({ week: registry.get(status).monday, scope, mode: "restore" })
+      const current = registry.get(status)
+      return load({ week: current.monday, day: current.day, scope, mode: "restore" })
     },
     rescan: () => {
       if (readLocked()) return Promise.resolve()
       const current = registry.get(status)
       update({ configurationChanged: false })
-      return load({ week: current.monday, scope: current.scope, mode: "full" })
+      return load({ week: current.monday, day: current.day, scope: current.scope, mode: "full" })
     },
     refreshRecorded,
     retry: () => lastRead === null ? Promise.resolve() : load(lastRead),

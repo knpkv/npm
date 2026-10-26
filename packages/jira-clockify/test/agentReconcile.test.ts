@@ -208,6 +208,7 @@ const AgentReport = Schema.Struct({
   mode: Schema.optional(Schema.String),
   sides: Schema.Struct({ clockify: Schema.Boolean, jira: Schema.Boolean }),
   proposals: Schema.Array(ReportProposal),
+  jiraUnseen: Schema.Array(Schema.Struct({ ticketKey: Schema.String, day: Schema.String, seconds: Schema.Finite })),
   ignored: Schema.Array(Schema.Struct({ ticketKey: Schema.String, day: Schema.String, seconds: Schema.Finite })),
   ignoredTickets: Schema.Array(Schema.String),
   ownershipWithheld: Schema.Array(
@@ -2055,6 +2056,59 @@ describe("jcf sync reconcile --agent --json", () => {
       expect(world.stdout).toEqual([])
       expect(output(world.stderr)).toContain("Jira worklog fetch failed")
     }))
+
+  // A branch can name a ticket that was deleted or sits in a project this account cannot read. The
+  // search already proved Jira reachable, so its 404 means no visible worklogs, not an outage — one
+  // such key must not fail the whole week.
+  it.effect("reads a session-only key Jira cannot see as having no worklogs", () =>
+    Effect.gen(function*() {
+      const { exit, world } = yield* run(
+        agent(["--json"]),
+        baseOptions({
+          jiraMissingIssues: ["PROJ-5663"],
+          transcripts: {
+            "work-repo/s1.jsonl": transcript({
+              sessionId: "s1",
+              cwd: `${WORK_ROOT}/repo`,
+              gitBranch: "feat/PROJ-5663-gone",
+              events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30)
+            })
+          }
+        })
+      )
+      expect(exit._tag).toBe("Success")
+      expect(output(world.stderr)).not.toContain("Jira worklog fetch failed")
+      // Reported, never offered: Jira would refuse a worklog on a ticket it cannot see.
+      const report = Option.getOrThrow(decodeAgentReport(world.stdout.join("\n")))
+      expect(report.proposals.map((proposal) => proposal.ticketKey)).not.toContain("PROJ-5663")
+      expect(report.jiraUnseen).toEqual([{ ticketKey: "PROJ-5663", day: "2026-07-01", seconds: expect.any(Number) }])
+      expect(report.jiraUnseen[0]!.seconds).toBeGreaterThan(0)
+    }))
+
+  // A key the worklog search itself returned cannot then be missing; that contradiction still fails,
+  // and the message names the status instead of the bare "Error" a status error stringifies to.
+  it.effect("fails, naming the status, when a searched key answers 404", () =>
+    Effect.gen(function*() {
+      const { exit, world } = yield* run(
+        agent(["--json"]),
+        baseOptions({
+          jiraMissingIssues: ["PROJ-5662"],
+          jiraWorklogs: {
+            "PROJ-5662": [{ started: iso(at(DAY.year, DAY.month, DAY.day, 10, 0)), timeSpentSeconds: 60 }]
+          },
+          transcripts: {
+            "work-repo/s1.jsonl": transcript({
+              sessionId: "s1",
+              cwd: `${WORK_ROOT}/repo`,
+              gitBranch: "feat/PROJ-5662-otel",
+              events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30)
+            })
+          }
+        })
+      )
+      expect(exit._tag).toBe("Failure")
+      expect(output(world.stderr)).toContain("Jira worklog fetch failed for PROJ-5662: GetIssueWorklog404")
+    }))
 })
 
 describe("jcf sync reconcile --agent: a session that changes branch", () => {
@@ -2948,6 +3002,51 @@ describe("jcf sync reconcile <direction>", () => {
     bindings: Schema.Array(LedgerBindingEvidence),
     observedUnbound: Schema.Array(Schema.Unknown)
   })))
+
+  // A POST Jira read and refused wrote nothing; holding its intent would block every later read on a
+  // review nobody can resolve. A 5xx stays held, because that write may have landed.
+  it.effect.each([
+    { name: "releases the intent when Jira refuses the POST", refused: true, pending: 0 },
+    { name: "holds the intent when the POST fails ambiguously", refused: false, pending: 1 }
+  ])("$name", ({ pending, refused }) =>
+    Effect.gen(function*() {
+      const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+      const rowId = "2026-07-01:POST-REFUSED"
+      const sourceId = "clockify-post-refused-source"
+      const source = {
+        id: sourceId,
+        description: `[PROJ-9] source\n${SourceConsumption.marker(rowId, startMs)}`,
+        start: iso(startMs),
+        end: iso(startMs + 3_600_000)
+      }
+      const fake = makeFakeHeadless(baseOptions({
+        clockifyEntries: [source],
+        jiraWorklogs: {},
+        ...(refused ? { jiraPostsRefused: true } : { jiraPostsFail: true }),
+        keep: [true],
+        writtenFiles: ledgerWith([{
+          provider: "clockify",
+          scope: clockifyScope,
+          entryId: sourceId,
+          rowId,
+          sourceStartMs: startMs,
+          startMs,
+          endMs: startMs + 3_600_000,
+          seconds: 3600,
+          ticketKey: "PROJ-9"
+        }])
+      }))
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      yield* Command.runWith(root, { version: "0.0.0-test" })([
+        "sync",
+        "reconcile",
+        "clockify-to-jira",
+        ...SINCE
+      ]).pipe(Effect.exit, Effect.provide(fake.layer))
+
+      expect(fake.world.jiraWorklogs).toEqual([])
+      expect(decodeLedgerEvidence(fake.world.writtenFiles[ledgerPath] ?? "").pending).toHaveLength(pending)
+    }))
 
   it.effect("checkpoints an exact Jira POST readback and retains it across a fresh CLI process", () =>
     Effect.gen(function*() {

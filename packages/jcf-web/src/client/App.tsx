@@ -176,6 +176,7 @@ export const App = () => {
     busy: writing,
     cancelled,
     configurationChanged,
+    day,
     failure: readFailure,
     loading,
     missingPlan,
@@ -236,9 +237,9 @@ export const App = () => {
     setOpen(null)
     actions.cancel()
   }
-  const load = (week: string | undefined, which: WeekScopeName) => {
+  const load = (week: string | undefined, which: WeekScopeName, day?: string | undefined) => {
     setOpen(null)
-    return actions.navigate(week, which)
+    return actions.navigate(week, which, day)
   }
   useEffect(() => {
     if (loading) setOpen((current) => (current?.kind === "agent" ? current : null))
@@ -380,6 +381,11 @@ export const App = () => {
               >
                 Next
               </Button>
+              {day === undefined ? null : (
+                <Button disabled={busy} onClick={() => load(monday, scope)} size="compact" variant="quiet">
+                  Back to week
+                </Button>
+              )}
             </div>
             <div className="jcf-bar-group" role="group" aria-label="Systems to reconcile">
               {scopeLabels
@@ -412,7 +418,8 @@ export const App = () => {
                 aria-disabled={unavailable ? "true" : undefined}
                 aria-describedby={unavailable ? "jcf-log-time-reason" : undefined}
                 onClick={() => {
-                  if (!unavailable && plan !== null) setOpen({ kind: "manual", day: plan.monday, clock: "09:00" })
+                  if (!unavailable && plan !== null)
+                    setOpen({ kind: "manual", day: plan.day ?? plan.monday, clock: "09:00" })
                 }}
                 size="compact"
                 variant="primary"
@@ -617,6 +624,7 @@ export const App = () => {
                     }}
                     layers={state.layers}
                     onToggleLayer={actions.toggleLayer}
+                    onRunDay={day === undefined ? (picked) => load(monday, scope, picked) : undefined}
                     writing={writing}
                     optimisticEntries={optimisticEntries}
                     disabled={state.queueUnavailable}
@@ -885,6 +893,24 @@ export const App = () => {
                         >
                           It is mine
                         </Button>
+                      </li>
+                    ))}
+                  </ul>
+                </Region>
+              )}
+
+              {(plan.jiraUnseen ?? []).length === 0 ? null : (
+                <Region className="jcf-lane" count={(plan.jiraUnseen ?? []).length} title="Jira cannot see">
+                  <p className="jcf-muted">
+                    Jira says these tickets do not exist or you cannot read them. The hours are real; they are not
+                    offered, because Jira would refuse the worklog. Check the key, or ask for access.
+                  </p>
+                  <ul>
+                    {(plan.jiraUnseen ?? []).map((row) => (
+                      <li key={`${row.day}:${row.ticketKey}`}>
+                        <strong>{row.day}</strong>
+                        <span>{row.ticketKey}</span>
+                        <span>{duration(row.seconds)}</span>
                       </li>
                     ))}
                   </ul>

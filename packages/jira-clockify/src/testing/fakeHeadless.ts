@@ -61,6 +61,7 @@ import * as Queue from "effect/Queue"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
+import * as Stream from "effect/Stream"
 import * as Terminal from "effect/Terminal"
 import { defaultSessionAgentSettings } from "../agent/agentSettings.js"
 import { LogToStderrLive } from "../cli/layers.js"
@@ -363,6 +364,8 @@ export interface FakeHeadlessOptions {
   readonly jiraCurrentUserFails?: boolean | undefined
   /** Make every worklog *read* fail, to model a transient Jira outage mid-run. */
   readonly jiraWorklogReadFails?: boolean | undefined
+  /** Issues Jira answers 404 for on worklog reads: deleted, or in a project this account cannot see. */
+  readonly jiraMissingIssues?: ReadonlyArray<string> | undefined
   /** Search reports a further page but supplies no continuation token. */
   readonly jiraSearchClaimsMoreWithoutToken?: boolean | undefined
   /** Limit each Jira worklog read page while retaining the provider's total count. */
@@ -386,6 +389,8 @@ export interface FakeHeadlessOptions {
   readonly clockifyDeletesFail?: boolean | undefined
   readonly jiraDeletesFail?: boolean | undefined
   readonly jiraPostsFail?: boolean | undefined
+  /** Jira reads the worklog POST and refuses it with a 400, so nothing is written. */
+  readonly jiraPostsRefused?: boolean | undefined
   readonly jiraSprintTickets?: ReadonlyArray<string> | undefined
   /** Deterministic test gate immediately before a Clockify create reaches the fake provider. */
   readonly beforeClockifyWrite?: ((world: FakeWorld) => Effect.Effect<void>) | undefined
@@ -555,6 +560,16 @@ const fakeFileSystemLayer = (
     writeAll: () => Effect.void
   })
 
+  const readStored = (method: string, path: string) => {
+    if (path.startsWith(`${TRANSCRIPT_ROOT}/`)) reads.push(path)
+    // Matched by suffix, so a test names the fixture it wrote rather than reproducing the project
+    // directory encoding the Claude CLI derives from a session's `cwd`.
+    if (unreadable.some((suffix) => path.endsWith(suffix))) return permissionDenied(method, path)
+    const stored = written[path]
+    if (stored !== undefined) return Effect.succeed(stored)
+    const content = files().get(path)
+    return content === undefined ? notFound(method, path) : Effect.succeed(content)
+  }
   return FileSystem.layerNoop({
     realPath: (path) =>
       directories().has(path) || files().has(path) || written[path] !== undefined
@@ -586,18 +601,10 @@ const fakeFileSystemLayer = (
         .map((file) => file.slice(prefix.length))
       return directories().has(path) ? Effect.succeed(entries) : notFound("readDirectory", path)
     },
-    readFileString: (path) => {
-      if (path.startsWith(`${TRANSCRIPT_ROOT}/`)) reads.push(path)
-      // Matched by suffix, so a test names the fixture it wrote rather than reproducing the project
-      // directory encoding the Claude CLI derives from a session's `cwd`.
-      if (unreadable.some((suffix) => path.endsWith(suffix))) {
-        return permissionDenied("readFileString", path)
-      }
-      const stored = written[path]
-      if (stored !== undefined) return Effect.succeed(stored)
-      const content = files().get(path)
-      return content === undefined ? notFound("readFileString", path) : Effect.succeed(content)
-    },
+    readFileString: (path) => readStored("readFileString", path),
+    // Transcripts are streamed by line; the fake hands the whole file over as one chunk.
+    stream: (path) =>
+      Stream.fromEffect(readStored("stream", path)).pipe(Stream.map((content) => new TextEncoder().encode(content))),
     // The config service writes through this; nothing in these tests reads it back from disk.
     makeDirectory: () => Effect.void,
     // A real store, so anything the CLI writes and reads back — the watch lease — behaves. `wx` is
@@ -1255,6 +1262,9 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           if (options.jiraPostsFail === true) {
             return jsonResponse(request, 500, { errorMessages: ["synthetic create failure"] })
           }
+          if (options.jiraPostsRefused === true) {
+            return jsonResponse(request, 400, { errorMessages: ["synthetic refusal"], errors: {} })
+          }
           const payload = requestPayload(request.body)
           const issueKey = worklogMatch[1] ?? "unknown"
           let nextId = 0
@@ -1283,6 +1293,11 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           const requestedStartAt = Number(request.urlParams.params.find(([name]) => name === "startAt")?.[1] ?? 0)
           if (requestedStartAt > 0 && options.jiraWorklogPageFault === "failure") {
             return jsonResponse(request, 500, { errorMessages: ["Later worklog page unavailable"] })
+          }
+          if (options.jiraMissingIssues?.includes(worklogMatch[1] ?? "") === true) {
+            return jsonResponse(request, 404, {
+              errorMessages: ["Issue does not exist or you do not have permission to see it."]
+            })
           }
           if (options.jiraWorklogReadFails === true || world.jiraWorklogReadFailuresRemaining > 0) {
             if (world.jiraWorklogReadFailuresRemaining > 0) world.jiraWorklogReadFailuresRemaining--
