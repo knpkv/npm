@@ -1,5 +1,16 @@
 # @knpkv/jcf-web
 
+## 0.11.0
+
+### Minor Changes
+
+- [#1100](https://github.com/knpkv/npm/pull/1100) [`1aaf862`](https://github.com/knpkv/npm/commit/1aaf8623940a3e5c0c3db3595ec4e3c17b2eb478) Thanks [@konopkov](https://github.com/konopkov)! - Run a single day: each day header has a "Run day" action that reads, refreshes and confirms only that day, held beside its week so "Back to week" needs no rescan. The week also lists tickets Jira cannot see, and a batch that fails the same way for every row reports the failure once.
+
+### Patch Changes
+
+- Updated dependencies [[`1aaf862`](https://github.com/knpkv/npm/commit/1aaf8623940a3e5c0c3db3595ec4e3c17b2eb478)]:
+  - @knpkv/jira-clockify@1.11.0
+
 ## 0.10.7
 
 ### Patch Changes
