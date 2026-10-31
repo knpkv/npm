@@ -1228,8 +1228,8 @@ export type GetSchedulingResponse = { readonly "dependencies": "Sequential" | "C
 export const GetSchedulingResponse = Schema.Struct({ "dependencies": Schema.Literals(["Sequential", "Concurrent"]).annotate({ "description": "The dependencies for the plan. This is \"Sequential\" or \"Concurrent\"." }), "endDate": Schema.suspend((): Schema.Codec<GetDateFieldResponse> => GetDateFieldResponse).annotate({ "description": "The end date field for the plan." }), "estimation": Schema.Literals(["StoryPoints", "Days", "Hours"]).annotate({ "description": "The estimation unit for the plan. This is \"StoryPoints\", \"Days\" or \"Hours\"." }), "inferredDates": Schema.Literals(["None", "SprintDates", "ReleaseDates"]).annotate({ "description": "The inferred dates for the plan. This is \"None\", \"SprintDates\" or \"ReleaseDates\"." }), "startDate": Schema.suspend((): Schema.Codec<GetDateFieldResponse> => GetDateFieldResponse).annotate({ "description": "The start date field for the plan." }) }).annotate({ "identifier": "GetSchedulingResponse" })
 export type PageWithCursorGetTeamResponseForPage = { readonly "cursor"?: string, readonly "last"?: boolean, readonly "nextPageCursor"?: string, readonly "size"?: number, readonly "total"?: number, readonly "values"?: ReadonlyArray<GetTeamResponseForPage> }
 export const PageWithCursorGetTeamResponseForPage = Schema.Struct({ "cursor": Schema.optionalKey(Schema.String), "last": Schema.optionalKey(Schema.Boolean), "nextPageCursor": Schema.optionalKey(Schema.String), "size": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "total": Schema.optionalKey(Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "values": Schema.optionalKey(Schema.Array(GetTeamResponseForPage)) }).annotate({ "identifier": "PageWithCursorGetTeamResponseForPage" })
-export type PolicySummaryResponse = { readonly "isLast"?: boolean, readonly "maxResults"?: number, readonly "startAt"?: number, readonly "total"?: number, readonly "values"?: ReadonlyArray<PolicySummary> }
-export const PolicySummaryResponse = Schema.Struct({ "isLast": Schema.optionalKey(Schema.Boolean), "maxResults": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "startAt": Schema.optionalKey(Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "total": Schema.optionalKey(Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "values": Schema.optionalKey(Schema.Array(PolicySummary)) }).annotate({ "identifier": "PolicySummaryResponse" })
+export type PolicySummaryResponse = { readonly "isLast"?: boolean, readonly "maxResults"?: number, readonly "nextPageCursor"?: string, readonly "startAt"?: number, readonly "total"?: number, readonly "values"?: ReadonlyArray<PolicySummary> }
+export const PolicySummaryResponse = Schema.Struct({ "isLast": Schema.optionalKey(Schema.Boolean), "maxResults": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "nextPageCursor": Schema.optionalKey(Schema.String), "startAt": Schema.optionalKey(Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "total": Schema.optionalKey(Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "values": Schema.optionalKey(Schema.Array(PolicySummary)) }).annotate({ "identifier": "PolicySummaryResponse" })
 export type StatePolicyDocument = { readonly "id"?: string, readonly "isDefault"?: boolean, readonly "policyDescription"?: string, readonly "policyName"?: string, readonly "rulesByDomain"?: { readonly [x: string]: ReadonlyArray<StatePolicyRule> }, readonly "version"?: number }
 export const StatePolicyDocument = Schema.Struct({ "id": Schema.optionalKey(Schema.String), "isDefault": Schema.optionalKey(Schema.Boolean), "policyDescription": Schema.optionalKey(Schema.String), "policyName": Schema.optionalKey(Schema.String), "rulesByDomain": Schema.optionalKey(Schema.Record(Schema.String, Schema.Array(StatePolicyRule))), "version": Schema.optionalKey(Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))) }).annotate({ "identifier": "StatePolicyDocument" })
 export type ProjectResult = { readonly "errors"?: ReadonlyArray<PolicyApplicationViolation>, readonly "message"?: string, readonly "projectId"?: number }
@@ -4000,6 +4000,8 @@ export type CreateIssueSecurityScheme401 = ErrorCollection
 export const CreateIssueSecurityScheme401 = ErrorCollection
 export type CreateIssueSecurityScheme403 = ErrorCollection
 export const CreateIssueSecurityScheme403 = ErrorCollection
+export type CreateIssueSecurityScheme422 = LimitExceededResponseBean
+export const CreateIssueSecurityScheme422 = LimitExceededResponseBean
 export type GetSecurityLevelsParams = { readonly "startAt"?: string, readonly "maxResults"?: string, readonly "id"?: ReadonlyArray<string>, readonly "schemeId"?: ReadonlyArray<string>, readonly "onlyDefault"?: boolean }
 export const GetSecurityLevelsParams = Schema.Struct({ "startAt": Schema.optionalKey(Schema.String), "maxResults": Schema.optionalKey(Schema.String), "id": Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isUnique().annotate({ "expected": "an array with unique items" }))), "schemeId": Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isUnique().annotate({ "expected": "an array with unique items" }))), "onlyDefault": Schema.optionalKey(Schema.Boolean) })
 export type GetSecurityLevels200 = PageBeanSecurityLevel
@@ -4650,6 +4652,8 @@ export type CreatePermissionScheme401 = Schema.Json
 export const CreatePermissionScheme401 = Schema.Json.annotate({ "expected": "JSON value" })
 export type CreatePermissionScheme403 = Schema.Json
 export const CreatePermissionScheme403 = Schema.Json.annotate({ "expected": "JSON value" })
+export type CreatePermissionScheme422 = LimitExceededResponseBean
+export const CreatePermissionScheme422 = LimitExceededResponseBean
 export type GetPermissionSchemeParams = { readonly "expand"?: string }
 export const GetPermissionSchemeParams = Schema.Struct({ "expand": Schema.optionalKey(Schema.String) })
 export type GetPermissionScheme200 = PermissionScheme
@@ -4878,14 +4882,18 @@ export type TrashPlan404 = ErrorCollection
 export const TrashPlan404 = ErrorCollection
 export type TrashPlan409 = ErrorCollection
 export const TrashPlan409 = ErrorCollection
-export type ListPoliciesParams = { readonly "startAt"?: number, readonly "maxResults"?: number }
-export const ListPoliciesParams = Schema.Struct({ "startAt": Schema.optionalKey(Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "maxResults": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))) })
+export type ListPoliciesParams = { readonly "startAt"?: number, readonly "maxResults"?: number, readonly "cursor"?: string }
+export const ListPoliciesParams = Schema.Struct({ "startAt": Schema.optionalKey(Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "maxResults": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "cursor": Schema.optionalKey(Schema.String) })
 export type ListPolicies200 = PolicySummaryResponse
 export const ListPolicies200 = PolicySummaryResponse
+export type ListPolicies400 = ErrorResponse
+export const ListPolicies400 = ErrorResponse
 export type ListPolicies401 = ErrorResponse
 export const ListPolicies401 = ErrorResponse
 export type ListPolicies403 = ErrorResponse
 export const ListPolicies403 = ErrorResponse
+export type ListPolicies500 = ErrorResponse
+export const ListPolicies500 = ErrorResponse
 export type GetPolicyState200 = ReadonlyArray<StatePolicyDocument>
 export const GetPolicyState200 = Schema.Array(StatePolicyDocument)
 export type GetPolicyState401 = ErrorResponse
@@ -4970,6 +4978,8 @@ export type CreatePriority401 = ErrorCollection
 export const CreatePriority401 = ErrorCollection
 export type CreatePriority403 = ErrorCollection
 export const CreatePriority403 = ErrorCollection
+export type CreatePriority422 = LimitExceededResponseBean
+export const CreatePriority422 = LimitExceededResponseBean
 export type SetDefaultPriorityRequestJson = SetDefaultPriorityRequest
 export const SetDefaultPriorityRequestJson = SetDefaultPriorityRequest
 export type SetDefaultPriority400 = ErrorCollection
@@ -5554,8 +5564,6 @@ export type GetProjectFields401 = Schema.Json
 export const GetProjectFields401 = Schema.Json.annotate({ "expected": "JSON value" })
 export type GetProjectFields403 = Schema.Json
 export const GetProjectFields403 = Schema.Json.annotate({ "expected": "JSON value" })
-export type GetProjectFields404 = Schema.Json
-export const GetProjectFields404 = Schema.Json.annotate({ "expected": "JSON value" })
 export type ValidateProjectKeyParams = { readonly "key"?: string }
 export const ValidateProjectKeyParams = Schema.Struct({ "key": Schema.optionalKey(Schema.String) })
 export type ValidateProjectKey200 = ErrorCollection
@@ -10077,6 +10085,7 @@ export const make = (
       "400": decodeError("CreateIssueSecurityScheme400", CreateIssueSecurityScheme400),
       "401": decodeError("CreateIssueSecurityScheme401", CreateIssueSecurityScheme401),
       "403": decodeError("CreateIssueSecurityScheme403", CreateIssueSecurityScheme403),
+      "422": decodeError("CreateIssueSecurityScheme422", CreateIssueSecurityScheme422),
       orElse: unexpectedStatus
     }))
     ),
@@ -10906,6 +10915,7 @@ export const make = (
       "400": decodeError("CreatePermissionScheme400", CreatePermissionScheme400),
       "401": decodeError("CreatePermissionScheme401", CreatePermissionScheme401),
       "403": decodeError("CreatePermissionScheme403", CreatePermissionScheme403),
+      "422": decodeError("CreatePermissionScheme422", CreatePermissionScheme422),
       orElse: unexpectedStatus
     }))
     ),
@@ -11191,11 +11201,13 @@ export const make = (
     ))
   ),
     "listPolicies": (options) => HttpClientRequest.get("/rest/api/3/policies").pipe(
-      HttpClientRequest.setUrlParams({ "startAt": options?.params?.["startAt"] as any, "maxResults": options?.params?.["maxResults"] as any }),
+      HttpClientRequest.setUrlParams({ "startAt": options?.params?.["startAt"] as any, "maxResults": options?.params?.["maxResults"] as any, "cursor": options?.params?.["cursor"] as any }),
       withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(ListPolicies200),
+      "400": decodeError("ListPolicies400", ListPolicies400),
       "401": decodeError("ListPolicies401", ListPolicies401),
       "403": decodeError("ListPolicies403", ListPolicies403),
+      "500": decodeError("ListPolicies500", ListPolicies500),
       orElse: unexpectedStatus
     }))
     ),
@@ -11290,6 +11302,7 @@ export const make = (
       "400": decodeError("CreatePriority400", CreatePriority400),
       "401": decodeError("CreatePriority401", CreatePriority401),
       "403": decodeError("CreatePriority403", CreatePriority403),
+      "422": decodeError("CreatePriority422", CreatePriority422),
       orElse: unexpectedStatus
     }))
     ),
@@ -12058,7 +12071,6 @@ export const make = (
       "400": decodeError("GetProjectFields400", GetProjectFields400),
       "401": decodeError("GetProjectFields401", GetProjectFields401),
       "403": decodeError("GetProjectFields403", GetProjectFields403),
-      "404": decodeError("GetProjectFields404", GetProjectFields404),
       orElse: unexpectedStatus
     }))
     ),
@@ -17124,7 +17136,7 @@ readonly "getIssueSecuritySchemes": <Config extends OperationConfig>(options: { 
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "createIssueSecurityScheme": <Config extends OperationConfig>(options: { readonly payload: typeof CreateIssueSecuritySchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof CreateIssueSecurityScheme201.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"CreateIssueSecurityScheme400", typeof CreateIssueSecurityScheme400.Type> | JiraApiError<"CreateIssueSecurityScheme401", typeof CreateIssueSecurityScheme401.Type> | JiraApiError<"CreateIssueSecurityScheme403", typeof CreateIssueSecurityScheme403.Type>>
+readonly "createIssueSecurityScheme": <Config extends OperationConfig>(options: { readonly payload: typeof CreateIssueSecuritySchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof CreateIssueSecurityScheme201.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"CreateIssueSecurityScheme400", typeof CreateIssueSecurityScheme400.Type> | JiraApiError<"CreateIssueSecurityScheme401", typeof CreateIssueSecurityScheme401.Type> | JiraApiError<"CreateIssueSecurityScheme403", typeof CreateIssueSecurityScheme403.Type> | JiraApiError<"CreateIssueSecurityScheme422", typeof CreateIssueSecurityScheme422.Type>>
   /**
 * Returns a [paginated](#pagination) list of issue security levels.
 *
@@ -17925,7 +17937,7 @@ readonly "getAllPermissionSchemes": <Config extends OperationConfig>(options: { 
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "createPermissionScheme": <Config extends OperationConfig>(options: { readonly params?: typeof CreatePermissionSchemeParams.Encoded | undefined; readonly payload: typeof CreatePermissionSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof CreatePermissionScheme201.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"CreatePermissionScheme400", typeof CreatePermissionScheme400.Type> | JiraApiError<"CreatePermissionScheme401", typeof CreatePermissionScheme401.Type> | JiraApiError<"CreatePermissionScheme403", typeof CreatePermissionScheme403.Type>>
+readonly "createPermissionScheme": <Config extends OperationConfig>(options: { readonly params?: typeof CreatePermissionSchemeParams.Encoded | undefined; readonly payload: typeof CreatePermissionSchemeRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof CreatePermissionScheme201.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"CreatePermissionScheme400", typeof CreatePermissionScheme400.Type> | JiraApiError<"CreatePermissionScheme401", typeof CreatePermissionScheme401.Type> | JiraApiError<"CreatePermissionScheme403", typeof CreatePermissionScheme403.Type> | JiraApiError<"CreatePermissionScheme422", typeof CreatePermissionScheme422.Type>>
   /**
 * Returns a permission scheme.
 *
@@ -18136,9 +18148,9 @@ readonly "trashPlan": <Config extends OperationConfig>(planId: string, options: 
   /**
 * Returns a paginated summary of all known policies, including their names, descriptions, and which projects each policy is assigned to.
 *
-* Results are paginated using the standard startAt, maxResults, total, isLast and values fields.
+* When \{@code tanuki-358-cursor-policy-listing\} is enabled, omit cursor for the first page and pass the returned \{@code nextPageCursor\} for subsequent pages. The legacy \{@code startAt\} and \{@code total\} fields are null because an offset and total are not available in cursor mode. When disabled, the offset contract is unchanged.
 */
-readonly "listPolicies": <Config extends OperationConfig>(options: { readonly params?: typeof ListPoliciesParams.Encoded | undefined; readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof ListPolicies200.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"ListPolicies401", typeof ListPolicies401.Type> | JiraApiError<"ListPolicies403", typeof ListPolicies403.Type>>
+readonly "listPolicies": <Config extends OperationConfig>(options: { readonly params?: typeof ListPoliciesParams.Encoded | undefined; readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<typeof ListPolicies200.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"ListPolicies400", typeof ListPolicies400.Type> | JiraApiError<"ListPolicies401", typeof ListPolicies401.Type> | JiraApiError<"ListPolicies403", typeof ListPolicies403.Type> | JiraApiError<"ListPolicies500", typeof ListPolicies500.Type>>
   /**
 * Returns the policies applied to a project.
 */
@@ -18188,7 +18200,7 @@ readonly "getPriorities": <Config extends OperationConfig>(options: { readonly c
 *
 * **[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).
 */
-readonly "createPriority": <Config extends OperationConfig>(options: { readonly payload: typeof CreatePriorityRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof CreatePriority201.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"CreatePriority400", typeof CreatePriority400.Type> | JiraApiError<"CreatePriority401", typeof CreatePriority401.Type> | JiraApiError<"CreatePriority403", typeof CreatePriority403.Type>>
+readonly "createPriority": <Config extends OperationConfig>(options: { readonly payload: typeof CreatePriorityRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof CreatePriority201.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"CreatePriority400", typeof CreatePriority400.Type> | JiraApiError<"CreatePriority401", typeof CreatePriority401.Type> | JiraApiError<"CreatePriority403", typeof CreatePriority403.Type> | JiraApiError<"CreatePriority422", typeof CreatePriority422.Type>>
   /**
 * Sets default issue priority.
 *
@@ -18798,7 +18810,7 @@ readonly "removeProjectCategory": <Config extends OperationConfig>(id: string, o
 *
 * **[Permissions](#permissions) required:** Permission to access Jira.
 */
-readonly "getProjectFields": <Config extends OperationConfig>(options: { readonly params: typeof GetProjectFieldsParams.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof GetProjectFields200.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"GetProjectFields400", typeof GetProjectFields400.Type> | JiraApiError<"GetProjectFields401", typeof GetProjectFields401.Type> | JiraApiError<"GetProjectFields403", typeof GetProjectFields403.Type> | JiraApiError<"GetProjectFields404", typeof GetProjectFields404.Type>>
+readonly "getProjectFields": <Config extends OperationConfig>(options: { readonly params: typeof GetProjectFieldsParams.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof GetProjectFields200.Type, Config>, HttpClientError.HttpClientError | SchemaError | JiraApiError<"GetProjectFields400", typeof GetProjectFields400.Type> | JiraApiError<"GetProjectFields401", typeof GetProjectFields401.Type> | JiraApiError<"GetProjectFields403", typeof GetProjectFields403.Type>>
   /**
 * Validates a project key by confirming the key is a valid string and not in use.
 *
