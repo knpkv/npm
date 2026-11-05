@@ -97,12 +97,12 @@ describe("dashboard pending refresh composition", () => {
       try {
         const initial = snapshot()
         act(() => root.render(<Bridge snapshot={initial} />))
-        for (let second = 0; second < 31; second += 1) act(() => vi.advanceTimersByTime(1_000))
-        act(() =>
+        for (let second = 0; second < 31; second += 1) act(() => void vi.advanceTimersByTime(1_000))
+        act(() => {
           container
             .querySelector(".countdown")
             ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ctrlKey: true, key: "Enter" }))
-        )
+        })
         expect(reads).toBe(1)
         expect(decisions).toEqual([])
         const next: DashboardSnapshot = {
@@ -260,12 +260,12 @@ describe("deep-linked approval refresh", () => {
         const original = record("job-1")
         act(() => root.render(<Parent snapshot={initial} />))
         await settle({ _tag: "Found", target: { _tag: "local", record: original } })
-        for (let second = 0; second < 31; second += 1) act(() => vi.advanceTimersByTime(1_000))
-        act(() =>
+        for (let second = 0; second < 31; second += 1) act(() => void vi.advanceTimersByTime(1_000))
+        act(() => {
           container
             .querySelector(".countdown")
             ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ctrlKey: true, key: "Enter" }))
-        )
+        })
         expect(reads).toBe(1)
         expect(decisions).toEqual([])
         const next = { ...initial, observedAt: Date.now() }
