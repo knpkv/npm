@@ -115,7 +115,6 @@ NodeRuntime.runMain(
   program.pipe(
     Effect.tapError((error) => Console.error(error.message)),
     // The lint script is the executable boundary for Node services.
-    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(NodeServices.layer)
   ),
   { disableErrorReporting: true }

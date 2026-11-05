@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { ApprovalRule } from "@knpkv/codecommit-core/Domain.js"
 
 import {
   pullRequestRowDecision,
@@ -52,13 +53,15 @@ describe("pull request row presentation", () => {
     const open = {
       isMergeable: true,
       status: "OPEN",
-      approvalRules: [{
-        ruleName: "reviewers",
-        requiredApprovals: 1,
-        poolMembers: [],
-        poolMemberArns: [],
-        satisfied: true
-      }]
+      approvalRules: [
+        new ApprovalRule({
+          ruleName: "reviewers",
+          requiredApprovals: 1,
+          poolMembers: [],
+          poolMemberArns: [],
+          satisfied: true
+        })
+      ]
     } satisfies Partial<Parameters<typeof pullRequestRowStatus>[0]>
     expect(pullRequestRowStatus({ ...open, isApproved: true, approvalUnknown: { _tag: "NotPermitted" } }))
       .toEqual({

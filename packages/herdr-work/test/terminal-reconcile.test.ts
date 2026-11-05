@@ -22,7 +22,6 @@ import {
   WorkStore
 } from "../src/index.js"
 
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const fixtureWith = (configureCrypto?: (base: Crypto.Crypto) => Crypto.Crypto) =>

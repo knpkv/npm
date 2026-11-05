@@ -69,7 +69,6 @@ const makeTestLayer = (files: Record<string, string>) => {
 const run = <A>(files: Record<string, string>, effect: Effect.Effect<A, unknown, ConfigService>) => {
   const { layer } = makeTestLayer(files)
   // Effect.runPromise is the test entry point and owns the complete layer lifetime.
-  // @effect-diagnostics-next-line strictEffectProvide:off
   return Effect.runPromise(Effect.provide(effect, layer))
 }
 
@@ -82,7 +81,6 @@ describe("ConfigService", () => {
     })
     const profiles = await Effect.runPromise(
       // Effect.runPromise is the test entry point and owns the complete layer lifetime.
-      // @effect-diagnostics-next-line strictEffectProvide:off
       discoverAwsProfiles(TEST_HOME).pipe(Effect.provide(Layer.mergeAll(mock.layer, MockPath)))
     )
 
@@ -382,7 +380,6 @@ describe("ConfigService", () => {
     })
     return Effect.runPromise(
       // Effect.runPromise is the test entry point and owns the complete layer lifetime.
-      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
         Effect.gen(function*() {
           const service = yield* ConfigService
@@ -422,7 +419,6 @@ describe("ConfigService", () => {
     })
     return Effect.runPromise(
       // Effect.runPromise is the test entry point and owns the complete layer lifetime.
-      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
         Effect.gen(function*() {
           const service = yield* ConfigService

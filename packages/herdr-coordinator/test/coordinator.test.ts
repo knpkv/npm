@@ -25,7 +25,6 @@ import {
 import type { StoredChatTurn } from "../src/model.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const worker = Schema.decodeUnknownSync(AgentWorkerIdentity)({
@@ -267,7 +266,6 @@ describe("coordinator contracts", () => {
     let genericRuns = 0
     const failingStore: ChatStoreService = {
       // No turn is stored for any job: the failure under test is in put.
-      // @effect-diagnostics-next-line effectSucceedWithVoid:off -- Effect.void is Effect<void>, which the service's StoredChatTurn | undefined result does not accept
       getByJob: () => Effect.succeed<StoredChatTurn | undefined>(undefined),
       list: () => Effect.succeed([]),
       put: () =>

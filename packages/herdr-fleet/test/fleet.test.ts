@@ -37,7 +37,6 @@ import {
 } from "../src/index.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const remoteWorker = Schema.decodeUnknownSync(AgentWorkerIdentity)({

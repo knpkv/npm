@@ -148,11 +148,11 @@ export const UsageByBooking: Story = {
     await expect(TIME_ZONE).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
     const dark =
       globals.theme === "dark" || (globals.theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
-    await waitFor(() => {
-      expect(canvasElement.querySelectorAll(".usage-column-target")).toHaveLength(7)
+    await waitFor(async () => {
+      await expect(canvasElement.querySelectorAll(".usage-column-target")).toHaveLength(7)
       const segment = canvasElement.querySelector('.usage-segment[fill="var(--usage-series-1)"]')
-      expect(segment).not.toBeNull()
-      expect(segment === null ? null : getComputedStyle(segment).fill).toBe(
+      await expect(segment).not.toBeNull()
+      await expect(segment === null ? null : getComputedStyle(segment).fill).toBe(
         dark ? "rgb(57, 135, 229)" : "rgb(42, 120, 214)"
       )
     })

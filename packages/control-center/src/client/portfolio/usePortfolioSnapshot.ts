@@ -365,7 +365,7 @@ export const usePortfolioSnapshot = (
       )
       : run(dependencies.transport, dependencies.connectivity)
 
-    Effect.runPromiseExit(program, { signal: abortController.signal }).then((exit) => {
+    void Effect.runPromiseExit(program, { signal: abortController.signal }).then((exit) => {
       if (!isCurrent || Exit.isSuccess(exit) || Cause.hasInterruptsOnly(exit.cause)) return
       setState({ _tag: "failed", failure: "unavailable", sessionKey })
     })

@@ -8,7 +8,6 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { hasOutstandingWorkJob } from "../src/internal/outstanding-work-job.js"
 
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const openStore = Effect.gen(function*() {

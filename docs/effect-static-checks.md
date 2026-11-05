@@ -24,9 +24,15 @@ style preferences into noisy CI failures.
   real config. `ast-grep test` alone parses fixtures in the rule's own language
   and cannot see this.
 - `pnpm lint:eslint` runs the shared ESLint config and local ESLint rules.
-- `pnpm lint:oxlint` runs every vendored anti-slop rule at error severity and
-  requires zero diagnostics. There is no debt baseline or update command: any
-  violation fails the same root `pnpm lint` gate as the other required checks.
+- `pnpm lint:oxlint` runs Oxlint through `effect-tsgo --tsrs-lint`, so its
+  type-aware rules run on tsrs without `oxlint-tsgolint`. It runs every vendored
+  anti-slop rule and the Effect `strict` preset, which makes every Effect rule
+  an error. Any error fails the same root `pnpm lint` gate as the other required
+  checks, with no debt baseline or update command. `oxlint.config.ts` keeps the
+  Effect rules that still have findings at `warn`: fix a rule's last finding and
+  delete its line, and never add one. Workspace packages must be built first, or
+  their imports resolve to `any`. Call Oxlint through this wrapper: the stock
+  binary does not know the `effecttsgo` plugin.
 - `pnpm skills:check` verifies product-local agent skills are synced from
   `packages/agent-skills/skills`.
 

@@ -32,7 +32,6 @@ export const request = <A>(
     }).pipe(
       Effect.scoped,
       // Browser Promise boundary: each request owns its HTTP client and body scope.
-      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(FetchHttpClient.layer)
     ),
     { signal: options.signal }

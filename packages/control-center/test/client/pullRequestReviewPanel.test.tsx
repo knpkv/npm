@@ -15,6 +15,7 @@ import {
   PullRequestReviewFailed,
   PullRequestReviewPending,
   PullRequestReviewStale,
+  PullRequestReviewCompleted,
   PullRequestReviewState,
   type PullRequestReviewThreadEvent,
   PullRequestReviewThreadPage,
@@ -1712,7 +1713,7 @@ describe("PullRequestReviewPanel", () => {
       throw new Error("Expected completed review fixture")
     }
     const onPreview = vi.fn()
-    const fileDraftReview: PullRequestReviewState = {
+    const fileDraftReview: PullRequestReviewState = new PullRequestReviewCompleted({
       ...REVIEW_STATE.review,
       report: {
         ...REVIEW_STATE.review.report,
@@ -1722,7 +1723,7 @@ describe("PullRequestReviewPanel", () => {
           return draft
         })
       }
-    }
+    })
     const revisionTransport: ReviewSuggestionRevisionTransport = {
       ...REVISION_TRANSPORT,
       load: (...args) =>

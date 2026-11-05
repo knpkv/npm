@@ -153,7 +153,7 @@ test("the existing Lint check depends on both bounded jobs without a skip-succes
   assert.equal(requiredJob["timeout-minutes"] <= 2, true)
   for (const [job, command, timeout] of [
     [staticJob, "pnpm lint:static", 40],
-    [coverageJob, "pnpm lint:changeset-coverage", 20]
+    [coverageJob, "pnpm lint:changeset-coverage", 40]
   ]) {
     assert.equal(job["timeout-minutes"], timeout)
     assert.equal(job.if, undefined)

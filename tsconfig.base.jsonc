@@ -36,6 +36,9 @@
           // depends on them deliberately and pins every Effect package to one exact release, so the
           // reference-alignment check, not a warning per call site, guards their stability.
           "unstableApiUsage": "off",
+          // Same stability walk: under tsc it overflows on control-center-sql's query-builder types and fails
+          // the build with a fileless TS2589. Oxlint still runs this rule on tsrs.
+          "experimentalApiUsage": "off",
           // Opt in to the language service's stricter, non-default patterns.
           "strictBooleanExpressions": "suggestion",
           "strictEffectProvide": "suggestion"
