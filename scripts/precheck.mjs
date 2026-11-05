@@ -232,7 +232,17 @@ export const planPrecheck = ({
     steps.push({
       label: `oxlint (${scripts.length} files)`,
       command: "pnpm",
-      args: ["exec", "oxlint", "--config", "oxlint.config.ts", "--", ...scripts]
+      args: [
+        "exec",
+        "effect-tsgo",
+        "--tsrs-lint",
+        "oxlint",
+        "--config",
+        "oxlint.config.ts",
+        "--type-aware",
+        "--",
+        ...scripts
+      ]
     })
   }
   if (files.length > 0) {

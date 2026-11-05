@@ -59,13 +59,10 @@ import { boundedTerminalLines, makeHerdrTerminalConnector, terminalEventMaxLineB
 import { calendarConnectAgents, connectLineageRows } from "../src/view.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its test layer.
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 // The HTTP integration case owns this client layer for the test lifetime.
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeHttpClient = Effect.provide(NodeHttpClient.layerNodeHttp)
 // The scroll test installs a deterministic clock at its test boundary.
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideTestClock = Effect.provide(TestClock.layer())
 
 describe("Connect public seams", () => {

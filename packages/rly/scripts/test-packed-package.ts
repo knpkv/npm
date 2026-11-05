@@ -704,7 +704,6 @@ NodeRuntime.runMain(
   program.pipe(
     Effect.tapError((error) => Console.error(error)),
     // This executable owns the Node service scope until runMain completes.
-    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(NodeServices.layer)
   ),
   { disableErrorReporting: false }

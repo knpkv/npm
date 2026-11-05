@@ -1,6 +1,8 @@
+import { recommended } from "@effect/tsgo/oxlint-presets"
 import { defineConfig } from "oxlint"
 
 export default defineConfig({
+  extends: [recommended],
   ignorePatterns: [
     // Bytes are hash-pinned design exports, reviewed in ref PRs.
     "design-refs/*/screens/**",
@@ -41,6 +43,12 @@ export default defineConfig({
       specifier: "./tools/oxlint/anti-slop/index.ts"
     }
   ],
+  overrides: [
+    // Plain JavaScript has no parameter annotation for the rule to find.
+    { files: ["**/*.mjs"], rules: { "effecttsgo/effect-fn-implicit-any": "off" } },
+    // Negative type tests: `@ts-expect-error` proves the mismatch, the rule would report the same one.
+    { files: ["**/dtslint/**"], rules: { "effecttsgo/missing-effect-error": "off" } }
+  ],
   rules: {
     "anti-slop/no-chained-type-assertions": "error",
     "anti-slop/no-conditional-empty-object-spread": "error",
@@ -56,6 +64,8 @@ export default defineConfig({
     "anti-slop/no-unknown-type-aliases": "error",
     "anti-slop/no-unsafe-dictionary-type": "error",
     "anti-slop/no-widen-then-assert": "error",
-    "anti-slop/require-safety-comment-for-type-assertion": "error"
+    "anti-slop/require-safety-comment-for-type-assertion": "error",
+    "effecttsgo/overridden-schema-constructor": "off",
+    "effecttsgo/unstable-api-usage": "off"
   }
 })

@@ -172,7 +172,6 @@ const main = program.pipe(
   Effect.tapErrorTag("TuiNeedsBun", () => Console.error(tuiNeedsBunMessage))
 )
 
-// @effect-diagnostics-next-line strictEffectProvide:off
 NodeRuntime.runMain(Effect.provide(main, RuntimeLayer), {
   teardown: forceExitTeardown
 })

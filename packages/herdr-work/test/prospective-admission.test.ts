@@ -24,7 +24,6 @@ const target: WorkAdmissionTarget = {
   branch: "feat/guided-review-rly"
 }
 
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const fixture = (configureCrypto?: (base: Crypto.Crypto) => Crypto.Crypto) =>

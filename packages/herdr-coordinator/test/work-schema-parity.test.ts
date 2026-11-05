@@ -21,7 +21,6 @@ import { DatabaseSync } from "node:sqlite"
 import { isDeepStrictEqual } from "node:util"
 import { addOversizedLegacyHandoffs, advanceLegacyClaim, writePreV2WorkFile } from "./fixtures/legacy-work.js"
 
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const openWithStore = (path: string) =>

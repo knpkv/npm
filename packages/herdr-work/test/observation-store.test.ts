@@ -20,7 +20,6 @@ import {
   WorkStore
 } from "../src/index.js"
 
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const fixture = Effect.gen(function*() {

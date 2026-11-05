@@ -7,7 +7,6 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { join } from "node:path"
 import { makeHerdrTerminalConnector, terminalStderrMaxBytes } from "../src/terminal.js"
 
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const configuration = (root: string): HostConfiguration => ({

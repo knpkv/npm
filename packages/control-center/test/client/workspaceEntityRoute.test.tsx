@@ -18,6 +18,7 @@ import {
   DurableAgentProviderId,
   type DurableAgentPrompt,
   PullRequestReviewNotStarted,
+  PullRequestReviewCompleted,
   PullRequestReviewState,
   ReviewAgentProfileId
 } from "../../src/api/agent.js"
@@ -826,7 +827,7 @@ const reviewSuggestionRevisionPage = (
 
 const publishedPullRequestReviewState = {
   ...completedPullRequestReviewState,
-  review: {
+  review: new PullRequestReviewCompleted({
     ...completedReview,
     report: {
       ...completedReview.report,
@@ -835,7 +836,7 @@ const publishedPullRequestReviewState = {
         state: "published"
       }))
     }
-  }
+  })
 } satisfies PullRequestReviewControllerState
 
 const pipelineState = {

@@ -107,6 +107,8 @@ test("per-file steps run in order: eslint --fix, prettier, eslint, oxlint, ast-g
     "oxlint (1 files)",
     "ast-grep scan (2 files)"
   ])
+  // The stock binary cannot load the `effecttsgo` plugin that oxlint.config.ts enables.
+  assert.deepEqual(steps[3].args.slice(0, 4), ["exec", "effect-tsgo", "--tsrs-lint", "oxlint"])
   // Explicit file lists, never a glob the shell or the tool expands.
   assert.deepEqual(steps[0].args.slice(-1), ["packages/jcf-web/src/client/App.tsx"])
   assert.deepEqual(steps[1].args.slice(-2), [

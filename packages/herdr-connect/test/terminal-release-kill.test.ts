@@ -10,9 +10,7 @@ import { join } from "node:path"
 import { releaseTerminalControl } from "../src/internal/terminal-release.js"
 import { makeHerdrTerminalConnector } from "../src/terminal.js"
 
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideTestClock = Effect.provide(TestClock.layer())
 
 const configuration = (root: string): HostConfiguration => ({

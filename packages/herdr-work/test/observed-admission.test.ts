@@ -29,7 +29,6 @@ const target: WorkAdmissionTarget = {
   branch: "feat/observed"
 }
 
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const fixture = Effect.gen(function*() {
