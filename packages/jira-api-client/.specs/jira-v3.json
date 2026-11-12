@@ -13126,6 +13126,7 @@
         "properties": {
           "isLast": { "type": "boolean" },
           "maxResults": { "format": "int32", "type": "integer" },
+          "nextPageCursor": { "type": "string" },
           "startAt": { "format": "int64", "type": "integer" },
           "total": { "format": "int64", "type": "integer" },
           "values": { "items": { "$ref": "#/components/schemas/PolicySummary" }, "type": "array" }
@@ -20563,7 +20564,7 @@
     "license": { "name": "Apache 2.0", "url": "http://www.apache.org/licenses/LICENSE-2.0.html" },
     "termsOfService": "https://developer.atlassian.com/platform/marketplace/atlassian-developer-terms/",
     "title": "The Jira Cloud platform REST API",
-    "version": "1001.0.0-SNAPSHOT-12ca6ec572dce8558d78a98d942a1c3f7f182787"
+    "version": "1001.0.0-SNAPSHOT-8e29bebf69d92b486d0010d2bd2ba39ddae62c43"
   },
   "openapi": "3.0.1",
   "paths": {
@@ -23994,6 +23995,14 @@
             "schema": { "items": { "format": "int64", "type": "integer" }, "type": "array" }
           },
           {
+            "in": "query",
+            "name": "query",
+            "schema": {
+              "description": "Filters results to projects whose name, key or id contains the query, ignoring case.",
+              "type": "string"
+            }
+          },
+          {
             "description": "The scheme id to search for associated projects",
             "in": "path",
             "name": "id",
@@ -27289,6 +27298,12 @@
             "schema": { "format": "int64", "type": "integer" }
           },
           {
+            "description": "Case-insensitive literal substring of the option value. Blank queries do not filter. Combined with optionId and onlyOptions before pagination; totals count matching options.",
+            "in": "query",
+            "name": "query",
+            "schema": { "type": "string" }
+          },
+          {
             "description": "Whether only options are returned.",
             "in": "query",
             "name": "onlyOptions",
@@ -30050,7 +30065,7 @@
       },
       "put": {
         "deprecated": false,
-        "description": "Sets the columns for a filter. Only navigable fields can be set as columns. Use [Get fields](#api-rest-api-3-field-get) to get the list fields in Jira. A navigable field has `navigable` set to `true`.\n\nThe parameters for this resource are expressed as HTML form data. For example, in curl:\n\n`curl -X PUT -d columns=summary -d columns=description https://your-domain.atlassian.net/rest/api/3/filter/10000/columns`\n\n**[Permissions](#permissions) required:** Permission to access Jira, however, columns are only set for:\n\n *  filters owned by the user.\n *  filters shared with a group that the user is a member of.\n *  filters shared with a private project that the user has *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for.\n *  filters shared with a public project.\n *  filters shared with the public.",
+        "description": "Sets the columns for a filter. Only navigable fields can be set as columns. Use [Get fields](#api-rest-api-3-field-get) to get the list fields in Jira. A navigable field has `navigable` set to `true`.\n\nSend the columns as a JSON request body, for example `{\"columns\": [\"summary\", \"description\"]}`. To remove all columns from the filter, send an empty `columns` array or omit `columns` from the request body.\n\n**[Permissions](#permissions) required:** Permission to access Jira, however, columns are only set for:\n\n *  filters owned by the user.\n *  filters shared with a group that the user is a member of.\n *  filters shared with a private project that the user has *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for.\n *  filters shared with a public project.\n *  filters shared with the public.",
         "operationId": "setColumns",
         "parameters": [
           {
@@ -30067,7 +30082,7 @@
             "application/json": { "schema": { "$ref": "#/components/schemas/ColumnRequestBody" } },
             "multipart/form-data": { "schema": { "$ref": "#/components/schemas/ColumnRequestBody" } }
           },
-          "description": "The IDs of the fields to set as columns. In the form data, specify each field as `columns=id`, where `id` is the *id* of a field (as seen in the response for [Get fields](#api-rest-api-<ver>-field-get)). For example, `columns=summary`.",
+          "description": "The IDs of the fields to set as columns, specified in the `columns` array of the JSON request body, where each entry is the *id* of a field (as seen in the response for [Get fields](#api-rest-api-<ver>-field-get)). For example, `{\"columns\": [\"summary\"]}`.",
           "required": true
         },
         "responses": {
@@ -35555,6 +35570,12 @@
               }
             },
             "description": "Returned if the user doesn't have the necessary permission."
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/LimitExceededResponseBean" } }
+            },
+            "description": "Returned if the number of issue security levels requested exceeds the limit for an issue security scheme."
           }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
@@ -40164,6 +40185,12 @@
           "401": { "description": "Returned if the authentication credentials are incorrect or missing." },
           "403": {
             "description": "Returned if the user does not have the necessary permission or the feature is not available in the Jira plan."
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/LimitExceededResponseBean" } }
+            },
+            "description": "Returned if the limit on grants per permission is breached while creating the new permission scheme. The limit applies to each permission separately rather than to the scheme as a whole, and the response body identifies the permission that breached it. No permission scheme is created."
           }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
@@ -41516,26 +41543,36 @@
     "/rest/api/3/policies": {
       "get": {
         "deprecated": false,
-        "description": "Returns a paginated summary of all known policies, including their names, descriptions, and which projects each policy is assigned to.\n\nResults are paginated using the standard startAt, maxResults, total, isLast and values fields.",
+        "description": "Returns a paginated summary of all known policies, including their names, descriptions, and which projects each policy is assigned to.\n\nWhen \\{@code tanuki-358-cursor-policy-listing\\} is enabled, omit cursor for the first page and pass the returned \\{@code nextPageCursor\\} for subsequent pages. The legacy \\{@code startAt\\} and \\{@code total\\} fields are null because an offset and total are not available in cursor mode. When disabled, the offset contract is unchanged.",
         "operationId": "listPolicies",
         "parameters": [
           {
-            "description": "the index of the first item to return (0-based, default 0)",
+            "description": "legacy 0-based offset (default 0); only 0 is accepted in cursor mode",
             "in": "query",
             "name": "startAt",
             "schema": { "default": 0, "format": "int64", "type": "integer" }
           },
           {
-            "description": "the maximum number of items to return per page (default 50, max 200)",
+            "description": "the maximum number of items to return per page (default 50; cursor max 50)",
             "in": "query",
             "name": "maxResults",
             "schema": { "default": 50, "format": "int32", "type": "integer" }
+          },
+          {
+            "description": "opaque cursor returned by the previous page, absent for the first page",
+            "in": "query",
+            "name": "cursor",
+            "schema": { "type": "string" }
           }
         ],
         "responses": {
           "200": {
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PolicySummaryResponse" } } },
             "description": "200 response"
+          },
+          "400": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "400 response"
           },
           "401": {
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
@@ -41544,6 +41581,10 @@
           "403": {
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
             "description": "403 response"
+          },
+          "500": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } },
+            "description": "500 response"
           }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
@@ -41948,6 +41989,12 @@
               }
             },
             "description": "Returned if the user doesn't have the necessary permission."
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/LimitExceededResponseBean" } }
+            },
+            "description": "Returned if the priority can't be added to the default priority scheme because that scheme has reached the maximum number of priorities."
           }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
@@ -46073,8 +46120,7 @@
           },
           "400": { "description": "Returned if the request parameters are invalid." },
           "401": { "description": "Returned if authentication is missing." },
-          "403": { "description": "Returned if the user does not have permission to view the projects or work types." },
-          "404": { "description": "Returned if the endpoint is not enabled via feature flag." }
+          "403": { "description": "Returned if the user does not have permission to view the projects or work types." }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["read:jira-work"] }],
         "summary": "Get fields for projects",
