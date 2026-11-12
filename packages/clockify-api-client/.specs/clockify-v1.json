@@ -12295,7 +12295,7 @@
         "type": "object",
         "default": null,
         "description": "Represents an entity creation permission enum.",
-        "example": "ADMINS",
+        "example": "EVERYONE",
         "oneOf": [{ "type": "string", "enum": ["ADMINS", "ADMINS_AND_PROJECT_MANAGERS", "EVERYONE"] }],
         "properties": {
           "ADMINS": { "type": "string", "enum": ["ADMINS", "ADMINS_AND_PROJECT_MANAGERS", "EVERYONE"] },
@@ -12320,7 +12320,7 @@
       "EntityIdNameDto": {
         "type": "object",
         "properties": { "id": { "type": "string" }, "name": { "type": "string" } },
-        "description": "Contains names of users that are assigned to holiday.",
+        "description": "Contains names of user groups that are assigned to holiday.",
         "default": null
       },
       "EstimateDtoV1": {
@@ -24056,7 +24056,7 @@
           },
           "currency": { "type": "string", "description": "Represents a currency.", "example": "USD", "default": "" }
         },
-        "description": "Represents hourly rate object.",
+        "description": "Represents cost rate object.",
         "default": null
       },
       "RateDtoV1": {
@@ -24070,7 +24070,7 @@
           },
           "currency": { "type": "string", "description": "Represents a currency.", "example": "USD", "default": "" }
         },
-        "description": "Represents hourly rate object.",
+        "description": "Represents cost rate object.",
         "default": null
       },
       "RateWithCurrencyRequestV1": {
