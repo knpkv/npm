@@ -1,5 +1,34 @@
 # @knpkv/jira-clockify
 
+## 1.11.1
+
+### Patch Changes
+
+- [#1149](https://github.com/knpkv/npm/pull/1149) [`46bde0b`](https://github.com/knpkv/npm/commit/46bde0bd67c06d5763f9098744de63984b304839) Thanks [@knpkv-automation](https://github.com/apps/knpkv-automation)! - Update the generated Schema-backed Jira API client.
+
+  Release: major (1 breaking, 9 additions).
+
+  Breaking:
+
+  - removed response 404 at `#/paths/~1rest~1api~13~1projects~1fields/get`
+
+  Additions:
+
+  - added property nextPageCursor at `#/components/schemas/PolicySummaryResponse`
+  - added query parameter query at `#/paths/~1rest~1api~13~1config~1fieldschemes~1{id}~1projects/get`
+  - added query parameter query at `#/paths/~1rest~1api~13~1field~1{fieldId}~1context~1{contextId}~1option/get`
+  - added response 422 at `#/paths/~1rest~1api~13~1issuesecurityschemes/post`
+  - added response 422 at `#/paths/~1rest~1api~13~1permissionscheme/post`
+  - added query parameter cursor at `#/paths/~1rest~1api~13~1policies/get`
+  - added response 400 at `#/paths/~1rest~1api~13~1policies/get`
+  - added response 500 at `#/paths/~1rest~1api~13~1policies/get`
+  - added response 422 at `#/paths/~1rest~1api~13~1priority/post`
+
+- Updated dependencies [[`c1052a2`](https://github.com/knpkv/npm/commit/c1052a200bd9b772e454ed5944ef4b7cdfcdb575), [`46bde0b`](https://github.com/knpkv/npm/commit/46bde0bd67c06d5763f9098744de63984b304839)]:
+  - @knpkv/clockify-api-client@5.1.2
+  - @knpkv/jira-api-client@4.0.0
+  - @knpkv/jira-cli@1.6.13
+
 ## 1.11.0
 
 ### Minor Changes
