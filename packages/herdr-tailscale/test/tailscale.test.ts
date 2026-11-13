@@ -7,7 +7,6 @@ import { join } from "node:path"
 import { authorizeWhois, discoverFleetPeers, make, Tailscale, type TailscaleClient } from "../src/index.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const node = (

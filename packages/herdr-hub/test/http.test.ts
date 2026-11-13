@@ -111,7 +111,6 @@ import { makeRelayHubMount, type RelayHubBackends } from "../src/relay/mount.js"
 import { ApprovalAppStore } from "../src/store.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const config = (stateDirectory: string): HostConfiguration => ({

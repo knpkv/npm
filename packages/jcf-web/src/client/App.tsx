@@ -401,7 +401,7 @@ export const App = () => {
                     key={option.scope}
                     onClick={() => {
                       setOpen(null)
-                      chooseScope(option.scope)
+                      void chooseScope(option.scope)
                     }}
                     size="compact"
                     variant={option.scope === scope ? "primary" : "quiet"}

@@ -23,7 +23,7 @@ import { AwsApiError, PermissionDeniedError } from "../Errors.js"
 import { AuditLogRepo, type NewAuditLogEntry } from "../PermissionService/AuditLog.js"
 import { PermissionService } from "../PermissionService/index.js"
 import { getOperationMeta } from "../PermissionService/operations.js"
-import { PermissionGate } from "../PermissionService/PermissionGate.js"
+import { PermissionGate, PermissionPrompt } from "../PermissionService/PermissionGate.js"
 import { AwsClient, type AwsClientError } from "./index.js"
 
 // Layer composition: AwsClientLive → InnerAwsClient (rename) → AwsClientGated → AwsClient
@@ -106,12 +106,12 @@ export const AwsClientGatedLive: Layer.Layer<
         const now = yield* Clock.currentTimeMillis
         const nonce = yield* Random.nextIntBetween(0, 999_999_999)
         const response = yield* gateService.request(
-          {
+          new PermissionPrompt({
             id: `gate-${now}-${nonce}`,
             operation: params.operation,
             category: meta.category,
             context: params.context
-          },
+          }),
           {
             // A standing grant or refusal saved after the check above still answers this call.
             standing: permService.check(params.operation).pipe(

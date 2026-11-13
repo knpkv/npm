@@ -34,7 +34,7 @@ const assertOxlintComposition = (scripts, expected, fixtureName) => {
 assertOxlintComposition(
   {
     lint: "pnpm lint:eslint",
-    "lint:oxlint": "oxlint --config oxlint.config.ts ."
+    "lint:oxlint": "effect-tsgo --tsrs-lint oxlint --config oxlint.config.ts --type-aware ."
   },
   false,
   "standalone-invalid"
@@ -42,7 +42,7 @@ assertOxlintComposition(
 assertOxlintComposition(
   {
     lint: "pnpm lint:eslint && pnpm lint:oxlint",
-    "lint:oxlint": "oxlint --config oxlint.config.ts ."
+    "lint:oxlint": "effect-tsgo --tsrs-lint oxlint --config oxlint.config.ts --type-aware ."
   },
   true,
   "composed-valid"
@@ -51,7 +51,7 @@ assertOxlintComposition(
 if (!invokesScript(packageJson.scripts, "lint", "lint:oxlint")) {
   throw new Error("The root lint script must invoke lint:oxlint")
 }
-if (packageJson.scripts["lint:oxlint"] !== "oxlint --config oxlint.config.ts .") {
+if (packageJson.scripts["lint:oxlint"] !== "effect-tsgo --tsrs-lint oxlint --config oxlint.config.ts --type-aware .") {
   throw new Error("lint:oxlint must run the required root Oxlint configuration without a debt baseline")
 }
 

@@ -139,7 +139,6 @@ const CLAUDE_REVIEW_PROFILE: ReviewAgentProfile = {
 }
 const LANGUAGE_MODEL = Effect.runSync(
   LanguageModel.LanguageModel.pipe(
-    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(makeDeterministicLanguageModel([]).layer)
   )
 )
@@ -365,7 +364,6 @@ const failedFollowUpReview = Schema.decodeSync(LatestAgentReviewRecord)({
   report: null
 })
 
-// @effect-diagnostics-next-line effectSucceedWithVoid:off
 const persistenceUndefined = Effect.succeed(undefined)
 
 const completedReviewWithSuggestion = (

@@ -22,7 +22,6 @@ import {
   makeLanWorkPairing
 } from "../src/lan-work.js"
 
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const config = (stateDirectory: string): HostConfiguration => ({

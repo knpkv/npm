@@ -24,7 +24,6 @@ export const browserOpenPullRequestTransport: OpenPullRequestTransport = {
         return yield* client.deliveryGraph.resolveCodeCommitPullRequest({ payload: locator })
       }).pipe(
         // This promise bridge owns the browser HTTP client boundary.
-        // @effect-diagnostics-next-line strictEffectProvide:off
         Effect.provide(FetchHttpClient.layer)
       ),
       { signal }

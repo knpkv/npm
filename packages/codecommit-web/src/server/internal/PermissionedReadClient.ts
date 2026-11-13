@@ -3,7 +3,7 @@ import { AwsApiError, type ConfigError, PermissionDeniedError } from "@knpkv/cod
 import { AuditLogRepo, type NewAuditLogEntry } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
 import { PermissionService, type PermissionState } from "@knpkv/codecommit-core/PermissionService/index.js"
 import { getOperationMeta } from "@knpkv/codecommit-core/PermissionService/operations.js"
-import { PermissionGate } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
+import { PermissionGate, PermissionPrompt } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
 import * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
 import { Clock, Context, Effect, Option, Random, Schema, Stream } from "effect"
 
@@ -171,12 +171,14 @@ const makePermissionedReadClientImpl = Effect.fn("PermissionedReadClient.make")(
       if (owner === null) return yield* Effect.die("Owner prompt services were not acquired")
       const now = yield* Clock.currentTimeMillis
       const nonce = yield* Random.nextIntBetween(0, 999_999_999)
-      const response = yield* owner.permissionGate.request({
-        id: `gate-${now}-${nonce}`,
-        operation: params.operation,
-        category: getOperationMeta(params.operation).category,
-        context: params.context
-      }).pipe(
+      const response = yield* owner.permissionGate.request(
+        new PermissionPrompt({
+          id: `gate-${now}-${nonce}`,
+          operation: params.operation,
+          category: getOperationMeta(params.operation).category,
+          context: params.context
+        })
+      ).pipe(
         Effect.catchTag("PermissionDeniedError", (error) =>
           Effect.gen(function*() {
             if (error.reason === "denied") {

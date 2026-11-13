@@ -45,7 +45,6 @@ const fixtureDatabase = (path: string): DatabaseSync => {
   return database
 }
 
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 class LegacyWriterError extends Schema.TaggedError<LegacyWriterError>()(

@@ -16,7 +16,6 @@ import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
 import { startHttpServer, type UiAssets } from "../src/http.js"
 
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const config = (stateDirectory: string): HostConfiguration => ({

@@ -110,7 +110,7 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## codecommit
 
-43 directives (ast-grep 13, effect-diagnostics 30), 24 without a reason.
+41 directives (ast-grep 13, effect-diagnostics 28), 23 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
@@ -127,7 +127,6 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/codecommit/src/tui/utils/prTemplates.ts](../packages/codecommit/src/tui/utils/prTemplates.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit/src/WorktreeService.ts](../packages/codecommit/src/WorktreeService.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit/src/WorktreeService.ts](../packages/codecommit/src/WorktreeService.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/codecommit/src/bin.ts](../packages/codecommit/src/bin.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/codecommit/src/PrCreate.ts](../packages/codecommit/src/PrCreate.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/codecommit/src/PrExport.ts](../packages/codecommit/src/PrExport.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/codecommit/src/PrList.ts](../packages/codecommit/src/PrList.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
@@ -156,11 +155,10 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/codecommit/test/PrOpen.test.ts](../packages/codecommit/test/PrOpen.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/codecommit/test/PrOpen.test.ts](../packages/codecommit/test/PrOpen.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/codecommit/test/PrUpdate.test.ts](../packages/codecommit/test/PrUpdate.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
-| [packages/codecommit/test/RelayReview.test.ts](../packages/codecommit/test/RelayReview.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 
 ## codecommit-core
 
-115 directives (ast-grep 81, effect-diagnostics 34), 17 without a reason.
+111 directives (ast-grep 81, effect-diagnostics 30), 17 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
@@ -250,10 +248,6 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/codecommit-core/test/approvalEvaluation.test.ts](../packages/codecommit-core/test/approvalEvaluation.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/codecommit-core/test/AwsClientGated.test.ts](../packages/codecommit-core/test/AwsClientGated.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/codecommit-core/test/ChildEnv.test.ts](../packages/codecommit-core/test/ChildEnv.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
-| [packages/codecommit-core/test/ConfigService.test.ts](../packages/codecommit-core/test/ConfigService.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/codecommit-core/test/ConfigService.test.ts](../packages/codecommit-core/test/ConfigService.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/codecommit-core/test/ConfigService.test.ts](../packages/codecommit-core/test/ConfigService.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/codecommit-core/test/ConfigService.test.ts](../packages/codecommit-core/test/ConfigService.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/codecommit-core/test/NotificationRepo.dedup.test.ts](../packages/codecommit-core/test/NotificationRepo.dedup.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
 | [packages/codecommit-core/test/PRService.callerIdentities.test.ts](../packages/codecommit-core/test/PRService.callerIdentities.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/codecommit-core/test/PRService.callerIdentities.test.ts](../packages/codecommit-core/test/PRService.callerIdentities.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
@@ -282,7 +276,7 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## codecommit-mock
 
-10 directives (ast-grep 4, effect-diagnostics 6), 0 without a reason.
+9 directives (ast-grep 4, effect-diagnostics 5), 0 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
@@ -290,7 +284,6 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/codecommit-mock/src/Server.ts](../packages/codecommit-mock/src/Server.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit-mock/src/Server.ts](../packages/codecommit-mock/src/Server.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit-mock/src/Server.ts](../packages/codecommit-mock/src/Server.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/codecommit-mock/src/cli.ts](../packages/codecommit-mock/src/cli.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/codecommit-mock/test/GitFixture.test.ts](../packages/codecommit-mock/test/GitFixture.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/codecommit-mock/test/GitFixture.test.ts](../packages/codecommit-mock/test/GitFixture.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/codecommit-mock/test/GitFixture.test.ts](../packages/codecommit-mock/test/GitFixture.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
@@ -299,7 +292,7 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## codecommit-web
 
-48 directives (ast-grep 22, effect-diagnostics 25, eslint 1), 2 without a reason.
+47 directives (ast-grep 22, effect-diagnostics 24, eslint 1), 2 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
@@ -325,7 +318,6 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/codecommit-web/src/server/review/ReviewSkillCatalog.ts](../packages/codecommit-web/src/server/review/ReviewSkillCatalog.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit-web/src/server/review/ReviewSkillCatalog.ts](../packages/codecommit-web/src/server/review/ReviewSkillCatalog.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit-web/src/server/Server.ts](../packages/codecommit-web/src/server/Server.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/codecommit-web/src/main.ts](../packages/codecommit-web/src/main.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/codecommit-web/src/server/review/PullRequestReview.ts](../packages/codecommit-web/src/server/review/PullRequestReview.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/codecommit-web/test/BackgroundWorkers.test.ts](../packages/codecommit-web/test/BackgroundWorkers.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/codecommit-web/test/BackgroundWorkers.test.ts](../packages/codecommit-web/test/BackgroundWorkers.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
@@ -363,7 +355,7 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## control-center
 
-108 directives (ast-grep 5, effect-diagnostics 91, eslint 9, typescript 3), 44 without a reason.
+101 directives (ast-grep 5, effect-diagnostics 84, eslint 9, typescript 3), 41 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
@@ -372,11 +364,7 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/control-center/test/integration/liveServerPort.ts](../packages/control-center/test/integration/liveServerPort.ts) | ast-grep | `ast-grep-ignore: no-released-ephemeral-test-port -- the live server takes its port as an argument; follow-up: let it bind 0 and report its port.` | yes |
 | [packages/control-center/test/runtime/offline-backup.test.ts](../packages/control-center/test/runtime/offline-backup.test.ts) | ast-grep | `ast-grep-ignore: no-released-ephemeral-test-port -- the built CLI takes its port as an argument; follow-up: let it bind 0 and report its port.` | yes |
 | [packages/control-center/test/runtime/server-smoke.test.ts](../packages/control-center/test/runtime/server-smoke.test.ts) | ast-grep | `ast-grep-ignore: no-released-ephemeral-test-port -- the built CLI takes its port as an argument; follow-up: let it bind 0 and report its port.` | yes |
-| [packages/control-center/src/client/entities/WorkspacePullRequestDiff.tsx](../packages/control-center/src/client/entities/WorkspacePullRequestDiff.tsx) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/control-center/src/client/entities/WorkspacePullRequestDiff.tsx](../packages/control-center/src/client/entities/WorkspacePullRequestDiff.tsx) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/control-center/src/client/openPullRequest/openPullRequest.ts](../packages/control-center/src/client/openPullRequest/openPullRequest.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/control-center/src/server/agent/internal/PrReviewTaskExecutor.ts](../packages/control-center/src/server/agent/internal/PrReviewTaskExecutor.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/control-center/src/server/cli.ts](../packages/control-center/src/server/cli.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/control-center/src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.ts](../packages/control-center/src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/control-center/src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.ts](../packages/control-center/src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/control-center/src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.ts](../packages/control-center/src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
@@ -394,8 +382,6 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/control-center/test/agent/pr-review-task-executor.test.ts](../packages/control-center/test/agent/pr-review-task-executor.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/control-center/test/agent/pr-review-task-executor.test.ts](../packages/control-center/test/agent/pr-review-task-executor.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/control-center/test/application/adapters.test.ts](../packages/control-center/test/application/adapters.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
-| [packages/control-center/test/application/pull-request-reviews.test.ts](../packages/control-center/test/application/pull-request-reviews.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line effectSucceedWithVoid:off` | **missing** |
-| [packages/control-center/test/application/pull-request-reviews.test.ts](../packages/control-center/test/application/pull-request-reviews.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/control-center/test/application/pull-request-reviews.test.ts](../packages/control-center/test/application/pull-request-reviews.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/control-center/test/application/pull-request-reviews.test.ts](../packages/control-center/test/application/pull-request-reviews.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/control-center/test/application/pull-request-reviews.test.ts](../packages/control-center/test/application/pull-request-reviews.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
@@ -460,7 +446,6 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/control-center/test/security/request-security.test.ts](../packages/control-center/test/security/request-security.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/control-center/test/security/request-security.test.ts](../packages/control-center/test/security/request-security.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/control-center/test/unit/javascriptArtifactBudget.test.ts](../packages/control-center/test/unit/javascriptArtifactBudget.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/control-center/test/unit/package-contract.test.ts](../packages/control-center/test/unit/package-contract.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/control-center/test/unit/productionRouteInventory.test.ts](../packages/control-center/test/unit/productionRouteInventory.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/control-center/test/unit/rlyCssTokenValidation.test.ts](../packages/control-center/test/unit/rlyCssTokenValidation.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/control-center/src/server/api/RequestBoundary.ts](../packages/control-center/src/server/api/RequestBoundary.ts) | eslint | `eslint-disable-next-line local-rules/require-exact-cause-rethrow -- The HTTP boundary translates only identified schema defects; request-boundary.test.ts covers translation and unrelated-cause preservation.` | yes |
@@ -487,46 +472,35 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## herdr-connect
 
-8 directives (ast-grep 1, effect-diagnostics 6, eslint 1), 4 without a reason.
+2 directives (ast-grep 1, eslint 1), 1 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
 | [packages/herdr-connect/src/internal/terminal-release.ts](../packages/herdr-connect/src/internal/terminal-release.ts) | ast-grep | `ast-grep-ignore: no-unowned-detached-fiber` | yes |
-| [packages/herdr-connect/test/connect.test.ts](../packages/herdr-connect/test/connect.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-connect/test/connect.test.ts](../packages/herdr-connect/test/connect.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-connect/test/connect.test.ts](../packages/herdr-connect/test/connect.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-connect/test/terminal-release-kill.test.ts](../packages/herdr-connect/test/terminal-release-kill.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
-| [packages/herdr-connect/test/terminal-release-kill.test.ts](../packages/herdr-connect/test/terminal-release-kill.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
-| [packages/herdr-connect/test/terminal-stderr.test.ts](../packages/herdr-connect/test/terminal-stderr.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/herdr-connect/src/internal/terminal-release.ts](../packages/herdr-connect/src/internal/terminal-release.ts) | eslint | `eslint-disable-line local-rules/no-unowned-detached-fiber` | **missing** |
 
 ## herdr-coordinator
 
-8 directives (effect-diagnostics 8), 5 without a reason.
+4 directives (effect-diagnostics 4), 3 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/herdr-coordinator/test/coordinator.test.ts](../packages/herdr-coordinator/test/coordinator.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line effectSucceedWithVoid:off` | yes |
-| [packages/herdr-coordinator/test/coordinator.test.ts](../packages/herdr-coordinator/test/coordinator.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-coordinator/test/orchestrator.test.ts](../packages/herdr-coordinator/test/orchestrator.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/herdr-coordinator/test/orchestrator.test.ts](../packages/herdr-coordinator/test/orchestrator.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/herdr-coordinator/test/orchestrator.test.ts](../packages/herdr-coordinator/test/orchestrator.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/herdr-coordinator/test/pull-request-evidence.test.ts](../packages/herdr-coordinator/test/pull-request-evidence.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/herdr-coordinator/test/work-schema-parity.test.ts](../packages/herdr-coordinator/test/work-schema-parity.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
-| [packages/herdr-coordinator/test/work-schema-parity.test.ts](../packages/herdr-coordinator/test/work-schema-parity.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 
 ## herdr-fleet
 
-2 directives (effect-diagnostics 2), 1 without a reason.
+1 directives (effect-diagnostics 1), 1 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/herdr-fleet/test/fleet.test.ts](../packages/herdr-fleet/test/fleet.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/herdr-fleet/test/sqlite.test.ts](../packages/herdr-fleet/test/sqlite.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
 
 ## herdr-hub
 
-12 directives (ast-grep 1, effect-diagnostics 11), 3 without a reason.
+6 directives (ast-grep 1, effect-diagnostics 5), 0 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
@@ -536,16 +510,10 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/herdr-hub/test/hostd-runtime.test.ts](../packages/herdr-hub/test/hostd-runtime.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/herdr-hub/test/hostd-runtime.test.ts](../packages/herdr-hub/test/hostd-runtime.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/herdr-hub/test/hostd-runtime.test.ts](../packages/herdr-hub/test/hostd-runtime.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-hub/test/http.test.ts](../packages/herdr-hub/test/http.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-hub/test/lan-work.test.ts](../packages/herdr-hub/test/lan-work.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
-| [packages/herdr-hub/test/operations.test.ts](../packages/herdr-hub/test/operations.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-hub/test/outstanding-work-job.test.ts](../packages/herdr-hub/test/outstanding-work-job.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
-| [packages/herdr-hub/test/push-worker.test.ts](../packages/herdr-hub/test/push-worker.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-hub/test/state-files.test.ts](../packages/herdr-hub/test/state-files.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 
 ## herdr-monitor
 
-5 directives (effect-diagnostics 5), 0 without a reason.
+4 directives (effect-diagnostics 4), 0 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
@@ -553,40 +521,25 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/herdr-monitor/src/cli.ts](../packages/herdr-monitor/src/cli.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/herdr-monitor/src/client/read-board.ts](../packages/herdr-monitor/src/client/read-board.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/herdr-monitor/src/publisher.ts](../packages/herdr-monitor/src/publisher.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/herdr-monitor/test/http.test.ts](../packages/herdr-monitor/test/http.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-
-## herdr-tailscale
-
-1 directives (effect-diagnostics 1), 0 without a reason.
-
-| File | Kind | Directive | Reason |
-| --- | --- | --- | --- |
-| [packages/herdr-tailscale/test/tailscale.test.ts](../packages/herdr-tailscale/test/tailscale.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 
 ## herdr-work
 
-10 directives (effect-diagnostics 8, eslint 1, typescript 1), 7 without a reason.
+5 directives (effect-diagnostics 3, eslint 1, typescript 1), 3 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
 | [packages/herdr-work/test/existing-goal-recovery.test.ts](../packages/herdr-work/test/existing-goal-recovery.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/herdr-work/test/goal-abandon.test.ts](../packages/herdr-work/test/goal-abandon.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
 | [packages/herdr-work/test/goal-reassignment.test.ts](../packages/herdr-work/test/goal-reassignment.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
-| [packages/herdr-work/test/observation-store.test.ts](../packages/herdr-work/test/observation-store.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
-| [packages/herdr-work/test/observed-admission.test.ts](../packages/herdr-work/test/observed-admission.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
-| [packages/herdr-work/test/prospective-admission.test.ts](../packages/herdr-work/test/prospective-admission.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
-| [packages/herdr-work/test/terminal-reconcile.test.ts](../packages/herdr-work/test/terminal-reconcile.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | **missing** |
-| [packages/herdr-work/test/work.test.ts](../packages/herdr-work/test/work.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/herdr-work/test/work.test.ts](../packages/herdr-work/test/work.test.ts) | eslint | `eslint-disable-next-line local-rules/require-immediate-work-store-cleanup` | yes |
 | [packages/herdr-work/test/terminal-reconcile.test.ts](../packages/herdr-work/test/terminal-reconcile.test.ts) | typescript | `@ts-expect-error -- deliberately not a digest: reconcile must reject malformed options at runtime` | yes |
 
 ## jcf-web
 
-9 directives (effect-diagnostics 9), 0 without a reason.
+8 directives (effect-diagnostics 8), 0 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/jcf-web/src/client/transport.ts](../packages/jcf-web/src/client/transport.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/jcf-web/test/browser/server.ts](../packages/jcf-web/test/browser/server.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 | [packages/jcf-web/test/confirm.test.ts](../packages/jcf-web/test/confirm.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 | [packages/jcf-web/test/confirmDst.test.ts](../packages/jcf-web/test/confirmDst.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
@@ -668,13 +621,11 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## rly
 
-30 directives (effect-diagnostics 3, eslint 1, typescript 26), 0 without a reason.
+28 directives (effect-diagnostics 1, eslint 1, typescript 26), 0 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
 | [packages/rly/scripts/build-storybook.ts](../packages/rly/scripts/build-storybook.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/rly/scripts/test-packed-package.ts](../packages/rly/scripts/test-packed-package.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/rly/scripts/tokens/lint-stripes.ts](../packages/rly/scripts/tokens/lint-stripes.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/rly/src/diff/worker-pool.tsx](../packages/rly/src/diff/worker-pool.tsx) | eslint | `eslint-disable-next-line import-x/default` | yes |
 | [packages/rly/test/diff/DiffFinding.test.tsx](../packages/rly/test/diff/DiffFinding.test.tsx) | typescript | `@ts-expect-error Agent findings require an explicit prevention plan.` | yes |
 | [packages/rly/test/foundations/GlobalStyles.test.tsx](../packages/rly/test/foundations/GlobalStyles.test.tsx) | typescript | `@ts-expect-error asChild cannot safely type a wrapper ref against an arbitrary child element` | yes |

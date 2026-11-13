@@ -3,6 +3,7 @@ import { ConfigProvider, Deferred, Effect, Fiber, Layer, Result, Stream } from "
 import * as FileSystem from "effect/FileSystem"
 import { EventsHub, RepoChange } from "../src/CacheService/EventsHub.js"
 import { PermissionService } from "../src/PermissionService/index.js"
+import { PermissionPrompt } from "../src/PermissionService/PermissionGate.js"
 import { PermissionGateLiveTag } from "../src/PermissionService/PermissionGateLive.js"
 
 const TEST_HOME = "/tmp/codecommit-permissions-test"
@@ -49,19 +50,23 @@ describe("PermissionService", () => {
   it.effect("removes interrupted sibling prompts after one concurrent request is denied", () =>
     Effect.gen(function*() {
       const gate = yield* PermissionGateLiveTag
-      const first = yield* gate.request({
-        id: "prompt-1",
-        operation: "getBlob",
-        category: "read",
-        context: "before blob"
-      }).pipe(Effect.forkChild)
+      const first = yield* gate.request(
+        new PermissionPrompt({
+          id: "prompt-1",
+          operation: "getBlob",
+          category: "read",
+          context: "before blob"
+        })
+      ).pipe(Effect.forkChild)
       yield* Effect.yieldNow
-      const second = yield* gate.request({
-        id: "prompt-2",
-        operation: "getBlob",
-        category: "read",
-        context: "after blob"
-      }).pipe(Effect.forkChild)
+      const second = yield* gate.request(
+        new PermissionPrompt({
+          id: "prompt-2",
+          operation: "getBlob",
+          category: "read",
+          context: "after blob"
+        })
+      ).pipe(Effect.forkChild)
       yield* Effect.yieldNow
 
       expect((yield* gate.getFirstPending())?.id).toBe("prompt-1")
@@ -87,12 +92,14 @@ describe("PermissionService", () => {
       })
       yield* Effect.gen(function*() {
         const gate = yield* PermissionGateLiveTag
-        const request = yield* gate.request({
-          id: "prompt-publishing",
-          operation: "getBlob",
-          category: "read",
-          context: "interrupted publish"
-        }).pipe(Effect.forkChild)
+        const request = yield* gate.request(
+          new PermissionPrompt({
+            id: "prompt-publishing",
+            operation: "getBlob",
+            category: "read",
+            context: "interrupted publish"
+          })
+        ).pipe(Effect.forkChild)
 
         yield* Deferred.await(publishing)
         expect((yield* gate.getFirstPending())?.id).toBe("prompt-publishing")
@@ -109,19 +116,23 @@ describe("PermissionService", () => {
   it.effect("drains both concurrent prompts when both receive responses", () =>
     Effect.gen(function*() {
       const gate = yield* PermissionGateLiveTag
-      const first = yield* gate.request({
-        id: "prompt-1",
-        operation: "getBlob",
-        category: "read",
-        context: "before blob"
-      }).pipe(Effect.forkChild)
+      const first = yield* gate.request(
+        new PermissionPrompt({
+          id: "prompt-1",
+          operation: "getBlob",
+          category: "read",
+          context: "before blob"
+        })
+      ).pipe(Effect.forkChild)
       yield* Effect.yieldNow
-      const second = yield* gate.request({
-        id: "prompt-2",
-        operation: "getBlob",
-        category: "read",
-        context: "after blob"
-      }).pipe(Effect.forkChild)
+      const second = yield* gate.request(
+        new PermissionPrompt({
+          id: "prompt-2",
+          operation: "getBlob",
+          category: "read",
+          context: "after blob"
+        })
+      ).pipe(Effect.forkChild)
       yield* Effect.yieldNow
 
       yield* gate.resolve("prompt-1", "allow_once")
@@ -139,7 +150,7 @@ describe("PermissionGateLive.resolveCategory", () => {
       Effect.gen(function*() {
         const gate = yield* PermissionGateLiveTag
         const ask = (id: string, category: "read" | "write") =>
-          gate.request({ id, operation: "getBlob", category, context: id }).pipe(Effect.forkChild)
+          gate.request(new PermissionPrompt({ id, operation: "getBlob", category, context: id })).pipe(Effect.forkChild)
         const identity = yield* ask("identity", "read")
         yield* Effect.yieldNow
         const listing = yield* ask("listing", "read")
@@ -160,7 +171,7 @@ describe("PermissionGateLive.resolveCategory", () => {
         const gate = yield* PermissionGateLiveTag
         // The call checked "ask" before the grant; by the time it registers, the grant is saved.
         const response = yield* gate.request(
-          { id: "late", operation: "getPullRequests", category: "read", context: "late" },
+          new PermissionPrompt({ id: "late", operation: "getPullRequests", category: "read", context: "late" }),
           { standing: Effect.succeed("allow_once") }
         )
         expect(response).toBe("allow_once")
@@ -176,7 +187,9 @@ describe("PermissionGateLive.pendingOf", () => {
       Effect.gen(function*() {
         const gate = yield* PermissionGateLiveTag
         const ask = (id: string, category: "read" | "write") =>
-          gate.request({ id, operation: "getBlob", category, context: `ctx ${id}` }).pipe(Effect.forkChild)
+          gate.request(new PermissionPrompt({ id, operation: "getBlob", category, context: `ctx ${id}` })).pipe(
+            Effect.forkChild
+          )
         const fibers = [
           yield* ask("r1", "read"),
           yield* ask("r2", "read"),

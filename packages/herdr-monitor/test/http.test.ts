@@ -14,7 +14,6 @@ const testServer = HttpServer.layerTestClient.pipe(
   Layer.provideMerge(NodeHttpServer.layer(createServer, { host: "127.0.0.1", port: 0 }))
 )
 // Each test is an isolated HTTP application entry point.
-// @effect-diagnostics-next-line strictEffectProvide:off
 const withServer = Effect.provide(testServer)
 const publishToken = `publish_${"p".repeat(43)}`
 const viewToken = `view_${"v".repeat(43)}`

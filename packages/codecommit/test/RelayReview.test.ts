@@ -23,7 +23,6 @@ import {
 } from "../src/RelayReview.js"
 
 // Each test effect is an application boundary that owns its Node services.
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const relayRequest: RelayReviewRequest = {

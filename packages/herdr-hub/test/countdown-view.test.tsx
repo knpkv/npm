@@ -841,7 +841,7 @@ describe("ApprovalsCountdown", () => {
       })
       expect(view.revalidations.count).toBe(0)
       // One second per act: React schedules each next tick only after it renders the last.
-      for (let second = 0; second < 3; second += 1) act(() => vi.advanceTimersByTime(1_000))
+      for (let second = 0; second < 3; second += 1) act(() => void vi.advanceTimersByTime(1_000))
       expect(view.revalidations.count).toBe(1)
       view.unmount()
     } finally {
@@ -868,7 +868,7 @@ describe("ApprovalsCountdown", () => {
           records: [record("job-1", { expiredAt: Date.now(), status: "expired" })]
         }
       })
-      for (let second = 0; second < 20; second += 1) act(() => vi.advanceTimersByTime(1_000))
+      for (let second = 0; second < 20; second += 1) act(() => void vi.advanceTimersByTime(1_000))
       expect(view.revalidations.count).toBe(0)
       view.unmount()
     } finally {
@@ -995,7 +995,7 @@ describe("approval request presentation", () => {
 
 describe("stale approval decisions", () => {
   const age = () => {
-    for (let second = 0; second < 31; second += 1) act(() => vi.advanceTimersByTime(1_000))
+    for (let second = 0; second < 31; second += 1) act(() => void vi.advanceTimersByTime(1_000))
   }
 
   it("revalidates before sending a stale decision and sends only the unchanged request", () => {
@@ -1099,7 +1099,7 @@ describe("failed stale validation", () => {
     try {
       const initial = snapshot()
       const view = mount({ snapshot: initial })
-      for (let second = 0; second < 31; second += 1) act(() => vi.advanceTimersByTime(1_000))
+      for (let second = 0; second < 31; second += 1) act(() => void vi.advanceTimersByTime(1_000))
       view.press("Enter")
       expect(view.decisions).toEqual([])
       view.render({ snapshot: initial, refreshFailed: true })
@@ -1177,7 +1177,7 @@ describe("full approval request", () => {
     try {
       const view = mount({ snapshot: snapshot() })
       const before = view.container.querySelector(".countdown-announcer")?.textContent
-      for (let second = 0; second < 3; second += 1) act(() => vi.advanceTimersByTime(1_000))
+      for (let second = 0; second < 3; second += 1) act(() => void vi.advanceTimersByTime(1_000))
       for (const clock of view.container.querySelectorAll(".countdown-row-clock")) {
         expect(clock.closest("[aria-live], [role='status']")).toBeNull()
       }

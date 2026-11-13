@@ -520,7 +520,6 @@ const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
 NodeRuntime.runMain(
   program.pipe(
     Effect.tapCause(reportProgramFailure),
-    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(
       Layer.mergeAll(
         NodeServices.layer,

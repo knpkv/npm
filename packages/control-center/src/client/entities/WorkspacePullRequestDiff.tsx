@@ -77,7 +77,6 @@ export const browserWorkspacePullRequestDiffTransport: WorkspacePullRequestDiffT
         })
       }).pipe(
         // Browser transport is the executable boundary for this request.
-        // @effect-diagnostics-next-line strictEffectProvide:off
         Effect.provide(FetchHttpClient.layer)
       ),
       { signal }
@@ -104,7 +103,6 @@ export const browserWorkspacePullRequestDiffTransport: WorkspacePullRequestDiffT
         })
       }).pipe(
         // Browser transport is the executable boundary for this request.
-        // @effect-diagnostics-next-line strictEffectProvide:off
         Effect.provide(FetchHttpClient.layer)
       ),
       { signal }

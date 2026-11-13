@@ -18,12 +18,12 @@ const slotStackStyle: CSSProperties = { ...stackStyle, maxWidth: "none" }
 const expectInInitialViewport = async (element: HTMLElement): Promise<void> => {
   const view = element.ownerDocument.defaultView
   if (view === null) throw new Error("ReleasePreview viewport was unavailable")
-  await waitFor(() => {
+  await waitFor(async () => {
     const bounds = element.getBoundingClientRect()
-    expect(bounds.top).toBeGreaterThanOrEqual(0)
-    expect(bounds.left).toBeGreaterThanOrEqual(0)
-    expect(bounds.bottom).toBeLessThanOrEqual(view.innerHeight)
-    expect(bounds.right).toBeLessThanOrEqual(view.innerWidth)
+    await expect(bounds.top).toBeGreaterThanOrEqual(0)
+    await expect(bounds.left).toBeGreaterThanOrEqual(0)
+    await expect(bounds.bottom).toBeLessThanOrEqual(view.innerHeight)
+    await expect(bounds.right).toBeLessThanOrEqual(view.innerWidth)
   })
 }
 

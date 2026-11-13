@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
+import { PullRequestReviewCompleted } from "../../api/agent.js"
 import type {
   AgentProviderCatalog,
   AgentProviderCatalogEntry,
@@ -623,7 +624,7 @@ export const usePullRequestReview = (
               latest.review.jobId === published.jobId
               ? {
                 ...latest,
-                review: {
+                review: new PullRequestReviewCompleted({
                   ...latest.review,
                   report: {
                     ...latest.review.report,
@@ -633,7 +634,7 @@ export const usePullRequestReview = (
                       return transitioned
                     })
                   }
-                }
+                })
               }
               : latest
           )

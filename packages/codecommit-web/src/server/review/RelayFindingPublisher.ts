@@ -3,7 +3,7 @@ import { AwsApiError, PermissionDeniedError } from "@knpkv/codecommit-core/Error
 import { AuditLogRepo, type NewAuditLogEntry } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
 import { PermissionService } from "@knpkv/codecommit-core/PermissionService/index.js"
 import { getOperationMeta } from "@knpkv/codecommit-core/PermissionService/operations.js"
-import { PermissionGate } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
+import { PermissionGate, PermissionPrompt } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
 import * as ReviewClient from "@knpkv/codecommit-core/ReviewClient.js"
 import { Clock, Context, Effect, Exit, Random } from "effect"
 
@@ -83,12 +83,14 @@ export const makeRelayFindingPublisher = Effect.fn("RelayFindingPublisher.make")
       }
       const now = yield* Clock.currentTimeMillis
       const nonce = yield* Random.nextIntBetween(0, 999_999_999)
-      const response = yield* permissionGate.request({
-        id: `gate-${now}-${nonce}`,
-        operation,
-        category: getOperationMeta(operation).category,
-        context: publicationContext(action)
-      }).pipe(
+      const response = yield* permissionGate.request(
+        new PermissionPrompt({
+          id: `gate-${now}-${nonce}`,
+          operation,
+          category: getOperationMeta(operation).category,
+          context: publicationContext(action)
+        })
+      ).pipe(
         Effect.catchTag("PermissionDeniedError", (error) =>
           Effect.gen(function*() {
             const auditState = error.reason === "denied" ? "denied" : "timed_out"

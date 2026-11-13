@@ -8,7 +8,6 @@ import * as Schema from "effect/Schema"
 import { inspectPackageContract } from "../../scripts/package-contract.js"
 
 // This test effect is the application boundary for its Node services.
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const validManifest = {

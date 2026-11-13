@@ -44,7 +44,6 @@ const runtimeLayer = Layer.merge(NodeServices.layer, ChildEnv.layerHostEnvironme
 NodeRuntime.runMain(
   program.pipe(
     // The CLI provides one merged runtime layer at its executable boundary.
-    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(runtimeLayer)
   )
 )

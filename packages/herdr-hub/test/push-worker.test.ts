@@ -11,7 +11,6 @@ import { type ApprovalNotificationBatch, runPushPass } from "../src/push-worker.
 import { ApprovalAppStore } from "../src/store.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
-// @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const subscription: PushSubscriptionRecord = {
