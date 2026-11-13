@@ -1,5 +1,13 @@
 # @knpkv/jcf-web
 
+## 0.11.1
+
+### Patch Changes
+
+- [#1151](https://github.com/knpkv/npm/pull/1151) [`c3c1278`](https://github.com/knpkv/npm/commit/c3c1278aeaebc6bff7fcb44dc2863eadb7fb619e) Thanks [@konopkov](https://github.com/konopkov)! - Build permission prompts and published review results as real Schema class instances instead of plain objects, and drop Effect suppressions the language service no longer needs.
+- Updated dependencies [[`46bde0b`](https://github.com/knpkv/npm/commit/46bde0bd67c06d5763f9098744de63984b304839)]:
+  - @knpkv/jira-clockify@1.11.1
+
 ## 0.11.0
 
 ### Minor Changes

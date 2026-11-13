@@ -1,5 +1,11 @@
 # @knpkv/codecommit-core
 
+## 0.29.1
+
+### Patch Changes
+
+- [#1151](https://github.com/knpkv/npm/pull/1151) [`c3c1278`](https://github.com/knpkv/npm/commit/c3c1278aeaebc6bff7fcb44dc2863eadb7fb619e) Thanks [@konopkov](https://github.com/konopkov)! - Build permission prompts and published review results as real Schema class instances instead of plain objects, and drop Effect suppressions the language service no longer needs.
+
 ## 0.29.0
 
 ### Minor Changes

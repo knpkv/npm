@@ -1,5 +1,15 @@
 # @knpkv/control-center
 
+## 0.23.2
+
+### Patch Changes
+
+- [#1151](https://github.com/knpkv/npm/pull/1151) [`c3c1278`](https://github.com/knpkv/npm/commit/c3c1278aeaebc6bff7fcb44dc2863eadb7fb619e) Thanks [@konopkov](https://github.com/konopkov)! - Build permission prompts and published review results as real Schema class instances instead of plain objects, and drop Effect suppressions the language service no longer needs.
+- Updated dependencies [[`c1052a2`](https://github.com/knpkv/npm/commit/c1052a200bd9b772e454ed5944ef4b7cdfcdb575), [`c3c1278`](https://github.com/knpkv/npm/commit/c3c1278aeaebc6bff7fcb44dc2863eadb7fb619e), [`46bde0b`](https://github.com/knpkv/npm/commit/46bde0bd67c06d5763f9098744de63984b304839)]:
+  - @knpkv/clockify-api-client@5.1.2
+  - @knpkv/codecommit-core@0.29.1
+  - @knpkv/jira-api-client@4.0.0
+
 ## 0.23.1
 
 ### Patch Changes
