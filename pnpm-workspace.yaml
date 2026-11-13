@@ -72,6 +72,8 @@ overrides:
   source-map-js@>=1.0.0 <1.2.2: 1.2.2
   # GHSA-c8x8-7fp4-3x9w: prosemirror-view <1.42.3 XSS; @atlaskit/editor-prosemirror 9.0.0 pins 1.41.5
   prosemirror-view@<1.42.3: 1.42.6
+  # GHSA-3g3m-2fjr-6pw4: glob 9.0.0-14.0.1 AbortSignal bypass (via rimraf and the react-docgen Vite plugin, both ^13)
+  glob@>=9.0.0 <14.0.2: 14.0.3
 
 # Security releases for the pinned overrides above; permit fixes before the age window expires.
 minimumReleaseAgeExclude:
@@ -107,3 +109,9 @@ auditConfig:
     # Object.prototype; only 0.18.2+ is patched. Path: packages/review > mermaid > katex; mermaid 12.1.0 (latest) still
     # requires ^0.16.47, and katex 0.x minors are breaking. Remove when mermaid accepts katex >=0.18.2.
     - GHSA-238p-pmpm-9mq7
+    # GHSA-g3hv-75wg-m249 (2026-10-30, moderate): minimatch <11.0.1 glob-pattern amplification DoS; only 11.0.1+ is patched.
+    # Dev-only paths: eslint, @eslint/config-array, typescript-estree and eslint-plugin-import-x, all on ^10. Forcing 11 stops
+    # ESLint loading, because 11 removed makeRe and import-x 4.17.1 (latest) imports it. Not reachable here: the bug needs
+    # optimizationLevel >=2, these callers all use the default 1, and their patterns come from this repo's own ESLint config.
+    # Remove when import-x accepts minimatch >=11.0.1: https://github.com/un-ts/eslint-plugin-import-x/pull/570
+    - GHSA-g3hv-75wg-m249
