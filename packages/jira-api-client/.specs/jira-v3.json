@@ -3068,7 +3068,7 @@
           },
           "inferredDates": {
             "description": "The inferred dates for the plan. This must be \"None\", \"SprintDates\" or \"ReleaseDates\".",
-            "enum": ["None", "SprintDates", "ReleaseDates"],
+            "enum": ["None", "SprintDates", "ReleaseDates", "AnySprintDates"],
             "type": "string"
           },
           "startDate": {
@@ -6098,7 +6098,7 @@
           },
           "inferredDates": {
             "description": "The inferred dates for the plan. This is \"None\", \"SprintDates\" or \"ReleaseDates\".",
-            "enum": ["None", "SprintDates", "ReleaseDates"],
+            "enum": ["None", "SprintDates", "ReleaseDates", "AnySprintDates"],
             "type": "string"
           },
           "startDate": {
@@ -20564,7 +20564,7 @@
     "license": { "name": "Apache 2.0", "url": "http://www.apache.org/licenses/LICENSE-2.0.html" },
     "termsOfService": "https://developer.atlassian.com/platform/marketplace/atlassian-developer-terms/",
     "title": "The Jira Cloud platform REST API",
-    "version": "1001.0.0-SNAPSHOT-8e29bebf69d92b486d0010d2bd2ba39ddae62c43"
+    "version": "1001.0.0-SNAPSHOT-73c38b88cadf4e761a2014a9282fd8e3296142d1"
   },
   "openapi": "3.0.1",
   "paths": {
@@ -26721,6 +26721,7 @@
           { "scheme": "OAuth2", "scopes": ["manage:jira-configuration"], "state": "Current" },
           { "scheme": "OAuth2", "scopes": ["read:field.default-value:jira"], "state": "Beta" }
         ],
+        "x-experimental": true,
         "x-atlassian-connect-scope": "READ"
       },
       "put": {
@@ -38572,6 +38573,16 @@
             "in": "query",
             "name": "predicateValue",
             "schema": { "type": "string" }
+          },
+          {
+            "description": "EXPERIMENTAL. A hint for the maximum number of suggestions to return for each of the field and predicate values. The value is capped at 50 and may be ignored, in which case the default of 15 is used. It is subject to change and may be removed without notice.",
+            "in": "query",
+            "name": "maxResults",
+            "schema": {
+              "description": "EXPERIMENTAL. A hint for the maximum number of suggestions to return. Capped at 50 and may be ignored, in which case the default of 15 is used.",
+              "format": "int32",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
