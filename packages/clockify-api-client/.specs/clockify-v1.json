@@ -11037,6 +11037,20 @@
           }
         }
       },
+      "CostRateDtoV1": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "integer",
+            "description": "Represents an amount as integer.",
+            "format": "int32",
+            "example": 10500
+          },
+          "currency": { "type": "string", "description": "Represents a currency.", "example": "USD", "default": "" }
+        },
+        "description": "Represents a cost rate object.",
+        "default": null
+      },
       "CostRateRequest": {
         "type": "object",
         "properties": {
@@ -23315,7 +23329,7 @@
       "MembershipDtoV1": {
         "type": "object",
         "properties": {
-          "costRate": { "$ref": "#/components/schemas/RateDtoV1" },
+          "costRate": { "$ref": "#/components/schemas/CostRateDtoV1" },
           "hourlyRate": { "$ref": "#/components/schemas/HourlyRateDtoV1" },
           "membershipStatus": {
             "type": "string",
@@ -23688,7 +23702,7 @@
             "example": "#000000",
             "default": ""
           },
-          "costRate": { "$ref": "#/components/schemas/RateDtoV1" },
+          "costRate": { "$ref": "#/components/schemas/CostRateDtoV1" },
           "duration": {
             "type": "string",
             "description": "Represents project duration in milliseconds.",
@@ -23697,7 +23711,7 @@
           },
           "estimate": { "$ref": "#/components/schemas/EstimateDtoV1" },
           "estimateReset": { "$ref": "#/components/schemas/EstimateResetDto" },
-          "hourlyRate": { "$ref": "#/components/schemas/RateDtoV1" },
+          "hourlyRate": { "$ref": "#/components/schemas/HourlyRateDtoV1" },
           "id": {
             "type": "string",
             "description": "Represents project identifier across the system.",
@@ -23763,7 +23777,7 @@
             "example": "#000000",
             "default": ""
           },
-          "costRate": { "$ref": "#/components/schemas/RateDtoV1" },
+          "costRate": { "$ref": "#/components/schemas/CostRateDtoV1" },
           "duration": {
             "type": "string",
             "description": "Represents project duration in milliseconds.",
@@ -23771,7 +23785,7 @@
             "default": ""
           },
           "estimate": { "$ref": "#/components/schemas/EstimateDtoV1" },
-          "hourlyRate": { "$ref": "#/components/schemas/RateDtoV1" },
+          "hourlyRate": { "$ref": "#/components/schemas/HourlyRateDtoV1" },
           "id": {
             "type": "string",
             "description": "Represents project identifier across the system.",
@@ -24070,7 +24084,7 @@
           },
           "currency": { "type": "string", "description": "Represents a currency.", "example": "USD", "default": "" }
         },
-        "description": "Represents cost rate object.",
+        "description": "Represents a cost rate object.",
         "default": null
       },
       "RateWithCurrencyRequestV1": {
@@ -24602,7 +24616,7 @@
             "format": "int64",
             "example": 10000
           },
-          "costRate": { "$ref": "#/components/schemas/RateDtoV1" },
+          "costRate": { "$ref": "#/components/schemas/CostRateDtoV1" },
           "duration": {
             "type": "string",
             "description": "Represents a task duration.",
@@ -24615,7 +24629,7 @@
             "example": "PT1H30M",
             "default": ""
           },
-          "hourlyRate": { "$ref": "#/components/schemas/RateDtoV1" },
+          "hourlyRate": { "$ref": "#/components/schemas/HourlyRateDtoV1" },
           "id": {
             "type": "string",
             "description": "Represents task identifier across the system.",
@@ -25283,7 +25297,7 @@
             "description": "Indicates whether a time entry is billable.",
             "default": false
           },
-          "costRate": { "$ref": "#/components/schemas/RateDtoV1" },
+          "costRate": { "$ref": "#/components/schemas/CostRateDtoV1" },
           "customFieldValues": {
             "type": "array",
             "description": "Represents a list of custom field value objects.",
@@ -25296,7 +25310,7 @@
             "example": "This is a sample time entry description.",
             "default": ""
           },
-          "hourlyRate": { "$ref": "#/components/schemas/RateDtoV1" },
+          "hourlyRate": { "$ref": "#/components/schemas/HourlyRateDtoV1" },
           "id": {
             "type": "string",
             "description": "Represents time entry identifier across the system.",
