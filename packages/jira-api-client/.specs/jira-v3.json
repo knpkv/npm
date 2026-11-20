@@ -3068,7 +3068,7 @@
           },
           "inferredDates": {
             "description": "The inferred dates for the plan. This must be \"None\", \"SprintDates\" or \"ReleaseDates\".",
-            "enum": ["None", "SprintDates", "ReleaseDates"],
+            "enum": ["None", "SprintDates", "ReleaseDates", "AnySprintDates"],
             "type": "string"
           },
           "startDate": {
@@ -3584,7 +3584,10 @@
         "description": "The default text for a text area custom field.",
         "properties": {
           "contextId": { "description": "The ID of the context.", "type": "string" },
-          "text": { "description": "The default text. The maximum length is 32767 characters.", "type": "string" },
+          "text": {
+            "description": "The default text. The maximum length is the instance's text field character limit.",
+            "type": "string"
+          },
           "type": { "type": "string" }
         },
         "required": ["contextId", "type"],
@@ -6098,7 +6101,7 @@
           },
           "inferredDates": {
             "description": "The inferred dates for the plan. This is \"None\", \"SprintDates\" or \"ReleaseDates\".",
-            "enum": ["None", "SprintDates", "ReleaseDates"],
+            "enum": ["None", "SprintDates", "ReleaseDates", "AnySprintDates"],
             "type": "string"
           },
           "startDate": {
@@ -20564,7 +20567,7 @@
     "license": { "name": "Apache 2.0", "url": "http://www.apache.org/licenses/LICENSE-2.0.html" },
     "termsOfService": "https://developer.atlassian.com/platform/marketplace/atlassian-developer-terms/",
     "title": "The Jira Cloud platform REST API",
-    "version": "1001.0.0-SNAPSHOT-8e29bebf69d92b486d0010d2bd2ba39ddae62c43"
+    "version": "1001.0.0-SNAPSHOT-b174c735d864a71a1aa91662ffe707e4007d84d3"
   },
   "openapi": "3.0.1",
   "paths": {
@@ -26653,7 +26656,7 @@
     "/rest/api/3/field/{fieldId}/context/defaultValues": {
       "get": {
         "deprecated": false,
-        "description": "Returns a paginated list of default values grouped by custom field context.\n\nEach returned `ContextDefaultValuesBean` has a `contextId` and a `defaultValues` list of `IssueTypeDefaultValueBean` entries - one per issue-type-scoped default value configured for the context. An entry with `\"isAnyIssueType\": true` represents the catch-all default that applies to every issue type covered by the context that is not covered by a more specific entry; a non-null `issueTypeId` represents a default that only applies to that issue type.\n\nFor contexts that have not been converted to the multiple-contexts data model, exactly one entry is returned per context with `isAnyIssueType=true`. For converted contexts, one entry is returned per configured per-issue-type default.\n\nThe value object on each entry is the same polymorphic `CustomFieldContextDefaultValueBean` exposed by the deprecated `GET /defaultValue` endpoint - its concrete subtype depends on the custom field's type (see the list of supported types on that endpoint).\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
+        "description": "Returns a paginated list of default values grouped by custom field context.\n\nEach returned `ContextDefaultValuesBean` has a `contextId` and a `defaultValues` list of `IssueTypeDefaultValueBean` entries - one per issue-type-scoped default value configured for the context. An entry with `\"isAnyIssueType\": true` represents the catch-all default that applies to every issue type covered by the context that is not covered by a more specific entry; a non-null `issueTypeId` represents a default that only applies to that issue type.\n\nFor contexts that have not been converted to the multiple-contexts data model, exactly one entry is returned per context with `isAnyIssueType=true`. For converted contexts, one entry is returned per configured per-issue-type default.\n\nThe value object on each entry is the same polymorphic `CustomFieldContextDefaultValueBean` exposed by the deprecated `GET /defaultValue` endpoint - its concrete subtype depends on the custom field's type (see the list of supported types on that endpoint).\n\nOnly tenants enrolled in the early access program (EAP) can access this resource. See the [EAP announcement](https://ecosystem.atlassian.net/browse/CHANGE-3082) for details.\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
         "operationId": "getContextDefaultValues",
         "parameters": [
           {
@@ -26702,7 +26705,7 @@
                 "example": "{\"errorMessages\":[\"Only Jira administrators can access custom field contexts.\"],\"errors\":{}}"
               }
             },
-            "description": "Returned if the user does not have the required permissions."
+            "description": "Returned if the user does not have the required permissions, or the feature is not enabled for the tenant."
           },
           "404": {
             "content": {
@@ -26721,6 +26724,7 @@
           { "scheme": "OAuth2", "scopes": ["manage:jira-configuration"], "state": "Current" },
           { "scheme": "OAuth2", "scopes": ["read:field.default-value:jira"], "state": "Beta" }
         ],
+        "x-experimental": true,
         "x-atlassian-connect-scope": "READ"
       },
       "put": {
@@ -38572,6 +38576,16 @@
             "in": "query",
             "name": "predicateValue",
             "schema": { "type": "string" }
+          },
+          {
+            "description": "EXPERIMENTAL. A hint for the maximum number of suggestions to return for each of the field and predicate values. The value is capped at 50 and may be ignored, in which case the default of 15 is used. It is subject to change and may be removed without notice.",
+            "in": "query",
+            "name": "maxResults",
+            "schema": {
+              "description": "EXPERIMENTAL. A hint for the maximum number of suggestions to return. Capped at 50 and may be ignored, in which case the default of 15 is used.",
+              "format": "int32",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -43328,6 +43342,12 @@
           "303": {
             "content": { "application/json": { "schema": {} } },
             "description": "The project creation task has been queued for execution"
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/LimitExceededResponseBean" } }
+            },
+            "description": "422 response"
           }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
